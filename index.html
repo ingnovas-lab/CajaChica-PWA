@@ -1361,38 +1361,7 @@ function closeModal(){ document.getElementById('modal').classList.remove('show')
 
 // ============================================================
 // SERVICE WORKER (PWA real)
-// ============================================================
-if('serviceWorker' in navigator){
-  // Registrar SW inline con Blob URL (para un solo archivo HTML)
-  const swCode = `
-    const CACHE = 'cc-v1';
-    const ASSETS = [self.registration.scope];
-    self.addEventListener('install', e => {
-      e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
-      self.skipWaiting();
-    });
-    self.addEventListener('activate', e => {
-      e.waitUntil(clients.claim());
-    });
-    self.addEventListener('fetch', e => {
-      // Solo cachear el shell de la app. API calls pasan directo.
-      if(e.request.method !== 'GET') return;
-      if(e.request.url.includes('googleapis.com') || e.request.url.includes('accounts.google.com')) return;
-      e.respondWith(
-        caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
-          if(resp.ok && e.request.url.startsWith(self.registration.scope)){
-            const clone = resp.clone();
-            caches.open(CACHE).then(c => c.put(e.request, clone));
-          }
-          return resp;
-        }).catch(() => caches.match('/')))
-      );
-    });
-  `;
-  const blob = new Blob([swCode], {type: 'application/javascript'});
-  const swUrl = URL.createObjectURL(blob);
-  navigator.serviceWorker.register(swUrl).catch(e => console.log('SW registration failed:', e));
-}
+
 
 // ============================================================
 // INIT
