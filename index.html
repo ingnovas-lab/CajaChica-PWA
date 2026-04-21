@@ -847,40 +847,64 @@ function finishSetup(){
 }
 
 // ============================================================
-// GEMINI 2.0 FLASH — OCR con JSON mode estructurado
-// Mucho más confiable que prompt de texto + parseo manual.
+// GEMINI — OCR con JSON mode estructurado + compresión de imagen
+// Compresión reduce 3-5 MB a ~150-300 KB → menos tokens, menos 429
 // ============================================================
+
+// Comprime imagen base64 a max 1280px ancho y calidad 0.75
+async function compressImage(base64){
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 1280;
+      const ratio = img.width > maxW ? maxW / img.width : 1;
+      const w = Math.round(img.width * ratio);
+      const h = Math.round(img.height * ratio);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const result = canvas.toDataURL('image/jpeg', 0.75).split(',')[1];
+      console.log('Imagen comprimida: ' + Math.round(base64.length/1024) + ' KB → ' + Math.round(result.length/1024) + ' KB');
+      resolve(result);
+    };
+    img.onerror = () => { console.warn('Compresión falló, usando original'); resolve(base64); };
+    img.src = 'data:image/jpeg;base64,' + base64;
+  });
+}
+
 async function geminiOCR(imageBase64){
   const key = localStorage.getItem(LS.GEMINI);
   if(!key) throw new Error('API Key de Gemini no configurada');
 
+  // Comprimir antes de mandar (crítico en tier gratis por límite de tokens/min)
+  const compressed = await compressImage(imageBase64);
+
   const schema = {
     type: 'object',
     properties: {
-      tipo_documento: {type: 'string', description: 'FACTURA, TIQUETE_COMBUSTIBLE, RECIBO, OTRO'},
+      tipo_documento: {type: 'string'},
       suplidor_nombre: {type: 'string'},
-      rnc: {type: 'string', description: 'Solo dígitos, 9 u 11'},
-      ncf: {type: 'string', description: 'NCF DGII tipo B01-B16 + 8 dígitos o E31-E47 + 10 dígitos'},
-      fecha: {type: 'string', description: 'YYYY-MM-DD'},
+      rnc: {type: 'string'},
+      ncf: {type: 'string'},
+      fecha: {type: 'string'},
       monto_total: {type: 'number'},
       itbis: {type: 'number'},
-      categoria_sugerida: {type: 'string', description: 'MAT, MOB, TRA, EQU, COM, SER, OTR'},
-      confianza: {type: 'number', description: '0 a 1'}
+      categoria_sugerida: {type: 'string'},
+      confianza: {type: 'number'}
     },
     required: ['monto_total', 'confianza']
   };
 
-  const prompt = `Extrae datos de este comprobante dominicano para control de caja chica en obra de construcción.
-Reglas:
-- NCF: formato exacto B01-B16 + 8 dígitos (total 11) o E31-E47 + 10 dígitos (total 13). Si no cumple el formato, deja vacío.
-- RNC: 9 u 11 dígitos, solo números.
-- Fecha: convierte al formato YYYY-MM-DD.
+  const prompt = `Extrae datos de este comprobante dominicano para caja chica en obra.
+- NCF: B01-B16 + 8 dígitos (11 total) o E31-E47 + 10 dígitos (13 total). Si no cumple, vacío.
+- RNC: 9 u 11 dígitos solo números.
+- Fecha: YYYY-MM-DD.
 - Monto total: número con decimales.
-- Categoría sugerida según el suplidor/productos:
-  MAT=materiales construcción, MOB=mano de obra, TRA=transporte, EQU=equipos/herramientas,
-  COM=combustible/gasolinera, SER=servicios (agua, luz, internet), OTR=otros.
-- Confianza: qué tan seguro estás de los datos (0 a 1).
-Si no ves algún campo claramente, déjalo vacío o 0.`;
+- categoria_sugerida: MAT (materiales) / MOB (mano de obra) / TRA (transporte) / EQU (equipos) / COM (combustible) / SER (servicios) / OTR (otros).
+- confianza: 0 a 1.
+Si no ves un campo, déjalo vacío o 0.`;
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=' + key;
   const r = await fetch(url, {
@@ -889,7 +913,7 @@ Si no ves algún campo claramente, déjalo vacío o 0.`;
     body: JSON.stringify({
       contents: [{parts: [
         {text: prompt},
-        {inline_data: {mime_type: 'image/jpeg', data: imageBase64}}
+        {inline_data: {mime_type: 'image/jpeg', data: compressed}}
       ]}],
       generationConfig: {
         responseMimeType: 'application/json',
@@ -898,7 +922,18 @@ Si no ves algún campo claramente, déjalo vacío o 0.`;
       }
     })
   });
-  if(!r.ok) throw new Error('Gemini HTTP ' + r.status);
+
+  // Capturar error detallado de Google (mucho más útil que "HTTP 429" genérico)
+  if(!r.ok){
+    let detail = '';
+    try {
+      const errBody = await r.json();
+      detail = errBody.error?.message || JSON.stringify(errBody).substring(0, 300);
+    } catch { detail = 'HTTP ' + r.status; }
+    console.error('Gemini error completo:', detail);
+    throw new Error('Gemini (' + r.status + '): ' + detail.substring(0, 250));
+  }
+
   const d = await r.json();
   if(!d.candidates || !d.candidates[0]) throw new Error('Gemini no devolvió resultado');
   return JSON.parse(d.candidates[0].content.parts[0].text);
