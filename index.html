@@ -882,7 +882,7 @@ Reglas:
 - Confianza: qué tan seguro estás de los datos (0 a 1).
 Si no ves algún campo claramente, déjalo vacío o 0.`;
 
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + key;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=' + key;
   const r = await fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
