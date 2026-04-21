@@ -613,7 +613,7 @@ function getToken(){
 
 function initGoogleAuth(){
   if(!window.google){ toast('Librería Google no cargada. Recarga.', 'err'); return; }
-  if(OAUTH_CLIENT_ID === '706122186868-nlpblrrtqjfk43le5i2mn3f3h6arv6ju.apps.googleusercontent.com'){
+  if(!OAUTH_CLIENT_ID || OAUTH_CLIENT_ID.indexOf('YOUR_CLIENT_ID') !== -1){
     showModal(`<h3>Configurar OAuth</h3>
       <div class="muted" style="margin:10px 0">
         Para usar esta app necesitas un Client ID OAuth. Es gratis y se hace una sola vez:<br><br>
