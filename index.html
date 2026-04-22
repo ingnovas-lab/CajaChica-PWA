@@ -96,6 +96,8 @@ input[type=date]{color-scheme:dark}
 .entry{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
 .entry:last-child{border-bottom:none}
 .entry-icon{width:36px;height:36px;border-radius:9px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px}
+.entry-thumb{width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer}
+.hcard-thumb{width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer}
 .entry-info{flex:1;min-width:0}
 .entry-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .entry-meta{font-size:11px;color:var(--text2);margin-top:2px}
@@ -1116,7 +1118,7 @@ async function refreshHome(){
     rw.style.display = 'block';
     box.innerHTML = myPending.slice(0, 3).map(p => {
       const thumb = p.image_base64
-        ? `<img class="entry-thumb" src="data:${p.image_mime || 'image/jpeg'};base64,${p.image_base64}" alt="">`
+        ? `<img class="entry-thumb" src="data:${p.image_mime || 'image/jpeg'};base64,${p.image_base64}" alt="" onclick="verFoto('${p.id}')">`
         : `<div class="entry-icon">${p.tipo_registro === 'ABONO' ? '+' : '−'}</div>`;
       return `
       <div class="entry">
@@ -1351,25 +1353,47 @@ async function renderHistory(){
   }
   body.innerHTML = all.map(e => {
     const isAbono = e.tipo_registro === 'ABONO';
+    const thumb = e.image_base64
+      ? `<img class="hcard-thumb" src="data:${e.image_mime || 'image/jpeg'};base64,${e.image_base64}" alt="" onclick="verFoto('${e.id}')">`
+      : `<div class="entry-icon" style="width:56px;height:56px;border-radius:10px;font-size:20px">${isAbono ? '+' : '−'}</div>`;
     return `
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        ${thumb}
         <div style="flex:1;min-width:0">
-          <div style="font-size:14px;font-weight:500">${isAbono ? 'ABONO · ' + e.tipo : (e.suplidor || '(sin suplidor)')}</div>
-          <div style="font-size:11px;color:var(--text2);margin-top:3px">
-            ${e.proyecto} · ${isAbono ? e.fecha : e.fecha_factura}
-            ${e.ncf ? ' · <span style="font-family:var(--mono)">'+e.ncf+'</span>' : ''}
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:500">${isAbono ? 'ABONO · ' + e.tipo : (e.suplidor || '(sin suplidor)')}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">
+                ${e.proyecto} · ${isAbono ? e.fecha : e.fecha_factura}
+                ${e.no_reporte ? ' · <span style="font-family:var(--mono);color:var(--amber)">'+e.no_reporte+'</span>' : ''}
+                ${e.ncf ? ' · <span style="font-family:var(--mono)">'+e.ncf+'</span>' : ''}
+              </div>
+              ${!isAbono && e.ncf ? `<div style="margin-top:6px">
+                <span class="badge ${NCF_REGEX.test(e.ncf) ? 'badge-ok' : 'badge-bad'}">${NCF_REGEX.test(e.ncf) ? 'NCF OK' : 'NCF INVÁLIDO'}</span>
+                <span class="badge badge-ocr">${e.ocr_status || ''}</span>
+              </div>` : ''}
+            </div>
+            <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:${isAbono ? 'var(--green)' : 'var(--red)'};white-space:nowrap">${fmt(e.monto)}</div>
           </div>
-          ${!isAbono && e.ncf ? `<div style="margin-top:6px">
-            <span class="badge ${NCF_REGEX.test(e.ncf) ? 'badge-ok' : 'badge-bad'}">${NCF_REGEX.test(e.ncf) ? 'NCF OK' : 'NCF INVÁLIDO'}</span>
-            <span class="badge badge-ocr">${e.ocr_status || ''}</span>
-          </div>` : ''}
         </div>
-        <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:${isAbono ? 'var(--green)' : 'var(--red)'}">${fmt(e.monto)}</div>
       </div>
       <button class="btn btn-red" style="margin-top:10px;padding:8px;font-size:12px" onclick="deletePending('${e.id}')">Eliminar</button>
     </div>`;
   }).join('');
+}
+
+// Ver foto de un registro pendiente en grande (modal)
+async function verFoto(id){
+  const entry = await dbGet('pending', id);
+  if(!entry || !entry.image_base64){ toast('No hay foto', 'err'); return; }
+  const dataUrl = `data:${entry.image_mime || 'image/jpeg'};base64,${entry.image_base64}`;
+  showModal(`
+    <div style="text-align:center">
+      <img src="${dataUrl}" style="max-width:100%;max-height:65vh;border-radius:8px;object-fit:contain">
+      <button class="btn" onclick="closeModal()" style="margin-top:14px">Cerrar</button>
+    </div>
+  `);
 }
 
 async function deletePending(id){
