@@ -278,8 +278,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div class="stats">
-      <div class="stat"><div class="stat-label">Pendientes</div><div class="stat-val amber" id="s-pending">0</div></div>
-      <div class="stat"><div class="stat-label">Por subir</div><div class="stat-val mono" id="s-total">RD$ 0.00</div></div>
+      <div class="stat" onclick="show('pg-history')" style="cursor:pointer"><div class="stat-label">Pendientes</div><div class="stat-val amber" id="s-pending">0</div></div>
+      <div class="stat" onclick="show('pg-history')" style="cursor:pointer"><div class="stat-label">Por subir</div><div class="stat-val mono" id="s-total">RD$ 0.00</div></div>
     </div>
 
     <input type="file" id="inp-cam" accept="image/*" capture="environment" style="display:none" onchange="onFile(this)">
@@ -303,7 +303,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div class="grid2">
-      <button class="btn btn-green" onclick="show('pg-abono')">+ Registrar abono</button>
+      <button class="btn btn-green" onclick="show('pg-abono')">+ Registrar ingreso</button>
       <button class="btn" onclick="show('pg-history')">Ver pendientes</button>
     </div>
 
@@ -312,9 +312,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       Generar reporte de balance
     </button>
 
-    <button class="btn" onclick="show('pg-facturas')">
+    <button class="btn" onclick="show('pg-facturas')" style="position:relative">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M3 9h18"/></svg>
       Mis facturas — editar / eliminar
+      <span id="badge-revisar" style="display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);background:var(--amber);color:#000;font-size:11px;font-weight:700;padding:3px 9px;border-radius:12px;min-width:24px;text-align:center">0</span>
     </button>
 
     <div id="home-recent" style="display:none">
@@ -341,7 +342,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   <div class="body">
     <button class="btn btn-green" onclick="show('pg-new-proj')" style="margin-bottom:14px">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      Nueva obra
+      Nuevo proyecto
     </button>
     <div id="proj-list"></div>
   </div>
@@ -354,7 +355,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
     </div>
     <div>
-      <div class="topbar-title">Nueva obra</div>
+      <div class="topbar-title">Nuevo proyecto</div>
       <div class="topbar-sub">Se crea la carpeta en Drive automáticamente</div>
     </div>
   </div>
@@ -410,6 +411,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <div class="lbl">Estado</div>
           <select id="fac-filtro-estado">
             <option value="activas">Activas</option>
+            <option value="revisar">Por revisar</option>
             <option value="eliminadas">Papelera</option>
             <option value="todas">Todas</option>
           </select>
@@ -523,7 +525,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
     </div>
     <div>
-      <div class="topbar-title">Confirmar gasto</div>
+      <div class="topbar-title">Confirmar gasto <span id="cfm-dup-badge" style="display:none;color:var(--red);font-weight:500;font-size:13px">(Duplicado)</span></div>
       <div class="topbar-sub" id="cfm-sub">Revisa lo que detectó la IA</div>
     </div>
   </div>
@@ -605,7 +607,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
     </div>
     <div>
-      <div class="topbar-title">Registrar abono</div>
+      <div class="topbar-title">Registrar ingreso</div>
       <div class="topbar-sub">Ingreso al fondo de obra</div>
     </div>
   </div>
@@ -1350,6 +1352,51 @@ function populateDropdowns(){
 // ============================================================
 // HOME — balance + stats + recientes
 // ============================================================
+// Cache del conteo de "por revisar" — se refresca cada 60s como máximo
+let revisarCache = {count: null, at: 0};
+
+async function refreshBadgeRevisar(){
+  const badge = document.getElementById('badge-revisar');
+  if(!badge) return;
+  try {
+    // Usar cache si tiene menos de 60s
+    let count;
+    if(revisarCache.count !== null && (Date.now() - revisarCache.at) < 60000){
+      count = revisarCache.count;
+    } else {
+      const raw = await sheetsGet('REGISTRO!A1:Z');
+      if(!raw || raw.length < 2){ badge.style.display = 'none'; return; }
+      const H = {};
+      (raw[0] || []).forEach((h, i) => H[h] = i);
+      if(H.APROBADO === undefined){ badge.style.display = 'none'; return; }
+      const proj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+      count = raw.slice(1).filter(r => {
+        if(!r[H.ID]) return false;
+        const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
+        if(eliminado) return false;
+        if(proj && r[H.PROYECTO] !== proj.cod) return false;
+        return r[H.APROBADO] === 'REVISAR' || r[H.APROBADO] === 'PENDIENTE';
+      }).length;
+      revisarCache = {count, at: Date.now()};
+    }
+
+    if(count > 0){
+      badge.textContent = count;
+      badge.style.display = 'block';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e){
+    // Silencioso — no bloquear el home si falla
+    badge.style.display = 'none';
+  }
+}
+
+// Invalidar cache cuando hay cambios (saveEdit, eliminarFactura, etc.)
+function invalidateRevisarCache(){
+  revisarCache = {count: null, at: 0};
+}
+
 async function refreshHome(){
   const proj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
   if(proj){
@@ -1373,6 +1420,10 @@ async function refreshHome(){
   const netoPendiente = myPending.reduce((s, p) => s + (p.tipo_registro === 'ABONO' ? +p.monto : -Math.abs(+p.monto)), 0);
   document.getElementById('s-pending').textContent = myPending.length;
   document.getElementById('s-total').textContent = fmt(netoPendiente);
+
+  // Badge "Por revisar": consulta cuántas facturas en el Sheet están como REVISAR/PENDIENTE
+  // (silencioso — si falla, no bloquea nada)
+  refreshBadgeRevisar();
 
   // Balance cacheado
   const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
@@ -1480,11 +1531,23 @@ function onFile(inp){
     currentCapture = {base64, dataUrl: e.target.result, mime: f.type, name: f.name};
     document.getElementById('cfm-img').src = e.target.result;
     document.getElementById('cfm-img-wrap').style.display = 'block';
+    // Limpiar campos de la captura anterior
+    document.getElementById('f-sup').value = '';
+    document.getElementById('f-rnc').value = '';
+    document.getElementById('f-ncf').value = '';
+    document.getElementById('f-monto').value = '';
+    document.getElementById('f-obs').value = '';
+    document.getElementById('f-tipo').value = 'GASTO';
+    document.getElementById('ncf-status').className = 'ncf-status';
+    document.getElementById('ncf-status').textContent = '';
+    document.getElementById('cfm-dup-badge').style.display = 'none';
     document.getElementById('f-fecha').value = today();
     // Pre-rellenar con último No. de reporte usado (facilita registros en lote)
     document.getElementById('f-reporte').value = localStorage.getItem('cc_last_reporte') || '';
     show('pg-confirm');
     await runOCR();
+    // Verificar duplicado una vez que el OCR rellene el NCF
+    checkDuplicado(document.getElementById('f-ncf').value);
   };
   r.readAsDataURL(f);
   inp.value = '';
@@ -1527,17 +1590,50 @@ async function runOCR(){
   }
 }
 
+// Cache de NCFs existentes en el Sheet (se llena bajo demanda)
+let ncfCache = {list: null, at: 0};
+
+async function getExistingNCFs(){
+  // Cache de 60 segundos para evitar muchas llamadas durante la edición
+  if(ncfCache.list && (Date.now() - ncfCache.at) < 60000) return ncfCache.list;
+  try {
+    const raw = await sheetsGet('REGISTRO!A1:Z');
+    if(!raw || raw.length < 2) return [];
+    const H = {};
+    (raw[0] || []).forEach((h, i) => H[h] = i);
+    if(H.NCF === undefined) return [];
+    const ncfs = raw.slice(1)
+      .filter(r => r[H.NCF] && (H.ELIMINADO === undefined || r[H.ELIMINADO] !== 'SI'))
+      .map(r => (r[H.NCF] || '').toUpperCase().trim());
+    ncfCache = {list: ncfs, at: Date.now()};
+    return ncfs;
+  } catch(e){ return []; }
+}
+
 function validateNCFLive(){
   const v = document.getElementById('f-ncf').value.toUpperCase().replace(/\s/g, '');
   document.getElementById('f-ncf').value = v;
   const s = document.getElementById('ncf-status');
-  if(!v){ s.className = 'ncf-status'; s.textContent = ''; return; }
+  if(!v){ s.className = 'ncf-status'; s.textContent = ''; checkDuplicado(v); return; }
   if(NCF_REGEX.test(v)){
     s.className = 'ncf-status ok';
     s.innerHTML = '✓ NCF válido (DGII)';
   } else {
     s.className = 'ncf-status bad';
     s.innerHTML = '✗ Formato inválido — revisa tipos y largo';
+  }
+  checkDuplicado(v);
+}
+
+async function checkDuplicado(ncf){
+  const badge = document.getElementById('cfm-dup-badge');
+  if(!badge) return;
+  if(!ncf || !NCF_REGEX.test(ncf)){ badge.style.display = 'none'; return; }
+  const existentes = await getExistingNCFs();
+  if(existentes.includes(ncf.toUpperCase())){
+    badge.style.display = 'inline';
+  } else {
+    badge.style.display = 'none';
   }
 }
 
@@ -1553,10 +1649,24 @@ async function saveEntry(){
   const monto = parseFloat(document.getElementById('f-monto').value);
   if(!monto || monto <= 0){ err.textContent = 'Monto inválido'; err.style.display = 'block'; return; }
 
+  const suplidor = document.getElementById('f-sup').value.trim();
+  if(!suplidor){ err.textContent = 'Suplidor es obligatorio (puedes poner "Colmado X" u otro identificador si es factura informal)'; err.style.display = 'block'; return; }
+
   const ncf = document.getElementById('f-ncf').value;
-  // No bloqueamos si no hay NCF (p.ej. tiquete combustible) pero avisamos si está inválido
-  if(ncf && !NCF_REGEX.test(ncf)){
-    if(!confirm('El NCF no cumple formato DGII. ¿Guardar de todos modos? (quedará en REVISAR)')) return;
+  const ncfValido = NCF_REGEX.test(ncf);
+
+  // Si no tiene NCF o es inválido → queda en REVISAR (factura informal, no bloquea)
+  // Si tiene NCF válido → se aprueba automáticamente
+  let aprobado;
+  if(ncfValido){
+    aprobado = 'SI';
+  } else if(ncf){
+    // Tiene algo pero no es válido
+    if(!confirm('El NCF no cumple formato DGII. Se marcará como "REVISAR" para que la valides después. ¿Continuar?')) return;
+    aprobado = 'REVISAR';
+  } else {
+    // Sin NCF = factura informal
+    aprobado = 'REVISAR';
   }
 
   const entry = {
@@ -1566,13 +1676,13 @@ async function saveEntry(){
     no_reporte: document.getElementById('f-reporte').value.trim(),
     fecha_registro: new Date().toISOString(),
     fecha_factura: document.getElementById('f-fecha').value,
-    suplidor: document.getElementById('f-sup').value.trim(),
+    suplidor: suplidor,
     rnc: document.getElementById('f-rnc').value.trim(),
     ncf: ncf,
     categoria: document.getElementById('f-cat').value,
     tipo: document.getElementById('f-tipo').value,
     monto: monto,
-    aprobado: NCF_REGEX.test(ncf) ? 'SI' : 'PENDIENTE',
+    aprobado: aprobado,
     observaciones: document.getElementById('f-obs').value.trim(),
     usuario: localStorage.getItem(LS.EMAIL),
     ocr_status: currentCapture ? 'PROCESADO' : 'MANUAL',
@@ -1738,6 +1848,7 @@ async function syncAll(){
     for(const e of gastos) if(e.image_base64) await dbDel('images', e.id);
 
     toast(`${all.length} registro(s) sincronizados`, 'ok');
+    invalidateRevisarCache();
     renderHistory();
     refreshHome();
     setTimeout(() => refreshBalance(true), 1000);
@@ -2208,18 +2319,19 @@ function imprimirReporte(){
 // CREAR NUEVO PROYECTO (con carpeta en Drive)
 // ============================================================
 function initNewProj(){
-  document.getElementById('np-cod').value = '';
   document.getElementById('np-nombre').value = '';
   document.getElementById('np-ubic').value = '';
   document.getElementById('np-fondo').value = '';
   document.getElementById('np-err').style.display = 'none';
-  // Sugerir siguiente código
+  // Pre-llenar con siguiente código de la secuencia
   const year = new Date().getFullYear();
   const nums = masters.projects
     .map(p => p.cod.match(new RegExp('OBR-' + year + '-(\\d+)')))
     .filter(m => m).map(m => parseInt(m[1]));
   const next = (nums.length ? Math.max(...nums) : 0) + 1;
-  document.getElementById('np-cod').placeholder = `OBR-${year}-${String(next).padStart(3,'0')}`;
+  const suggested = `OBR-${year}-${String(next).padStart(3,'0')}`;
+  document.getElementById('np-cod').value = suggested;
+  document.getElementById('np-cod').placeholder = suggested;
 }
 
 async function createProject(){
@@ -2338,8 +2450,10 @@ async function loadFacturas(){
     const filtered = rows.filter(r => {
       if(!r[H.ID]) return false;
       const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
+      const porRevisar = r[H.APROBADO] === 'REVISAR' || r[H.APROBADO] === 'PENDIENTE';
       if(estado === 'activas' && eliminado) return false;
       if(estado === 'eliminadas' && !eliminado) return false;
+      if(estado === 'revisar' && (!porRevisar || eliminado)) return false;
       if(obra && r[H.PROYECTO] !== obra) return false;
       if(buscar){
         const text = ((r[H.SUPLIDOR] || '') + ' ' + (r[H.NCF] || '') + ' ' + (r[H.NO_REPORTE] || '')).toLowerCase();
@@ -2373,11 +2487,15 @@ function renderFacturas(){
   box.innerHTML = facturasCache.map((f, i) => {
     const r = f.row;
     const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
+    const aprobadoVal = r[H.APROBADO] || '';
+    const necesitaRevisar = aprobadoVal === 'REVISAR' || aprobadoVal === 'PENDIENTE';
     const url = r[H.URL_FACTURA] || '';
     const proj = masters.projects.find(p => p.cod === r[H.PROYECTO]);
     const catName = (masters.categories.find(c => c.cod === r[H.CATEGORIA]) || {nombre: r[H.CATEGORIA] || ''}).nombre;
+    // Estilo de borde si necesita revisar (amarillo) o eliminada (atenuada)
+    const borderStyle = necesitaRevisar && !eliminado ? 'border:2px solid var(--amber)' : '';
     return `
-    <div class="card" style="${eliminado ? 'opacity:0.6' : ''}">
+    <div class="card" style="${eliminado ? 'opacity:0.6' : ''};${borderStyle}">
       <div style="display:flex;gap:12px;align-items:flex-start">
         ${url ? `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;color:var(--text2);cursor:pointer" onclick="verFotoDrive('${url}')" title="Ver foto">📄</div>` : '<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">−</div>'}
         <div style="flex:1;min-width:0">
@@ -2391,7 +2509,10 @@ function renderFacturas(){
               <div style="font-size:11px;color:var(--text2);margin-top:2px">
                 ${catName} ${r[H.NCF] ? ' · <span style="font-family:var(--mono)">'+r[H.NCF]+'</span>' : ''}
               </div>
-              ${eliminado ? '<span class="badge badge-bad" style="margin-top:6px">ELIMINADO</span>' : ''}
+              <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">
+                ${eliminado ? '<span class="badge badge-bad">ELIMINADO</span>' : ''}
+                ${necesitaRevisar && !eliminado ? '<span class="badge" style="background:rgba(245,158,11,0.15);color:var(--amber);border:1px solid var(--amber)">POR REVISAR</span>' : ''}
+              </div>
             </div>
             <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--red);white-space:nowrap">${fmt(parseFloat(r[H.MONTO])||0)}</div>
           </div>
@@ -2597,7 +2718,7 @@ async function saveEdit(){
     editContext = null;
     show('pg-facturas');
     setTimeout(() => loadFacturas(), 500);
-    setTimeout(() => refreshBalance(true), 1500);
+    invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 1500);
   } catch(e){
     loading(false);
     err.textContent = 'Error: ' + e.message;
@@ -2705,7 +2826,7 @@ async function eliminarFactura(idx){
     loading(false);
     toast('Factura enviada a Papelera', 'ok');
     await loadFacturas();
-    setTimeout(() => refreshBalance(true), 500);
+    invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 500);
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
@@ -2762,7 +2883,7 @@ async function restaurarFactura(idx){
     loading(false);
     toast('Factura restaurada', 'ok');
     await loadFacturas();
-    setTimeout(() => refreshBalance(true), 500);
+    invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 500);
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
@@ -2822,7 +2943,7 @@ async function eliminarFacturaPermanente(idx){
     loading(false);
     toast('Eliminada permanentemente', 'ok');
     await loadFacturas();
-    setTimeout(() => refreshBalance(true), 500);
+    invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 500);
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
@@ -2955,7 +3076,7 @@ async function syncDriveFilesWithSheet(){
   await loadMasters();
   loading(false);
   show('pg-home');
-  setTimeout(() => refreshBalance(true), 500);
+  invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 500);
 })();
 
 // Refrescar al volver al foreground
