@@ -255,7 +255,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   </div>
   <div class="body">
 
-    <div style="font-size:16px;font-weight:600;color:var(--text);margin:2px 4px 6px;letter-spacing:.01em">Proyecto Activo</div>
+    <div style="font-size:18px;font-weight:600;color:var(--text);margin:2px 4px 6px;letter-spacing:.01em">Proyecto Activo</div>
 
     <div class="proj-bar" onclick="show('pg-proj-select')">
       <div class="proj-dot"></div>
@@ -436,17 +436,31 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 <!-- ========== PAGE: EDITAR FACTURA ========== -->
 <div class="page" id="pg-editar">
   <div class="topbar">
-    <div class="ibtn" onclick="show('pg-facturas')">
+    <div class="ibtn" onclick="editarBackFn()">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
     </div>
     <div>
-      <div class="topbar-title">Editar factura</div>
+      <div class="topbar-title" id="ed-title">Editar factura</div>
       <div class="topbar-sub" id="ed-sub">—</div>
     </div>
   </div>
   <div class="body">
     <div id="ed-img-wrap" style="display:none">
       <img id="ed-img" alt="" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);cursor:pointer" onclick="verFotoUrl(this.src)">
+    </div>
+
+    <!-- Inputs file para cambiar foto (solo visible al editar pendiente) -->
+    <input type="file" id="ed-inp-cam" accept="image/*" capture="environment" style="display:none" onchange="onChangePhoto(this)">
+    <input type="file" id="ed-inp-gal" accept="image/*" style="display:none" onchange="onChangePhoto(this)">
+    <div id="ed-photo-btns" class="grid2" style="display:none;margin-bottom:10px">
+      <button class="btn" onclick="document.getElementById('ed-inp-cam').click()" style="padding:10px;font-size:12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Cambiar foto
+      </button>
+      <button class="btn" onclick="document.getElementById('ed-inp-gal').click()" style="padding:10px;font-size:12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        De galería
+      </button>
     </div>
 
     <div class="field">
@@ -1442,17 +1456,20 @@ async function refreshHome(){
     document.getElementById('balance-status').textContent = age === 0 ? 'Recién actualizado' : `Hace ${age} min`;
   }
 
-  // Recientes (pendientes locales)
+  // Recientes (pendientes locales) — card entera clickeable para editar
   const box = document.getElementById('home-list');
   const rw = document.getElementById('home-recent');
   if(myPending.length > 0){
     rw.style.display = 'block';
     box.innerHTML = myPending.slice(0, 3).map(p => {
+      // ABONO no se edita por ahora (solo se elimina desde "Ver pendientes")
+      const canEdit = p.tipo_registro === 'GASTO';
+      const clickHandler = canEdit ? `onclick="editarPending('${p.id}')" style="cursor:pointer"` : '';
       const thumb = p.image_base64
-        ? `<img src="data:${p.image_mime || 'image/jpeg'};base64,${p.image_base64}" alt="" onclick="verFoto('${p.id}')" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:block">`
+        ? `<img src="data:${p.image_mime || 'image/jpeg'};base64,${p.image_base64}" alt="" onclick="event.stopPropagation();verFoto('${p.id}')" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:block">`
         : `<div class="entry-icon">${p.tipo_registro === 'ABONO' ? '+' : '−'}</div>`;
       return `
-      <div class="entry">
+      <div class="entry" ${clickHandler}>
         ${thumb}
         <div class="entry-info">
           <div class="entry-name">${p.suplidor || (p.tipo_registro === 'ABONO' ? 'Abono · ' + (p.tipo || '') : '(sin suplidor)')}</div>
@@ -1743,11 +1760,13 @@ async function renderHistory(){
   }
   body.innerHTML = all.map(e => {
     const isAbono = e.tipo_registro === 'ABONO';
+    const canEdit = !isAbono;
     const thumb = e.image_base64
-      ? `<img src="data:${e.image_mime || 'image/jpeg'};base64,${e.image_base64}" alt="" onclick="verFoto('${e.id}')" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:block">`
+      ? `<img src="data:${e.image_mime || 'image/jpeg'};base64,${e.image_base64}" alt="" onclick="event.stopPropagation();verFoto('${e.id}')" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:block">`
       : `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">${isAbono ? '+' : '−'}</div>`;
+    const clickHandler = canEdit ? `onclick="editarPending('${e.id}')" style="cursor:pointer"` : '';
     return `
-    <div class="card">
+    <div class="card" ${clickHandler}>
       <div style="display:flex;gap:12px;align-items:flex-start">
         ${thumb}
         <div style="flex:1;min-width:0">
@@ -1768,7 +1787,7 @@ async function renderHistory(){
           </div>
         </div>
       </div>
-      <button class="btn btn-red" style="margin-top:10px;padding:8px;font-size:12px" onclick="deletePending('${e.id}')">Eliminar</button>
+      <button class="btn btn-red" style="margin-top:10px;padding:8px;font-size:12px" onclick="event.stopPropagation();deletePending('${e.id}')">Eliminar</button>
     </div>`;
   }).join('');
 }
@@ -2565,7 +2584,13 @@ function verFotoUrl(src){
 // ============================================================
 // EDITAR FACTURA
 // ============================================================
-let editContext = null;  // {sheetRow, original: {...}}
+let editContext = null;  // {mode: 'sheet'|'pending', sheetRow, original: {...}, returnTo: 'pg-X'}
+
+// Back dinámico — lleva a la pantalla correcta según de dónde venimos
+function editarBackFn(){
+  const to = editContext?.returnTo || 'pg-facturas';
+  show(to);
+}
 
 function editarFactura(idx){
   const f = facturasCache[idx];
@@ -2573,6 +2598,8 @@ function editarFactura(idx){
   const r = f.row;
 
   editContext = {
+    mode: 'sheet',
+    returnTo: 'pg-facturas',
     sheetRow: f.sheetRow,
     original: {
       proyecto: r[H.PROYECTO] || '',
@@ -2590,6 +2617,9 @@ function editarFactura(idx){
       id: r[H.ID] || ''
     }
   };
+
+  document.getElementById('ed-title').textContent = 'Editar factura';
+  document.getElementById('ed-photo-btns').style.display = 'none'; // No cambiar foto de sincronizada
 
   // Llenar dropdowns
   const pSel = document.getElementById('ed-proj');
@@ -2628,6 +2658,94 @@ function editarFactura(idx){
   show('pg-editar');
 }
 
+// Editar factura pendiente (local, no sincronizada)
+async function editarPending(id){
+  const entry = await dbGet('pending', id);
+  if(!entry){ toast('Registro no encontrado', 'err'); return; }
+  if(entry.tipo_registro === 'ABONO'){ toast('Los ingresos pendientes no se editan aún, elimínalo y crea uno nuevo', 'err'); return; }
+
+  // Decidir dónde volver (del home o del historial)
+  const currentPage = document.querySelector('.page.on')?.id || 'pg-home';
+  const returnTo = currentPage === 'pg-history' ? 'pg-history' : 'pg-home';
+
+  editContext = {
+    mode: 'pending',
+    returnTo: returnTo,
+    pendingId: id,
+    original: {
+      proyecto: entry.proyecto || '',
+      fecha: entry.fecha_factura || '',
+      suplidor: entry.suplidor || '',
+      rnc: entry.rnc || '',
+      ncf: entry.ncf || '',
+      categoria: entry.categoria || '',
+      tipo: entry.tipo || 'GASTO',
+      monto: entry.monto || 0,
+      aprobado: entry.aprobado || 'SI',
+      no_reporte: entry.no_reporte || '',
+      observaciones: entry.observaciones || '',
+      image_base64: entry.image_base64,
+      image_mime: entry.image_mime,
+      id: entry.id
+    }
+  };
+
+  document.getElementById('ed-title').innerHTML = 'Editar pendiente <span style="color:var(--amber);font-weight:500;font-size:13px">(sin sincronizar)</span>';
+  document.getElementById('ed-photo-btns').style.display = 'grid'; // SÍ cambiar foto en pendiente
+
+  // Llenar dropdowns
+  const pSel = document.getElementById('ed-proj');
+  pSel.innerHTML = masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
+  pSel.value = editContext.original.proyecto;
+
+  const cSel = document.getElementById('ed-cat');
+  cSel.innerHTML = masters.categories.map(c => `<option value="${c.cod}">${c.nombre}</option>`).join('');
+  cSel.value = editContext.original.categoria;
+
+  // Llenar campos
+  document.getElementById('ed-fecha').value = editContext.original.fecha;
+  document.getElementById('ed-reporte').value = editContext.original.no_reporte;
+  document.getElementById('ed-sup').value = editContext.original.suplidor;
+  document.getElementById('ed-rnc').value = editContext.original.rnc;
+  document.getElementById('ed-ncf').value = editContext.original.ncf;
+  document.getElementById('ed-monto').value = editContext.original.monto;
+  document.getElementById('ed-tipo').value = editContext.original.tipo;
+  document.getElementById('ed-aprobado').value = editContext.original.aprobado;
+  document.getElementById('ed-obs').value = editContext.original.observaciones;
+
+  // Thumbnail desde base64 local
+  const imgWrap = document.getElementById('ed-img-wrap');
+  const img = document.getElementById('ed-img');
+  if(editContext.original.image_base64){
+    img.src = `data:${editContext.original.image_mime || 'image/jpeg'};base64,${editContext.original.image_base64}`;
+    imgWrap.style.display = 'block';
+  } else imgWrap.style.display = 'none';
+
+  document.getElementById('ed-sub').textContent = 'ID: ' + entry.id;
+  document.getElementById('ed-err').style.display = 'none';
+  validateNCFLiveEd();
+  show('pg-editar');
+}
+
+// Cambiar foto del pendiente en edición
+function onChangePhoto(inp){
+  const f = inp.files[0];
+  if(!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    const base64 = e.target.result.split(',')[1];
+    if(editContext){
+      editContext.original.image_base64 = base64;
+      editContext.original.image_mime = f.type;
+    }
+    document.getElementById('ed-img').src = e.target.result;
+    document.getElementById('ed-img-wrap').style.display = 'block';
+    toast('Foto actualizada (pendiente guardar)', 'ok');
+  };
+  r.readAsDataURL(f);
+  inp.value = '';
+}
+
 function validateNCFLiveEd(){
   const v = document.getElementById('ed-ncf').value.toUpperCase().replace(/\s/g, '');
   document.getElementById('ed-ncf').value = v;
@@ -2662,13 +2780,54 @@ async function saveEdit(){
   };
 
   if(!nuevo.monto || nuevo.monto <= 0){
-    err.textContent = 'Monto inválido';
-    err.style.display = 'block'; return;
+    err.textContent = 'Monto inválido'; err.style.display = 'block'; return;
+  }
+  if(!nuevo.suplidor){
+    err.textContent = 'Suplidor es obligatorio'; err.style.display = 'block'; return;
   }
   if(nuevo.ncf && !NCF_REGEX.test(nuevo.ncf)){
     if(!confirm('El nuevo NCF no cumple formato DGII. ¿Guardar de todas formas?')) return;
   }
 
+  // ============ MODO PENDIENTE: actualizar IndexedDB ============
+  if(editContext.mode === 'pending'){
+    loading(true, 'Guardando cambios', 'Actualizando registro local...');
+    try {
+      const entry = await dbGet('pending', editContext.pendingId);
+      if(!entry){ throw new Error('Pendiente no encontrado'); }
+      entry.proyecto = nuevo.proyecto;
+      entry.fecha_factura = nuevo.fecha;
+      entry.suplidor = nuevo.suplidor;
+      entry.rnc = nuevo.rnc;
+      entry.ncf = nuevo.ncf;
+      entry.categoria = nuevo.categoria;
+      entry.tipo = nuevo.tipo;
+      entry.monto = nuevo.monto;
+      entry.aprobado = nuevo.aprobado;
+      entry.no_reporte = nuevo.no_reporte;
+      entry.observaciones = nuevo.observaciones;
+      // Foto (si se cambió, editContext.original.image_base64 ya tiene la nueva)
+      entry.image_base64 = editContext.original.image_base64;
+      entry.image_mime = editContext.original.image_mime;
+
+      await dbAdd('pending', entry);  // put reemplaza por id
+      loading(false);
+      toast('Pendiente actualizado', 'ok');
+      const to = editContext.returnTo || 'pg-home';
+      editContext = null;
+      show(to);
+      // Refrescar la vista correspondiente
+      if(to === 'pg-history') renderHistory();
+      else refreshHome();
+    } catch(e){
+      loading(false);
+      err.textContent = 'Error: ' + e.message;
+      err.style.display = 'block';
+    }
+    return;
+  }
+
+  // ============ MODO SHEET: actualizar Google Sheet + Drive ============
   loading(true, 'Guardando cambios', 'Actualizando Sheet...');
   try {
     const H = facturasHeaders;
@@ -2677,7 +2836,7 @@ async function saveEdit(){
     // Escribir celdas una por una usando sus posiciones por header
     // (evita escribir en columnas con fórmulas: I, J, W)
     const updates = [];
-    const col = idx => String.fromCharCode(65 + idx); // 0-indexed -> letra
+    const col = idx => String.fromCharCode(65 + idx);
     const add = (headerName, val) => {
       if(H[headerName] !== undefined){
         updates.push({range: `REGISTRO!${col(H[headerName])}${row}`, values: [[val]]});
@@ -2724,7 +2883,8 @@ async function saveEdit(){
     editContext = null;
     show('pg-facturas');
     setTimeout(() => loadFacturas(), 500);
-    invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 1500);
+    invalidateRevisarCache();
+    setTimeout(() => refreshBalance(true), 1500);
   } catch(e){
     loading(false);
     err.textContent = 'Error: ' + e.message;
