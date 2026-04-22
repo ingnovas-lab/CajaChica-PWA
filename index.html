@@ -258,7 +258,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   </div>
   <div class="body">
 
-    <div style="font-size:18px;font-weight:600;color:var(--text);margin:2px 4px 6px;letter-spacing:.01em">Proyecto Activo</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:2px 4px 6px">
+      <div style="font-size:18px;font-weight:600;color:var(--text);letter-spacing:.01em">Proyecto Activo</div>
+      <div class="ibtn" onclick="show('pg-help')" style="width:32px;height:32px" title="Guía de uso">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+    </div>
 
     <div class="proj-bar" onclick="show('pg-proj-select')">
       <div class="proj-dot"></div>
