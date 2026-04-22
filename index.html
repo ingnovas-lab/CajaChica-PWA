@@ -1009,8 +1009,12 @@ async function dbDel(store, id){
 
 // ============================================================
 // GOOGLE OAUTH — Google Identity Services (gratis)
+// Con silent re-auth para evitar que el usuario tenga que reloguearse cada hora
 // ============================================================
 let tokenClient = null;
+let silentClient = null;          // Cliente separado para renovación silenciosa
+let refreshingPromise = null;     // Evita refresh concurrentes
+
 function getToken(){
   const s = localStorage.getItem(LS.TOKEN);
   if(!s) return null;
@@ -1019,6 +1023,108 @@ function getToken(){
     if(t.expires_at && t.expires_at > Date.now()) return t.access_token;
     return null;
   } catch { return null; }
+}
+
+// Verifica si el token va a expirar pronto (menos de 5 minutos)
+function tokenAboutToExpire(){
+  const s = localStorage.getItem(LS.TOKEN);
+  if(!s) return true;
+  try {
+    const t = JSON.parse(s);
+    if(!t.expires_at) return true;
+    return t.expires_at - Date.now() < 5 * 60 * 1000;
+  } catch { return true; }
+}
+
+// Intenta renovar el token silenciosamente (sin mostrar UI al usuario)
+// Si falla, devuelve null y la app puede pedir login interactivo.
+async function silentRefresh(){
+  // Evitar múltiples refresh concurrentes
+  if(refreshingPromise) return refreshingPromise;
+
+  refreshingPromise = (async () => {
+    try {
+      if(!window.google) return null;
+      const email = localStorage.getItem(LS.EMAIL);
+      if(!email) return null;
+
+      return await new Promise((resolve) => {
+        // Cliente separado porque este es silencioso (prompt: '')
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: OAUTH_CLIENT_ID,
+          scope: OAUTH_SCOPES,
+          hint: email, // le dice a Google qué cuenta usar sin pedir selector
+          callback: (resp) => {
+            if(resp.error || !resp.access_token){
+              console.warn('Silent refresh falló:', resp.error);
+              resolve(null);
+              return;
+            }
+            localStorage.setItem(LS.TOKEN, JSON.stringify({
+              access_token: resp.access_token,
+              expires_at: Date.now() + (resp.expires_in - 60) * 1000
+            }));
+            console.log('Token renovado silenciosamente');
+            resolve(resp.access_token);
+          },
+          error_callback: (err) => {
+            console.warn('Silent refresh error:', err);
+            resolve(null);
+          }
+        });
+        // prompt: '' = intento silencioso. Si Google no puede, falla sin UI.
+        client.requestAccessToken({prompt: ''});
+
+        // Timeout por si el callback nunca se llama (pasa a veces)
+        setTimeout(() => resolve(null), 8000);
+      });
+    } finally {
+      refreshingPromise = null;
+    }
+  })();
+
+  return refreshingPromise;
+}
+
+// Asegura que hay un token válido antes de hacer llamadas API.
+// Si expira pronto, renueva proactivamente. Si no hay, pide login interactivo.
+async function ensureFreshToken(){
+  if(!tokenAboutToExpire()) return getToken();
+  const refreshed = await silentRefresh();
+  if(refreshed) return refreshed;
+  return getToken(); // puede ser null — el caller maneja
+}
+
+// Wrapper de fetch que reintenta automáticamente si el token expiró (401/403)
+// Úsalo para TODAS las llamadas a googleapis.com
+async function authFetch(url, options = {}){
+  // Pre-chequeo: si el token va a expirar, renovar antes
+  await ensureFreshToken();
+  let token = getToken();
+  if(!token) throw new Error('Sesión expirada. Reingresa con Google.');
+
+  // Inyectar el Authorization header
+  const doFetch = (tk) => {
+    const headers = Object.assign({}, options.headers || {}, {
+      'Authorization': 'Bearer ' + tk
+    });
+    return fetch(url, Object.assign({}, options, {headers}));
+  };
+
+  let res = await doFetch(token);
+
+  // Si falla con 401, intentar silent refresh y reintentar UNA vez
+  if(res.status === 401){
+    console.log('401 detectado, intentando silent refresh...');
+    const newToken = await silentRefresh();
+    if(newToken){
+      res = await doFetch(newToken);
+    } else {
+      // Silent refresh falló — necesita login interactivo
+      throw new Error('Sesión expirada. Reingresa con Google.');
+    }
+  }
+  return res;
 }
 
 function initGoogleAuth(){
@@ -1064,6 +1170,30 @@ function initGoogleAuth(){
   tokenClient.requestAccessToken({prompt: 'consent'});
 }
 
+// Reingresar con Google cuando la sesión expiró (sin perder configuración)
+function reauthGoogle(){
+  if(!window.google){ toast('Recarga la app', 'err'); return; }
+  const email = localStorage.getItem(LS.EMAIL);
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: OAUTH_CLIENT_ID,
+    scope: OAUTH_SCOPES,
+    hint: email || undefined,
+    callback: async (resp) => {
+      if(resp.error || !resp.access_token){ toast('No se pudo reingresar', 'err'); return; }
+      localStorage.setItem(LS.TOKEN, JSON.stringify({
+        access_token: resp.access_token,
+        expires_at: Date.now() + (resp.expires_in - 60) * 1000
+      }));
+      toast('Sesión renovada', 'ok');
+      // Recargar datos
+      await loadMasters();
+      refreshBalance(true);
+    }
+  });
+  client.requestAccessToken({prompt: ''}); // intento silencioso primero
+  // Si el silencioso falla por falta de interacción, Google mostrará popup
+}
+
 function logoutGoogle(){
   localStorage.removeItem(LS.TOKEN);
   localStorage.removeItem(LS.EMAIL);
@@ -1075,12 +1205,9 @@ function logoutGoogle(){
 // Reemplaza xlsx round-trip del app original.
 // ============================================================
 async function sheetsGet(range){
-  const token = getToken();
-  if(!token) throw new Error('Sesión expirada');
   const ssid = localStorage.getItem(LS.SSID);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(range)}`;
-  const r = await fetch(url, {headers: {'Authorization': 'Bearer ' + token}});
-  if(r.status === 401){ localStorage.removeItem(LS.TOKEN); throw new Error('Sesión expirada'); }
+  const r = await authFetch(url);
   if(!r.ok) throw new Error('Error Sheets: ' + r.status);
   const d = await r.json();
   return d.values || [];
@@ -1091,8 +1218,6 @@ async function sheetsGet(range){
 // muy altas (1000+). En su lugar leemos la columna A (IDs, sin fórmulas) para
 // saber la última fila real y hacemos update directo.
 async function sheetsAppend(range, values){
-  const token = getToken();
-  if(!token) throw new Error('Sesión expirada');
   const ssid = localStorage.getItem(LS.SSID);
 
   // Extraer nombre de hoja del range (ej: "REGISTRO!A2" -> "REGISTRO")
@@ -1100,7 +1225,7 @@ async function sheetsAppend(range, values){
 
   // Leer columna A de la hoja (solo IDs — nunca tiene fórmulas que arrastren)
   const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(sheetName + '!A:A')}`;
-  const getRes = await fetch(getUrl, {headers: {'Authorization': 'Bearer ' + token}});
+  const getRes = await authFetch(getUrl);
   if(!getRes.ok) throw new Error('Error leyendo columna A: ' + getRes.status);
   const existing = (await getRes.json()).values || [];
 
@@ -1113,12 +1238,7 @@ async function sheetsAppend(range, values){
   const finalRow = nextRow + values.length - 1;
 
   // Asegurar que el Sheet tiene suficientes filas físicas.
-  // Si el usuario borró filas y la hoja quedó reducida, un update en una fila
-  // fuera de rango falla con "exceeds grid limits". Solución: expandir el grid
-  // con appendDimension antes de escribir.
-  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`, {
-    headers: {'Authorization': 'Bearer ' + token}
-  });
+  const metaRes = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`);
   const metaData = await metaRes.json();
   const sheetMeta = metaData.sheets.find(s => s.properties.title === sheetName);
   if(!sheetMeta) throw new Error('Hoja ' + sheetName + ' no encontrada');
@@ -1126,17 +1246,13 @@ async function sheetsAppend(range, values){
   const sheetId = sheetMeta.properties.sheetId;
 
   if(finalRow > currentRows){
-    const rowsToAdd = finalRow - currentRows + 50; // +50 de buffer para futuras escrituras
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+    const rowsToAdd = finalRow - currentRows + 50;
+    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
       method: 'POST',
-      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         requests: [{
-          appendDimension: {
-            sheetId: sheetId,
-            dimension: 'ROWS',
-            length: rowsToAdd
-          }
+          appendDimension: {sheetId: sheetId, dimension: 'ROWS', length: rowsToAdd}
         }]
       })
     });
@@ -1145,9 +1261,9 @@ async function sheetsAppend(range, values){
   // Update directo en la siguiente fila vacía
   const writeRange = `${sheetName}!A${nextRow}`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(writeRange)}?valueInputOption=USER_ENTERED`;
-  const r = await fetch(url, {
+  const r = await authFetch(url, {
     method: 'PUT',
-    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({values: values})
   });
   if(!r.ok){
@@ -1155,18 +1271,14 @@ async function sheetsAppend(range, values){
     throw new Error('Error escribiendo filas: ' + err);
   }
   const json = await r.json();
-  // Asegurar que updatedRange esté presente (Google Sheets lo retorna como updatedRange en updatedCells, no en root)
-  // El formato de respuesta PUT es: {spreadsheetId, updatedRange, updatedRows, updatedColumns, updatedCells}
   return {...json, startRow: nextRow, updatedRange: json.updatedRange || writeRange};
 }
 
 async function sheetsBatchGet(ranges){
-  const token = getToken();
-  if(!token) throw new Error('Sesión expirada');
   const ssid = localStorage.getItem(LS.SSID);
   const qs = ranges.map(r => 'ranges=' + encodeURIComponent(r)).join('&');
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchGet?${qs}`;
-  const r = await fetch(url, {headers: {'Authorization': 'Bearer ' + token}});
+  const r = await authFetch(url);
   if(!r.ok) throw new Error('Error batchGet: ' + r.status);
   return (await r.json()).valueRanges || [];
 }
@@ -3592,28 +3704,23 @@ async function guardarInvitacion(){
       const rowIdx = (allUsers || []).findIndex(r => r[0] === email);
       if(rowIdx < 0) throw new Error('Usuario no encontrado para editar');
       const rowNum = rowIdx + 2; // +1 por header, +1 para 1-indexed
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/USUARIOS!A${rowNum}:D${rowNum}?valueInputOption=USER_ENTERED`, {
+      await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/USUARIOS!A${rowNum}:D${rowNum}?valueInputOption=USER_ENTERED`, {
         method: 'PUT',
-        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({values: [[email, nombre, rol, proyectosStr]]})
       });
-      await loadMasters();
-      loading(false);
-      toast('Usuario actualizado', 'ok');
       editingUserIdx = null;
-      show('pg-users');
-      return;
+      // Cae al flujo común de generar link abajo
+    } else {
+      // INVITAR NUEVO: verificar que no existe ya
+      if(masters.users.find(u => u.email === email)){
+        throw new Error('Ya existe un usuario con ese correo. Edítalo desde la lista.');
+      }
+      // Agregar fila al Sheet
+      await sheetsAppend('USUARIOS!A2', [[email, nombre, rol, proyectosStr]]);
     }
 
-    // INVITAR NUEVO: verificar que no existe ya
-    if(masters.users.find(u => u.email === email)){
-      throw new Error('Ya existe un usuario con ese correo. Edítalo desde la lista.');
-    }
-
-    // Agregar fila al Sheet
-    await sheetsAppend('USUARIOS!A2', [[email, nombre, rol, proyectosStr]]);
-
-    // Generar link de invitación
+    // Generar link de invitación (se muestra tanto al invitar como al editar)
     const payload = {
       k: localStorage.getItem(LS.GEMINI),
       s: ssid
@@ -3630,7 +3737,7 @@ async function guardarInvitacion(){
 
     await loadMasters();
     loading(false);
-    toast('Usuario guardado. Comparte el link.', 'ok');
+    toast('Guardado. Comparte el link si es necesario.', 'ok');
   } catch(e){
     loading(false);
     err.textContent = 'Error: ' + e.message;
@@ -3854,15 +3961,26 @@ function processInviteHash(){
     check();
   });
 
-  const hasToken = getToken();
+  let hasToken = getToken();
   const hasSSID = localStorage.getItem(LS.SSID);
   const hasGemini = localStorage.getItem(LS.GEMINI);
+  const hasEmail = localStorage.getItem(LS.EMAIL);
+
+  // Si no hay token VÁLIDO pero sí hay email previo → intentar renovar silenciosamente
+  // Esto cubre el caso de "la sesión expiró mientras la app estaba cerrada"
+  if(!hasToken && hasEmail && hasSSID && hasGemini){
+    loading(true, 'Iniciando', 'Renovando sesión...');
+    const refreshed = await silentRefresh();
+    if(refreshed) hasToken = refreshed;
+  }
 
   if(!hasToken || !hasSSID || !hasGemini){
     loading(false);
     show('pg-setup');
     if(fromInvite){
       toast('Configuración recibida. Solo autoriza con Google para terminar.', 'ok');
+    } else if(hasEmail && !hasToken){
+      toast('Sesión expirada. Reingresa con Google.', 'err');
     }
     if(hasToken) document.getElementById('gauth-status').innerHTML = '✓ Conectado: ' + localStorage.getItem(LS.EMAIL);
     if(hasGemini) document.getElementById('gemini-status').innerHTML = '<span style="color:var(--green)">✓ Clave configurada</span>';
@@ -3878,12 +3996,19 @@ function processInviteHash(){
 })();
 
 // Refrescar al volver al foreground
-document.addEventListener('visibilitychange', () => {
-  if(!document.hidden && getToken() && localStorage.getItem(LS.SSID)){
-    const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
-    const proj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
-    if(proj && (!cache[proj.cod] || Date.now() - cache[proj.cod].at > 600000)){
-      refreshBalance(true);
+document.addEventListener('visibilitychange', async () => {
+  if(!document.hidden && localStorage.getItem(LS.SSID) && localStorage.getItem(LS.EMAIL)){
+    // Si el token expiró mientras la app estaba en background, renovarlo silenciosamente
+    if(!getToken()){
+      await silentRefresh();
+    }
+    // Después del refresh (o si ya había token), refrescar balance si toca
+    if(getToken()){
+      const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
+      const proj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+      if(proj && (!cache[proj.cod] || Date.now() - cache[proj.cod].at > 600000)){
+        refreshBalance(true);
+      }
     }
   }
 });
