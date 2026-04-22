@@ -268,6 +268,16 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
     </div>
 
+    <div id="consolidar-banner" data-admin-only style="display:none;background:rgba(59,130,246,0.12);border:1px solid var(--blue);border-radius:var(--r);padding:12px 14px;margin-top:8px;cursor:pointer" onclick="show('pg-settings')">
+      <div style="display:flex;align-items:center;gap:10px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500;color:var(--blue)">Facturas sin consolidar</div>
+          <div id="consolidar-banner-text" style="font-size:11px;color:var(--text2);margin-top:2px">—</div>
+        </div>
+      </div>
+    </div>
+
     <div class="balance" onclick="refreshBalance(true)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
@@ -348,7 +358,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
   </div>
   <div class="body">
-    <button class="btn btn-green" onclick="show('pg-new-proj')" style="margin-bottom:14px">
+    <button class="btn btn-green" onclick="show('pg-new-proj')" style="margin-bottom:14px" data-admin-only>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       Nuevo proyecto
     </button>
@@ -384,6 +394,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="field" style="margin-bottom:18px">
         <div class="lbl">Fondo inicial (RD$)</div>
         <input type="number" id="np-fondo" placeholder="0.00" min="0" step="0.01" style="font-family:var(--mono)">
+      </div>
+      <div class="field" style="margin-bottom:18px">
+        <div class="lbl">Usuarios asignados</div>
+        <div id="np-users" style="max-height:180px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"></div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">Marca los usuarios que podrán ver y capturar para esta obra. Tú quedas asignado automáticamente.</div>
       </div>
       <div id="np-err" class="alert alert-red" style="display:none;margin-bottom:10px"></div>
       <button class="btn btn-green" onclick="createProject()" style="padding:13px">Crear obra</button>
@@ -536,6 +551,78 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <button class="btn btn-amber" onclick="saveEdit()" style="padding:14px">
       Guardar cambios
     </button>
+  </div>
+</div>
+
+<!-- ========== PAGE: GESTIÓN DE USUARIOS ========== -->
+<div class="page" id="pg-users">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-settings')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Gestionar usuarios</div>
+      <div class="topbar-sub" id="users-sub">—</div>
+    </div>
+  </div>
+  <div class="body">
+    <button class="btn btn-green" onclick="show('pg-invite')" style="padding:13px;margin-bottom:14px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+      Invitar usuario
+    </button>
+    <div id="users-list"></div>
+  </div>
+</div>
+
+<!-- ========== PAGE: INVITAR USUARIO ========== -->
+<div class="page" id="pg-invite">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-users')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title" id="invite-title">Invitar usuario</div>
+      <div class="topbar-sub" id="invite-sub">Genera link de configuración</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="card">
+      <div class="field">
+        <div class="lbl">Correo Google</div>
+        <input type="email" id="inv-email" placeholder="usuario@gmail.com" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="field">
+        <div class="lbl">Nombre</div>
+        <input type="text" id="inv-nombre" placeholder="Nombre completo">
+      </div>
+      <div class="field">
+        <div class="lbl">Rol</div>
+        <select id="inv-rol">
+          <option value="USUARIO">Usuario (captura facturas, edita las suyas)</option>
+          <option value="ADMIN">Administrador (acceso total)</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="lbl">Obras asignadas</div>
+        <div id="inv-obras" style="max-height:200px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"></div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">Los ADMIN ven todas las obras automáticamente. Para USUARIO debes marcar las obras asignadas.</div>
+      </div>
+      <div id="inv-err" class="alert alert-red" style="display:none;margin-bottom:10px"></div>
+      <button class="btn btn-green" onclick="guardarInvitacion()" style="padding:13px">Guardar y generar link</button>
+    </div>
+
+    <div class="card" id="inv-link-card" style="display:none;margin-top:14px">
+      <h3>Link de configuración generado</h3>
+      <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:10px">
+        Comparte este link con el usuario (WhatsApp, email, etc.). Al abrirlo desde su teléfono, la app queda configurada automáticamente.
+      </div>
+      <div id="inv-link" style="font-family:var(--mono);font-size:10px;background:var(--bg);padding:10px;border-radius:8px;word-break:break-all;border:1px solid var(--border);margin-bottom:10px"></div>
+      <div class="grid2">
+        <button class="btn btn-blue" onclick="copiarLinkInvitacion()">Copiar link</button>
+        <button class="btn btn-green" onclick="compartirLinkInvitacion()">Compartir</button>
+      </div>
+      <button class="btn" onclick="show('pg-users')" style="margin-top:10px">Listo</button>
+    </div>
   </div>
 </div>
 
@@ -733,6 +820,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div class="card">
       <h3>Cuenta Google</h3>
       <div style="font-size:13px;color:var(--text2)" id="set-email">—</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px">Rol: <span id="set-rol" style="color:var(--text);font-weight:500">—</span></div>
       <button class="btn" onclick="logoutGoogle()" style="margin-top:10px">Cerrar sesión</button>
     </div>
 
@@ -753,7 +841,26 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button class="btn btn-amber" onclick="updateGeminiKey()" style="margin-top:10px">Actualizar clave</button>
     </div>
 
-    <div class="card">
+    <div class="card" data-admin-only>
+      <h3>Gestión de usuarios</h3>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Invita, edita permisos o elimina usuarios del sistema.</div>
+      <button class="btn btn-green" onclick="show('pg-users')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Gestionar usuarios
+      </button>
+    </div>
+
+    <div class="card" data-admin-only>
+      <h3>Consolidar facturas</h3>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Las fotos subidas por otros usuarios viven en sus Drives. Consolidar las copia a tu Drive y actualiza los enlaces del Sheet.</div>
+      <button class="btn btn-blue" onclick="consolidarFacturas()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Consolidar facturas ahora
+      </button>
+      <div id="consolidar-status" style="font-size:11px;color:var(--text2);margin-top:8px"></div>
+    </div>
+
+    <div class="card" data-admin-only>
       <h3>Mantenimiento</h3>
       <button class="btn btn-amber" onclick="repairFormulas()">Reparar fórmulas del Dashboard</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
@@ -821,11 +928,16 @@ function show(id){
   if(id==='pg-settings'){
     document.getElementById('set-email').textContent = localStorage.getItem(LS.EMAIL) || '—';
     document.getElementById('set-ssid').textContent = localStorage.getItem(LS.SSID) || '—';
+    document.getElementById('set-rol').textContent = masters.myRole || 'USUARIO';
+    checkConsolidarStatus();
   }
   if(id==='pg-abono') document.getElementById('ab-fecha').value = today();
   if(id==='pg-reportes') initReportes();
   if(id==='pg-new-proj') initNewProj();
   if(id==='pg-facturas') initFacturas();
+  if(id==='pg-users') initUsers();
+  if(id==='pg-invite') initInvite();
+  applyRoleUI();
 }
 
 function loading(on, title, msg){
@@ -1313,7 +1425,20 @@ Si no ves un campo, déjalo vacío o 0.`;
 // MASTERS (cache local de PROYECTOS, SUPLIDORES, CATEGORIAS)
 // Se refrescan on-demand; mientras tanto, operamos con cache.
 // ============================================================
-let masters = {projects: [], suppliers: [], categories: []};
+let masters = {projects: [], suppliers: [], categories: [], users: [], myRole: 'USUARIO'};
+
+// Helper global para verificar si el usuario actual es ADMIN
+function isAdmin(){
+  return masters.myRole === 'ADMIN';
+}
+
+// Aplicar visibilidad de elementos restringidos a ADMIN
+function applyRoleUI(){
+  const admin = isAdmin();
+  document.querySelectorAll('[data-admin-only]').forEach(el => {
+    el.style.display = admin ? '' : 'none';
+  });
+}
 
 async function loadMasters(){
   try {
@@ -1324,12 +1449,19 @@ async function loadMasters(){
     // Filtrar proyectos por USUARIOS_ASIGNADOS del usuario actual
     const myRow = usr.find(r => r[0] === email);
     const myProjCodes = myRow ? (myRow[3] || '').split(',').map(s => s.trim()).filter(Boolean) : [];
-    const isAdmin = myRow && myRow[2] === 'ADMIN';
+    const amAdmin = myRow && myRow[2] === 'ADMIN';
+    masters.myRole = amAdmin ? 'ADMIN' : 'USUARIO';
 
     masters.projects = proj
       .filter(r => r[0] && (r[4] === 'ACTIVO'))
-      .filter(r => isAdmin || myProjCodes.includes(r[0]))
+      .filter(r => amAdmin || myProjCodes.includes(r[0]))
       .map(r => ({cod: r[0], nombre: r[1], ubicacion: r[2], fondo: +r[3]||0}));
+
+    // Lista COMPLETA de usuarios (solo el admin la usa en Gestionar usuarios)
+    masters.users = usr.filter(r => r[0]).map(r => ({
+      email: r[0], nombre: r[1] || '', rol: r[2] || 'USUARIO',
+      proyectos: (r[3] || '').split(',').map(s => s.trim()).filter(Boolean)
+    }));
 
     masters.suppliers = sup.filter(r => r[0]).map(r => ({rnc: r[0], nombre: r[1], cat: r[2]}));
     masters.categories = cat.filter(r => r[0]).map(r => ({cod: r[0], nombre: r[1], cuenta: r[2]}));
@@ -1352,11 +1484,12 @@ async function loadMasters(){
     }
 
     populateDropdowns();
+    applyRoleUI();
     refreshHome();
   } catch(e){
     // Fallback a cache
     const c = localStorage.getItem(LS.MASTERS);
-    if(c){ masters = JSON.parse(c); populateDropdowns(); }
+    if(c){ masters = JSON.parse(c); populateDropdowns(); applyRoleUI(); }
     toast('Trabajando offline', 'err');
   }
 }
@@ -1445,6 +1578,7 @@ async function refreshHome(){
   // Badge "Por revisar": consulta cuántas facturas en el Sheet están como REVISAR/PENDIENTE
   // (silencioso — si falla, no bloquea nada)
   refreshBadgeRevisar();
+  checkConsolidarStatus();
 
   // Balance cacheado
   const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
@@ -2358,6 +2492,25 @@ function initNewProj(){
   const suggested = `OBR-${year}-${String(next).padStart(3,'0')}`;
   document.getElementById('np-cod').value = suggested;
   document.getElementById('np-cod').placeholder = suggested;
+
+  // Renderizar checkboxes de usuarios (excepto el admin actual, que se asigna automáticamente)
+  const miEmail = localStorage.getItem(LS.EMAIL);
+  const usersBox = document.getElementById('np-users');
+  const otros = (masters.users || []).filter(u => u.email !== miEmail);
+  if(otros.length === 0){
+    usersBox.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:8px">No hay otros usuarios registrados. Los usuarios que invites después podrán ser asignados a esta obra desde Gestionar usuarios.</div>';
+  } else {
+    usersBox.innerHTML = otros.map(u => `
+      <label style="display:flex;align-items:center;gap:10px;padding:8px 4px;cursor:pointer;border-bottom:1px solid var(--border)">
+        <input type="checkbox" value="${u.email}" class="np-user-chk" style="width:18px;height:18px;accent-color:var(--amber)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:var(--text)">${u.nombre || u.email.split('@')[0]}</div>
+          <div style="font-size:11px;color:var(--text2);word-break:break-all">${u.email}</div>
+        </div>
+        ${u.rol === 'ADMIN' ? '<span class="badge" style="background:rgba(245,158,11,0.15);color:var(--amber);border:1px solid var(--amber);font-size:10px">ADMIN</span>' : ''}
+      </label>
+    `).join('');
+  }
 }
 
 async function createProject(){
@@ -2368,6 +2521,7 @@ async function createProject(){
   const nombre = document.getElementById('np-nombre').value.trim();
   const ubic = document.getElementById('np-ubic').value.trim();
   const fondo = parseFloat(document.getElementById('np-fondo').value) || 0;
+  const usuariosAsignados = Array.from(document.querySelectorAll('.np-user-chk:checked')).map(c => c.value);
 
   if(!cod || !nombre){
     err.textContent = 'Código y nombre son obligatorios';
@@ -2381,21 +2535,25 @@ async function createProject(){
   loading(true, 'Creando obra', 'Agregando al Sheet...');
   try {
     const email = localStorage.getItem(LS.EMAIL);
+    const token = getToken();
+    const ssid = localStorage.getItem(LS.SSID);
 
-    // 1) Agregar fila al Sheet PROYECTOS
-    await sheetsAppend('PROYECTOS!A2', [[cod, nombre, ubic, fondo, 'ACTIVO', email]]);
+    // 1) Agregar fila al Sheet PROYECTOS (incluye todos los usuarios asignados)
+    const todosAsignados = [email, ...usuariosAsignados];
+    await sheetsAppend('PROYECTOS!A2', [[cod, nombre, ubic, fondo, 'ACTIVO', todosAsignados.join(',')]]);
 
-    // 2) Agregar usuario actual a la obra en USUARIOS (si ya está, agregar cod a su lista)
+    // 2) Actualizar USUARIOS: agregar este cod a PROYECTOS_ASIGNADOS de cada usuario marcado
+    loading(true, 'Creando obra', 'Actualizando permisos...');
     const usrData = await sheetsGet('USUARIOS!A2:D');
     const usrRows = usrData || [];
+
+    // Admin actual: agregar cod si no lo tiene ya
     const myIdx = usrRows.findIndex(r => r[0] === email);
     if(myIdx >= 0){
       const currentProjs = (usrRows[myIdx][3] || '').split(',').map(s => s.trim()).filter(Boolean);
       if(!currentProjs.includes(cod)){
         currentProjs.push(cod);
         const rowNum = myIdx + 2;
-        const token = getToken();
-        const ssid = localStorage.getItem(LS.SSID);
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/USUARIOS!D${rowNum}?valueInputOption=USER_ENTERED`, {
           method: 'PUT',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
@@ -2404,7 +2562,23 @@ async function createProject(){
       }
     }
 
-    // 3) Crear carpetas en Drive
+    // Usuarios asignados: agregar el cod a cada uno
+    for(const userEmail of usuariosAsignados){
+      const idx = usrRows.findIndex(r => r[0] === userEmail);
+      if(idx < 0) continue;
+      const currentProjs = (usrRows[idx][3] || '').split(',').map(s => s.trim()).filter(Boolean);
+      if(!currentProjs.includes(cod)){
+        currentProjs.push(cod);
+        const rowNum = idx + 2;
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/USUARIOS!D${rowNum}?valueInputOption=USER_ENTERED`, {
+          method: 'PUT',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [[currentProjs.join(',')]]})
+        });
+      }
+    }
+
+    // 3) Crear carpetas en Drive (del admin)
     loading(true, 'Creando obra', 'Creando carpetas en Drive...');
     const rootId = await ensureFolder(ROOT_FOLDER, null);
     const projFolderName = `${cod} - ${nombre}`;
@@ -2568,7 +2742,7 @@ function renderFacturas(){
       <div class="grid2" style="margin-top:10px">
         ${eliminado
           ? `<button class="btn btn-green" style="padding:8px;font-size:12px" onclick="restaurarFactura(${i})">Restaurar</button>
-             <button class="btn btn-red" style="padding:8px;font-size:12px" onclick="eliminarFacturaPermanente(${i})">Borrar definitivo</button>`
+             ${isAdmin() ? `<button class="btn btn-red" style="padding:8px;font-size:12px" onclick="eliminarFacturaPermanente(${i})">Borrar definitivo</button>` : '<div></div>'}`
           : `<button class="btn btn-amber" style="padding:8px;font-size:12px" onclick="editarFactura(${i})">Editar</button>
              <button class="btn btn-red" style="padding:8px;font-size:12px" onclick="eliminarFactura(${i})">Eliminar</button>`}
       </div>
@@ -3237,10 +3411,442 @@ async function syncDriveFilesWithSheet(){
 
 
 // ============================================================
+// GESTIÓN DE USUARIOS (solo ADMIN)
+// ============================================================
+
+async function initUsers(){
+  document.getElementById('users-sub').textContent = masters.users.length + ' usuario(s) registrado(s)';
+  renderUsersList();
+}
+
+function renderUsersList(){
+  const box = document.getElementById('users-list');
+  if(!masters.users || masters.users.length === 0){
+    box.innerHTML = '<div class="alert alert-amber">Aún no hay usuarios. Toca "Invitar usuario" para empezar.</div>';
+    return;
+  }
+  const myEmail = localStorage.getItem(LS.EMAIL);
+  box.innerHTML = masters.users.map((u, i) => {
+    const isMe = u.email === myEmail;
+    const isRolAdmin = u.rol === 'ADMIN';
+    const projCount = isRolAdmin ? 'todas las obras' : (u.proyectos.length + ' obra(s)');
+    return `
+    <div class="card" style="${isMe ? 'border:1.5px solid var(--amber)' : ''}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:500">${u.nombre || u.email.split('@')[0]} ${isMe ? '<span style="color:var(--amber);font-size:11px;font-weight:400">(tú)</span>' : ''}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:3px;word-break:break-all">${u.email}</div>
+          <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">
+            <span class="badge" style="background:${isRolAdmin ? 'rgba(245,158,11,0.15)' : 'rgba(59,130,246,0.15)'};color:${isRolAdmin ? 'var(--amber)' : 'var(--blue)'};border:1px solid ${isRolAdmin ? 'var(--amber)' : 'var(--blue)'}">${u.rol}</span>
+            <span class="badge" style="background:var(--bg3);color:var(--text2)">${projCount}</span>
+          </div>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:10px">
+        <button class="btn btn-amber" style="padding:8px;font-size:12px" onclick="editarUsuario(${i})">Editar</button>
+        ${isMe
+          ? '<button class="btn" style="padding:8px;font-size:12px;opacity:0.5" disabled>Tú mismo</button>'
+          : `<button class="btn btn-red" style="padding:8px;font-size:12px" onclick="eliminarUsuario(${i})">Eliminar</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Para editar: reutilizamos la pantalla de invitar con el usuario pre-cargado
+let editingUserIdx = null;
+
+function editarUsuario(idx){
+  editingUserIdx = idx;
+  show('pg-invite');
+}
+
+async function eliminarUsuario(idx){
+  const u = masters.users[idx];
+  if(!u) return;
+  if(!confirm(`¿Eliminar al usuario ${u.email}? Perderá acceso pero sus facturas registradas se mantienen.`)) return;
+
+  loading(true, 'Eliminando', 'Actualizando USUARIOS...');
+  try {
+    const token = getToken();
+    const ssid = localStorage.getItem(LS.SSID);
+
+    // Obtener sheetId de USUARIOS para poder borrar la fila
+    const ssRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    const ssData = await ssRes.json();
+    const usrSheet = ssData.sheets.find(s => s.properties.title === 'USUARIOS');
+    if(!usrSheet) throw new Error('Hoja USUARIOS no encontrada');
+
+    // Encontrar fila real del usuario
+    const allUsers = await sheetsGet('USUARIOS!A2:D');
+    const rowIdx = (allUsers || []).findIndex(r => r[0] === u.email);
+    if(rowIdx < 0) throw new Error('Usuario no encontrado en Sheet');
+
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        requests: [{
+          deleteDimension: {
+            range: {
+              sheetId: usrSheet.properties.sheetId,
+              dimension: 'ROWS',
+              startIndex: rowIdx + 1, // +1 por header, luego -1 para 0-indexed... o sea rowIdx + 1
+              endIndex: rowIdx + 2
+            }
+          }
+        }]
+      })
+    });
+
+    await loadMasters();
+    loading(false);
+    toast('Usuario eliminado', 'ok');
+    initUsers();
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+  }
+}
+
+// ============================================================
+// INVITAR / EDITAR USUARIO
+// ============================================================
+function initInvite(){
+  const obrasBox = document.getElementById('inv-obras');
+
+  // Renderizar checkboxes de obras
+  const renderObrasCheckboxes = (selectedCodes) => {
+    if(masters.projects.length === 0){
+      obrasBox.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:8px">No hay obras creadas aún</div>';
+      return;
+    }
+    obrasBox.innerHTML = masters.projects.map(p => {
+      const checked = selectedCodes.includes(p.cod) ? 'checked' : '';
+      return `
+        <label style="display:flex;align-items:center;gap:10px;padding:8px 4px;cursor:pointer;border-bottom:1px solid var(--border)">
+          <input type="checkbox" value="${p.cod}" class="inv-obra-chk" ${checked} style="width:18px;height:18px;accent-color:var(--amber)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;color:var(--text)">${p.nombre}</div>
+            <div style="font-size:11px;color:var(--text2);font-family:var(--mono)">${p.cod}</div>
+          </div>
+        </label>
+      `;
+    }).join('');
+  };
+
+  if(editingUserIdx !== null){
+    // Modo editar
+    const u = masters.users[editingUserIdx];
+    document.getElementById('invite-title').textContent = 'Editar usuario';
+    document.getElementById('invite-sub').textContent = 'Cambia permisos y obras';
+    document.getElementById('inv-email').value = u.email;
+    document.getElementById('inv-email').disabled = true; // no cambiar email
+    document.getElementById('inv-nombre').value = u.nombre || '';
+    document.getElementById('inv-rol').value = u.rol || 'USUARIO';
+    renderObrasCheckboxes(u.proyectos || []);
+  } else {
+    // Modo invitar nuevo
+    document.getElementById('invite-title').textContent = 'Invitar usuario';
+    document.getElementById('invite-sub').textContent = 'Genera link de configuración';
+    document.getElementById('inv-email').value = '';
+    document.getElementById('inv-email').disabled = false;
+    document.getElementById('inv-nombre').value = '';
+    document.getElementById('inv-rol').value = 'USUARIO';
+    renderObrasCheckboxes([]);
+  }
+  document.getElementById('inv-err').style.display = 'none';
+  document.getElementById('inv-link-card').style.display = 'none';
+}
+
+async function guardarInvitacion(){
+  const err = document.getElementById('inv-err');
+  err.style.display = 'none';
+
+  const email = document.getElementById('inv-email').value.trim().toLowerCase();
+  const nombre = document.getElementById('inv-nombre').value.trim();
+  const rol = document.getElementById('inv-rol').value;
+  const obras = Array.from(document.querySelectorAll('.inv-obra-chk:checked')).map(c => c.value);
+
+  if(!email || !email.includes('@')){
+    err.textContent = 'Correo inválido'; err.style.display = 'block'; return;
+  }
+  if(!nombre){
+    err.textContent = 'Nombre es obligatorio'; err.style.display = 'block'; return;
+  }
+  if(rol === 'USUARIO' && obras.length === 0){
+    err.textContent = 'Debes asignar al menos una obra al usuario'; err.style.display = 'block'; return;
+  }
+
+  loading(true, 'Guardando', 'Actualizando USUARIOS...');
+  try {
+    const token = getToken();
+    const ssid = localStorage.getItem(LS.SSID);
+    const proyectosStr = obras.join(',');
+
+    if(editingUserIdx !== null){
+      // EDITAR: encontrar fila y actualizar
+      const allUsers = await sheetsGet('USUARIOS!A2:D');
+      const rowIdx = (allUsers || []).findIndex(r => r[0] === email);
+      if(rowIdx < 0) throw new Error('Usuario no encontrado para editar');
+      const rowNum = rowIdx + 2; // +1 por header, +1 para 1-indexed
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/USUARIOS!A${rowNum}:D${rowNum}?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({values: [[email, nombre, rol, proyectosStr]]})
+      });
+      await loadMasters();
+      loading(false);
+      toast('Usuario actualizado', 'ok');
+      editingUserIdx = null;
+      show('pg-users');
+      return;
+    }
+
+    // INVITAR NUEVO: verificar que no existe ya
+    if(masters.users.find(u => u.email === email)){
+      throw new Error('Ya existe un usuario con ese correo. Edítalo desde la lista.');
+    }
+
+    // Agregar fila al Sheet
+    await sheetsAppend('USUARIOS!A2', [[email, nombre, rol, proyectosStr]]);
+
+    // Generar link de invitación
+    const payload = {
+      k: localStorage.getItem(LS.GEMINI),
+      s: ssid
+    };
+    const encoded = btoa(JSON.stringify(payload));
+    const baseUrl = window.location.origin + window.location.pathname;
+    const link = `${baseUrl}#invite=${encodeURIComponent(encoded)}`;
+
+    // Guardar en variable global para usar en los botones de copiar/compartir
+    window._inviteLink = link;
+    window._inviteUserName = nombre;
+    document.getElementById('inv-link').textContent = link;
+    document.getElementById('inv-link-card').style.display = 'block';
+
+    await loadMasters();
+    loading(false);
+    toast('Usuario guardado. Comparte el link.', 'ok');
+  } catch(e){
+    loading(false);
+    err.textContent = 'Error: ' + e.message;
+    err.style.display = 'block';
+    console.error(e);
+  }
+}
+
+function copiarLinkInvitacion(){
+  if(!window._inviteLink){ toast('No hay link', 'err'); return; }
+  navigator.clipboard.writeText(window._inviteLink)
+    .then(() => toast('Link copiado', 'ok'))
+    .catch(() => toast('No se pudo copiar. Selecciónalo a mano.', 'err'));
+}
+
+async function compartirLinkInvitacion(){
+  if(!window._inviteLink){ toast('No hay link', 'err'); return; }
+  const texto = `Hola ${window._inviteUserName || ''}, aquí está tu acceso a Caja Chica Obras:\n\n${window._inviteLink}\n\nÁbrelo desde tu celular y autoriza con tu correo Google.`;
+  if(navigator.share){
+    try {
+      await navigator.share({title: 'Invitación a Caja Chica Obras', text: texto});
+    } catch(e){ /* usuario canceló */ }
+  } else {
+    // Fallback: WhatsApp web
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+  }
+}
+
+// ============================================================
+// CONSOLIDAR FACTURAS (copiar a mi Drive los archivos de otros users)
+// ============================================================
+
+// Verifica si hay facturas sin consolidar y muestra/oculta el banner del home
+async function checkConsolidarStatus(){
+  if(!isAdmin()) return;
+  const banner = document.getElementById('consolidar-banner');
+  const bannerText = document.getElementById('consolidar-banner-text');
+  const statusLabel = document.getElementById('consolidar-status');
+  if(!banner) return;
+
+  try {
+    const count = await contarFacturasSinConsolidar();
+    if(count > 0){
+      bannerText.textContent = `${count} factura(s) subida(s) por otros usuarios. Toca para consolidar.`;
+      banner.style.display = 'block';
+      if(statusLabel) statusLabel.textContent = `${count} factura(s) pendiente(s) de consolidar`;
+    } else {
+      banner.style.display = 'none';
+      if(statusLabel) statusLabel.textContent = 'Todas las facturas están consolidadas en tu Drive';
+    }
+  } catch(e){
+    banner.style.display = 'none';
+  }
+}
+
+async function contarFacturasSinConsolidar(){
+  const miEmail = localStorage.getItem(LS.EMAIL);
+  const raw = await sheetsGet('REGISTRO!A1:Z');
+  if(!raw || raw.length < 2) return 0;
+  const H = {};
+  (raw[0] || []).forEach((h, i) => H[h] = i);
+  if(H.URL_FACTURA === undefined || H.USUARIO === undefined) return 0;
+
+  return raw.slice(1).filter(r => {
+    if(!r[H.ID] || !r[H.URL_FACTURA]) return false;
+    // Si el USUARIO es distinto al admin actual, y tiene URL, está sin consolidar
+    return r[H.USUARIO] && r[H.USUARIO] !== miEmail;
+  }).length;
+}
+
+async function consolidarFacturas(){
+  if(!confirm('Esto copiará a tu Drive las fotos subidas por otros usuarios. Puede tomar varios minutos si hay muchas. ¿Continuar?')) return;
+
+  const miEmail = localStorage.getItem(LS.EMAIL);
+  loading(true, 'Consolidando', 'Leyendo REGISTRO...');
+  try {
+    const raw = await sheetsGet('REGISTRO!A1:Z');
+    if(!raw || raw.length < 2){ loading(false); toast('Nada que consolidar', 'err'); return; }
+
+    const H = {};
+    (raw[0] || []).forEach((h, i) => H[h] = i);
+    if(H.URL_FACTURA === undefined || H.USUARIO === undefined) throw new Error('Faltan columnas URL_FACTURA o USUARIO');
+
+    const rows = raw.slice(1);
+    const token = getToken();
+    const ssid = localStorage.getItem(LS.SSID);
+    const rootId = await ensureFolder(ROOT_FOLDER, null);
+
+    let consolidadas = 0, omitidas = 0, errores = 0;
+
+    for(let i = 0; i < rows.length; i++){
+      const r = rows[i];
+      if(!r[H.ID] || !r[H.URL_FACTURA]){ omitidas++; continue; }
+      if(r[H.USUARIO] === miEmail){ omitidas++; continue; } // Ya es mía
+
+      loading(true, 'Consolidando', `Fila ${i+1} de ${rows.length}: ${r[H.SUPLIDOR] || ''}...`);
+
+      const sheetRow = i + 2; // 1-indexed + header
+      const url = r[H.URL_FACTURA];
+      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(!m){ errores++; continue; }
+      const origenFileId = m[1];
+
+      try {
+        // 1) Obtener metadata del archivo origen
+        const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?fields=name,mimeType`, {
+          headers: {'Authorization': 'Bearer ' + token}
+        });
+        if(!metaRes.ok){
+          // Sin acceso al archivo de otro usuario → error esperado si no lo compartió contigo
+          errores++;
+          console.warn(`No hay acceso al archivo ${origenFileId} (fila ${sheetRow})`);
+          continue;
+        }
+        const meta = await metaRes.json();
+
+        // 2) Descargar el contenido
+        const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?alt=media`, {
+          headers: {'Authorization': 'Bearer ' + token}
+        });
+        if(!downloadRes.ok){ errores++; continue; }
+        const blob = await downloadRes.blob();
+
+        // 3) Determinar carpeta destino (carpeta del proyecto en mi Drive; papelera si eliminado)
+        const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
+        const projCod = r[H.PROYECTO];
+        const proj = masters.projects.find(p => p.cod === projCod);
+        const projFolderName = proj ? `${projCod} - ${proj.nombre}` : projCod;
+        const projId = await ensureFolder(projFolderName, rootId);
+        const destId = eliminado ? await ensureFolder('Papelera', projId) : projId;
+
+        // 4) Subir a mi Drive
+        const boundary = '-------consolidar' + Math.random().toString(36).slice(2);
+        const metadata = {
+          name: meta.name || `consolidada-${r[H.ID]}.jpg`,
+          mimeType: meta.mimeType || 'image/jpeg',
+          parents: [destId]
+        };
+        const body = new Blob([
+          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
+          JSON.stringify(metadata),
+          `\r\n--${boundary}\r\nContent-Type: ${metadata.mimeType}\r\n\r\n`,
+          blob,
+          `\r\n--${boundary}--`
+        ]);
+        const upRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+          method: 'POST',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}`},
+          body: body
+        });
+        if(!upRes.ok){ errores++; continue; }
+        const upData = await upRes.json();
+        const nuevaUrl = `https://drive.google.com/file/d/${upData.id}/view`;
+
+        // 5) Actualizar celdas en el Sheet: URL_FACTURA y USUARIO
+        const col = idx => String.fromCharCode(65 + idx);
+        const updates = [
+          {range: `REGISTRO!${col(H.URL_FACTURA)}${sheetRow}`, values: [[nuevaUrl]]},
+          {range: `REGISTRO!${col(H.USUARIO)}${sheetRow}`, values: [[miEmail]]}
+        ];
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchUpdate`, {
+          method: 'POST',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: updates})
+        });
+
+        consolidadas++;
+        await new Promise(r => setTimeout(r, 150)); // Delay anti-rate-limit
+      } catch(e){
+        errores++;
+        console.error('Error en fila ' + sheetRow + ':', e);
+      }
+    }
+
+    loading(false);
+    toast(`Consolidación completa: ${consolidadas} copiadas, ${omitidas} omitidas, ${errores} errores`, 'ok');
+    checkConsolidarStatus();
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+
+// ============================================================
 // INIT
 // ============================================================
+
+// Procesa parámetros de invitación del URL si existen (hash fragment por seguridad)
+// Formato: https://.../#invite=BASE64({k: geminiKey, s: ssid})
+function processInviteHash(){
+  const hash = window.location.hash;
+  if(!hash || !hash.includes('invite=')) return false;
+  try {
+    const match = hash.match(/invite=([^&]+)/);
+    if(!match) return false;
+    const payload = JSON.parse(atob(decodeURIComponent(match[1])));
+    // Aplicar configuración recibida
+    if(payload.k) localStorage.setItem(LS.GEMINI, payload.k);
+    if(payload.s) localStorage.setItem(LS.SSID, payload.s);
+    // Si viene otro Client ID, se ignora — el que usa la app viene hardcodeado
+    // Limpiar hash del URL para no exponer secretos en historial
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    return true;
+  } catch(e){
+    console.error('Link de invitación inválido:', e);
+    return false;
+  }
+}
+
 (async () => {
   loading(true, 'Iniciando', 'Cargando...');
+
+  // Aplicar configuración de invitación si aplica (antes del primer check)
+  const fromInvite = processInviteHash();
+
   // Esperar carga de librería Google
   await new Promise(r => {
     const check = () => window.google ? r() : setTimeout(check, 100);
@@ -3254,6 +3860,9 @@ async function syncDriveFilesWithSheet(){
   if(!hasToken || !hasSSID || !hasGemini){
     loading(false);
     show('pg-setup');
+    if(fromInvite){
+      toast('Configuración recibida. Solo autoriza con Google para terminar.', 'ok');
+    }
     if(hasToken) document.getElementById('gauth-status').innerHTML = '✓ Conectado: ' + localStorage.getItem(LS.EMAIL);
     if(hasGemini) document.getElementById('gemini-status').innerHTML = '<span style="color:var(--green)">✓ Clave configurada</span>';
     if(hasSSID) document.getElementById('ssid-status').innerHTML = '<span style="color:var(--green)">✓ Base configurada</span>';
