@@ -312,6 +312,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       Generar reporte de balance
     </button>
 
+    <button class="btn" onclick="show('pg-facturas')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M3 9h18"/></svg>
+      Mis facturas — editar / eliminar
+    </button>
+
     <div id="home-recent" style="display:none">
       <div style="display:flex;align-items:center;justify-content:space-between;margin:4px 0 8px">
         <span style="font-size:11px;color:var(--text2);font-weight:500;text-transform:uppercase;letter-spacing:.05em">Últimos registros</span>
@@ -333,7 +338,182 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="topbar-sub">Obras asignadas a tu usuario</div>
     </div>
   </div>
-  <div class="body" id="proj-list"></div>
+  <div class="body">
+    <button class="btn btn-green" onclick="show('pg-new-proj')" style="margin-bottom:14px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Nueva obra
+    </button>
+    <div id="proj-list"></div>
+  </div>
+</div>
+
+<!-- ========== PAGE: NEW PROJECT ========== -->
+<div class="page" id="pg-new-proj">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-proj-select')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Nueva obra</div>
+      <div class="topbar-sub">Se crea la carpeta en Drive automáticamente</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="card">
+      <div class="field">
+        <div class="lbl">Código <span style="color:var(--text3);font-weight:400">(ej. OBR-2026-003)</span></div>
+        <input type="text" id="np-cod" placeholder="OBR-2026-XXX" style="font-family:var(--mono);text-transform:uppercase">
+      </div>
+      <div class="field">
+        <div class="lbl">Nombre</div>
+        <input type="text" id="np-nombre" placeholder="Nombre del proyecto">
+      </div>
+      <div class="field">
+        <div class="lbl">Ubicación</div>
+        <input type="text" id="np-ubic" placeholder="Santo Domingo, Santiago, etc.">
+      </div>
+      <div class="field">
+        <div class="lbl">Fondo inicial (RD$)</div>
+        <input type="number" id="np-fondo" placeholder="0.00" min="0" step="0.01" style="font-family:var(--mono)">
+      </div>
+      <div id="np-err" class="alert alert-red" style="display:none"></div>
+      <button class="btn btn-green" onclick="createProject()" style="padding:13px">Crear obra</button>
+    </div>
+    <div style="font-size:11px;color:var(--text2);line-height:1.5;padding:0 4px">
+      Al crear la obra:<br>
+      • Se agrega al Sheet en la hoja PROYECTOS<br>
+      • Se crea la carpeta <span style="font-family:var(--mono)">/Caja Chica Obras/{COD - Nombre}/</span> en Drive<br>
+      • Se crea la subcarpeta <span style="font-family:var(--mono)">/Papelera/</span>
+    </div>
+  </div>
+</div>
+
+<!-- ========== PAGE: MIS FACTURAS ========== -->
+<div class="page" id="pg-facturas">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-home')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Mis facturas</div>
+      <div class="topbar-sub" id="fac-sub">Editar o eliminar registros</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="card" style="padding:12px">
+      <div class="field" style="margin-bottom:8px">
+        <div class="lbl">Obra</div>
+        <select id="fac-filtro-obra"></select>
+      </div>
+      <div class="grid2">
+        <div class="field" style="margin-bottom:0">
+          <div class="lbl">Estado</div>
+          <select id="fac-filtro-estado">
+            <option value="activas">Activas</option>
+            <option value="eliminadas">Papelera</option>
+            <option value="todas">Todas</option>
+          </select>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <div class="lbl">Buscar</div>
+          <input type="text" id="fac-filtro-buscar" placeholder="Suplidor, NCF...">
+        </div>
+      </div>
+      <button class="btn btn-amber" onclick="loadFacturas()" style="margin-top:10px;padding:11px">Buscar</button>
+    </div>
+    <div id="fac-lista"></div>
+  </div>
+</div>
+
+<!-- ========== PAGE: EDITAR FACTURA ========== -->
+<div class="page" id="pg-editar">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-facturas')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Editar factura</div>
+      <div class="topbar-sub" id="ed-sub">—</div>
+    </div>
+  </div>
+  <div class="body">
+    <div id="ed-img-wrap" style="display:none">
+      <img id="ed-img" alt="" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);cursor:pointer" onclick="verFotoUrl(this.src)">
+    </div>
+
+    <div class="field">
+      <div class="lbl">Obra</div>
+      <select id="ed-proj"></select>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <div class="lbl">Fecha factura</div>
+        <input type="date" id="ed-fecha">
+      </div>
+      <div class="field">
+        <div class="lbl">No. de reporte</div>
+        <input type="text" id="ed-reporte" style="font-family:var(--mono)">
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="lbl">Suplidor</div>
+      <input type="text" id="ed-sup" list="sup-list">
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <div class="lbl">RNC / Cédula</div>
+        <input type="text" id="ed-rnc" style="font-family:var(--mono)">
+      </div>
+      <div class="field">
+        <div class="lbl">Categoría</div>
+        <select id="ed-cat"></select>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="lbl">NCF / e-CF</div>
+      <input type="text" id="ed-ncf" style="font-family:var(--mono);text-transform:uppercase" oninput="validateNCFLiveEd()">
+      <div id="ed-ncf-status" class="ncf-status"></div>
+    </div>
+
+    <div class="field">
+      <div class="lbl">Monto (RD$)</div>
+      <input type="number" id="ed-monto" min="0" step="0.01" style="font-family:var(--mono);font-size:22px;font-weight:600;color:var(--amber)">
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <div class="lbl">Tipo</div>
+        <select id="ed-tipo">
+          <option value="GASTO">Gasto</option>
+          <option value="ANTICIPO">Anticipo</option>
+          <option value="REEMBOLSO">Reembolso</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="lbl">Aprobado</div>
+        <select id="ed-aprobado">
+          <option value="SI">SI</option>
+          <option value="PENDIENTE">PENDIENTE</option>
+          <option value="REVISAR">REVISAR</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="lbl">Observaciones</div>
+      <textarea id="ed-obs"></textarea>
+    </div>
+
+    <div id="ed-err" class="alert alert-red" style="display:none"></div>
+
+    <button class="btn btn-amber" onclick="saveEdit()" style="padding:14px">
+      Guardar cambios
+    </button>
+  </div>
 </div>
 
 <!-- ========== PAGE: CONFIRM REGISTRO ========== -->
@@ -553,7 +733,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div class="card">
       <h3>Mantenimiento</h3>
       <button class="btn btn-amber" onclick="repairFormulas()">Reparar fórmulas del Dashboard</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Úsalo una vez si el balance muestra valores incorrectos (ej. el mismo balance para todas las obras).</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
+      <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="margin-top:10px">Sincronizar archivos con Sheet</button>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
       <button class="btn btn-red" onclick="resetApp()" style="margin-top:10px">Borrar todo y empezar de cero</button>
     </div>
 
@@ -619,6 +801,8 @@ function show(id){
   }
   if(id==='pg-abono') document.getElementById('ab-fecha').value = today();
   if(id==='pg-reportes') initReportes();
+  if(id==='pg-new-proj') initNewProj();
+  if(id==='pg-facturas') initFacturas();
 }
 
 function loading(on, title, msg){
@@ -834,7 +1018,10 @@ async function sheetsAppend(range, values){
     const err = await r.text();
     throw new Error('Error escribiendo filas: ' + err);
   }
-  return r.json();
+  const json = await r.json();
+  // Asegurar que updatedRange esté presente (Google Sheets lo retorna como updatedRange en updatedCells, no en root)
+  // El formato de respuesta PUT es: {spreadsheetId, updatedRange, updatedRows, updatedColumns, updatedCells}
+  return {...json, startRow: nextRow, updatedRange: json.updatedRange || writeRange};
 }
 
 async function sheetsBatchGet(ranges){
@@ -882,11 +1069,11 @@ async function createNewSheet(){
     // 2. Poblar con headers y datos iniciales (un solo batchUpdate)
     const email = localStorage.getItem(LS.EMAIL);
     const data = [
-      {range: 'REGISTRO!A1:W1', values: [[
+      {range: 'REGISTRO!A1:X1', values: [[
         'ID','PROYECTO','NO_REPORTE','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF',
         'VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO',
         'APROBADO','OBSERVACIONES','URL_FACTURA','USUARIO','OCR_STATUS',
-        'OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO'
+        'OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO','ELIMINADO'
       ]]},
       {range: 'PROYECTOS!A1:F1', values: [['COD_PROYECTO','NOMBRE','UBICACION','FONDO_INICIAL','ESTADO','USUARIOS_ASIGNADOS']]},
       {range: 'PROYECTOS!A2:F3', values: [
@@ -936,11 +1123,12 @@ async function createNewSheet(){
       body: JSON.stringify({values: regFormulas})
     });
 
-    // Columna W: MONTO_APROBADO (MONTO si APROBADO=SI, 0 si no). MONTO está en M, APROBADO en N.
+    // Columna W: MONTO_APROBADO (MONTO si APROBADO=SI y NO está ELIMINADO). MONTO=M, APROBADO=N, ELIMINADO=X.
+    // Usamos multiplicación lógica (N:N="SI")*(X:X<>"SI") porque AND() no vectoriza en ARRAYFORMULA
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF(N:N="SI",IFERROR(M:M*1,0),0)))']]})
+      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF((N:N="SI")*(X:X<>"SI"),IFERROR(M:M*1,0),0)))']]})
     });
 
     // 5. Mover el Spreadsheet a la carpeta raíz de caja chica
@@ -1507,25 +1695,42 @@ async function syncAll(){
       }
     }
 
-    // 2) Preparar filas para REGISTRO (nueva estructura: NO_REPORTE en C, sin ITBIS)
-    // Orden: ID, PROYECTO, NO_REPORTE, FECHA_REGISTRO, FECHA_FACTURA, SUPLIDOR, RNC, NCF,
-    //        VAL_NCF(fórmula), DUP(fórmula), CATEGORIA, TIPO, MONTO, APROBADO, OBSERVACIONES,
-    //        URL_FACTURA, USUARIO, OCR_STATUS, OCR_CONFIDENCE, EXPORTADO, FECHA_EXPORT, LOTE_EXPORT
-    const regRows = gastos.map(e => [
+    // 2) Preparar filas para REGISTRO (evita tocar W=MONTO_APROBADO que es fórmula)
+    // Escribimos A:V (22 cols) + Y separado (ELIMINADO en col 25)
+    const regRowsMain = gastos.map(e => [
       e.id, e.proyecto, e.no_reporte || '', e.fecha_registro.slice(0,10), e.fecha_factura,
       e.suplidor, e.rnc, (e.ncf || '').toUpperCase(),
-      '', '', // VALIDACION_NCF y DUPLICADO son fórmulas (ARRAYFORMULA en I1/J1), NO escribir aquí
+      '', '', // VALIDACION_NCF y DUPLICADO son fórmulas, NO escribir
       e.categoria, e.tipo, e.monto,
       e.aprobado, e.observaciones, e.url_factura || '',
       e.usuario, e.ocr_status, e.ocr_confidence || 0,
       'NO', '', ''
     ]);
+    const regRowsEliminado = gastos.map(e => ['NO']);
     const ingRows = abonos.map(e => [
       e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia
     ]);
 
-    // 3) Append masivo (una sola llamada por hoja)
-    if(regRows.length > 0) await sheetsAppend('REGISTRO!A2', regRows);
+    // 3) Append masivo — escribir A-V primero (sin tocar W=fórmula), luego X=ELIMINADO
+    let startRowReg = 0;
+    if(regRowsMain.length > 0){
+      const appendRes = await sheetsAppend('REGISTRO!A2', regRowsMain);
+      // Extraer la fila donde empezó la escritura para poder poner ELIMINADO en X
+      const updatedRange = appendRes.updatedRange || '';
+      // updatedRange tiene formato "REGISTRO!A5:V7" — extraer 5
+      const m = updatedRange.match(/!A(\d+):/);
+      if(m) startRowReg = parseInt(m[1]);
+      if(startRowReg > 0 && regRowsEliminado.length > 0){
+        const xRange = `REGISTRO!X${startRowReg}`;
+        const token = getToken();
+        const ssid = localStorage.getItem(LS.SSID);
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(xRange)}?valueInputOption=USER_ENTERED`, {
+          method: 'PUT',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: regRowsEliminado})
+        });
+      }
+    }
     if(ingRows.length > 0) await sheetsAppend('INGRESOS!A2', ingRows);
 
     // 4) Limpiar pendientes
@@ -1671,9 +1876,9 @@ async function refreshData(){
 }
 
 // Repara fórmulas del DASHBOARD + migra estructura del Sheet a la versión actual
-// (inserta columna NO_REPORTE en C si no existe, actualiza fórmulas)
+// (inserta columna NO_REPORTE en C si no existe, agrega ELIMINADO en X, actualiza fórmulas)
 async function repairFormulas(){
-  if(!confirm('Esto migrará el Sheet a la estructura actualizada: agrega columna NO_REPORTE y repara las fórmulas. Tus datos existentes se preservan. ¿Continuar?')) return;
+  if(!confirm('Esto migrará el Sheet a la estructura actualizada: agrega columnas NO_REPORTE y ELIMINADO, actualiza las fórmulas. Tus datos se preservan. ¿Continuar?')) return;
 
   const token = getToken();
   if(!token){ toast('Sesión expirada', 'err'); return; }
@@ -1691,11 +1896,12 @@ async function repairFormulas(){
     if(!regSheet) throw new Error('Hoja REGISTRO no encontrada');
     const regSheetId = regSheet.properties.sheetId;
 
-    const headers = await sheetsGet('REGISTRO!A1:Z1');
-    const headerRow = headers[0] || [];
+    let headers = await sheetsGet('REGISTRO!A1:Z1');
+    let headerRow = headers[0] || [];
     const hasNoReporte = headerRow.includes('NO_REPORTE');
+    const hasEliminado = headerRow.includes('ELIMINADO');
 
-    // 2. Si no tiene NO_REPORTE, insertarla en columna C
+    // 2. Insertar NO_REPORTE en columna C si no existe
     if(!hasNoReporte){
       loading(true, 'Migrando', 'Insertando columna NO_REPORTE...');
       await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
@@ -1704,19 +1910,12 @@ async function repairFormulas(){
         body: JSON.stringify({
           requests: [{
             insertDimension: {
-              range: {
-                sheetId: regSheetId,
-                dimension: 'COLUMNS',
-                startIndex: 2,  // columna C (0-indexed)
-                endIndex: 3
-              },
+              range: {sheetId: regSheetId, dimension: 'COLUMNS', startIndex: 2, endIndex: 3},
               inheritFromBefore: false
             }
           }]
         })
       });
-
-      // 3. Poner el header NO_REPORTE en C1
       await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!C1?valueInputOption=USER_ENTERED`, {
         method: 'PUT',
         headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
@@ -1724,15 +1923,40 @@ async function repairFormulas(){
       });
     }
 
-    // 4. Reescribir fórmulas MONTO_APROBADO con las nuevas posiciones (M=MONTO, N=APROBADO)
+    // 3. Agregar ELIMINADO en posición X (columna 24) al final si no existe
+    if(!hasEliminado){
+      loading(true, 'Migrando', 'Agregando columna ELIMINADO...');
+      // Re-leer headers por si se movieron tras insertar NO_REPORTE
+      headers = await sheetsGet('REGISTRO!A1:Z1');
+      headerRow = headers[0] || [];
+      // Agregar ELIMINADO justo después del último header existente (sin dejar huecos)
+      let targetCol = headerRow.length + 1; // 1-indexed
+      // Si MONTO_APROBADO (W) no existe, asegurarnos que esté antes de ELIMINADO (X)
+      if(!headerRow.includes('MONTO_APROBADO')){
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
+          method: 'PUT',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [['MONTO_APROBADO']]})
+        });
+        targetCol = 24; // X
+      }
+      const colLetter = String.fromCharCode(64 + targetCol); // A=65, X=88
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!${colLetter}1?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({values: [['ELIMINADO']]})
+      });
+    }
+
+    // 4. Reescribir fórmula MONTO_APROBADO (MONTO * aprobado * no-eliminado)
     loading(true, 'Migrando', 'Actualizando fórmulas...');
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF(N:N="SI",IFERROR(M:M*1,0),0)))']]})
+      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF((N:N="SI")*(X:X<>"SI"),IFERROR(M:M*1,0),0)))']]})
     });
 
-    // 5. Fórmulas de DASHBOARD (balance por proyecto)
+    // 5. Fórmulas de DASHBOARD
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/DASHBOARD!A2:C2?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
@@ -1744,7 +1968,7 @@ async function repairFormulas(){
     });
 
     loading(false);
-    toast(hasNoReporte ? 'Fórmulas actualizadas' : 'Migración completa', 'ok');
+    toast('Migración completa', 'ok');
     setTimeout(() => refreshBalance(true), 800);
   } catch(e){
     loading(false);
@@ -1978,6 +2202,725 @@ function imprimirReporte(){
   // Ventaja en iOS PWA: al cerrar el diálogo de impresión vuelves naturalmente a la app,
   // sin quedar trabado en una ventana emergente.
   window.print();
+}
+
+// ============================================================
+// CREAR NUEVO PROYECTO (con carpeta en Drive)
+// ============================================================
+function initNewProj(){
+  document.getElementById('np-cod').value = '';
+  document.getElementById('np-nombre').value = '';
+  document.getElementById('np-ubic').value = '';
+  document.getElementById('np-fondo').value = '';
+  document.getElementById('np-err').style.display = 'none';
+  // Sugerir siguiente código
+  const year = new Date().getFullYear();
+  const nums = masters.projects
+    .map(p => p.cod.match(new RegExp('OBR-' + year + '-(\\d+)')))
+    .filter(m => m).map(m => parseInt(m[1]));
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  document.getElementById('np-cod').placeholder = `OBR-${year}-${String(next).padStart(3,'0')}`;
+}
+
+async function createProject(){
+  const err = document.getElementById('np-err');
+  err.style.display = 'none';
+
+  const cod = document.getElementById('np-cod').value.trim().toUpperCase();
+  const nombre = document.getElementById('np-nombre').value.trim();
+  const ubic = document.getElementById('np-ubic').value.trim();
+  const fondo = parseFloat(document.getElementById('np-fondo').value) || 0;
+
+  if(!cod || !nombre){
+    err.textContent = 'Código y nombre son obligatorios';
+    err.style.display = 'block'; return;
+  }
+  if(masters.projects.find(p => p.cod === cod)){
+    err.textContent = 'Ya existe una obra con ese código';
+    err.style.display = 'block'; return;
+  }
+
+  loading(true, 'Creando obra', 'Agregando al Sheet...');
+  try {
+    const email = localStorage.getItem(LS.EMAIL);
+
+    // 1) Agregar fila al Sheet PROYECTOS
+    await sheetsAppend('PROYECTOS!A2', [[cod, nombre, ubic, fondo, 'ACTIVO', email]]);
+
+    // 2) Agregar usuario actual a la obra en USUARIOS (si ya está, agregar cod a su lista)
+    const usrData = await sheetsGet('USUARIOS!A2:D');
+    const usrRows = usrData || [];
+    const myIdx = usrRows.findIndex(r => r[0] === email);
+    if(myIdx >= 0){
+      const currentProjs = (usrRows[myIdx][3] || '').split(',').map(s => s.trim()).filter(Boolean);
+      if(!currentProjs.includes(cod)){
+        currentProjs.push(cod);
+        const rowNum = myIdx + 2;
+        const token = getToken();
+        const ssid = localStorage.getItem(LS.SSID);
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/USUARIOS!D${rowNum}?valueInputOption=USER_ENTERED`, {
+          method: 'PUT',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [[currentProjs.join(',')]]})
+        });
+      }
+    }
+
+    // 3) Crear carpetas en Drive
+    loading(true, 'Creando obra', 'Creando carpetas en Drive...');
+    const rootId = await ensureFolder(ROOT_FOLDER, null);
+    const projFolderName = `${cod} - ${nombre}`;
+    const projFolderId = await ensureFolder(projFolderName, rootId);
+    await ensureFolder('Papelera', projFolderId);
+
+    // 4) Refrescar masters y seleccionar la nueva obra
+    await loadMasters();
+    const nueva = masters.projects.find(p => p.cod === cod);
+    if(nueva){
+      localStorage.setItem(LS.PROJ, JSON.stringify(nueva));
+    }
+
+    loading(false);
+    toast('Obra creada: ' + cod, 'ok');
+    show('pg-home');
+    refreshBalance(true);
+  } catch(e){
+    loading(false);
+    err.textContent = 'Error: ' + e.message;
+    err.style.display = 'block';
+    console.error(e);
+  }
+}
+
+// ============================================================
+// MIS FACTURAS — Lista con filtros + editar/eliminar
+// ============================================================
+let facturasCache = [];  // cache de la última carga
+let facturasHeaders = {}; // mapeo header->índice
+
+function initFacturas(){
+  // Llenar dropdown de obras
+  const sel = document.getElementById('fac-filtro-obra');
+  sel.innerHTML = '<option value="">— Todas las obras —</option>' +
+    masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
+
+  const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+  if(currentProj) sel.value = currentProj.cod;
+
+  document.getElementById('fac-filtro-estado').value = 'activas';
+  document.getElementById('fac-filtro-buscar').value = '';
+  document.getElementById('fac-lista').innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px 0;font-size:13px">Selecciona filtros y toca Buscar</div>';
+}
+
+async function loadFacturas(){
+  const obra = document.getElementById('fac-filtro-obra').value;
+  const estado = document.getElementById('fac-filtro-estado').value;
+  const buscar = document.getElementById('fac-filtro-buscar').value.trim().toLowerCase();
+
+  loading(true, 'Cargando', 'Leyendo facturas...');
+  try {
+    const raw = await sheetsGet('REGISTRO!A1:Z');
+    if(!raw || raw.length === 0){
+      document.getElementById('fac-lista').innerHTML = '<div class="alert alert-amber">REGISTRO vacío</div>';
+      loading(false); return;
+    }
+
+    // Mapeo por header
+    facturasHeaders = {};
+    (raw[0] || []).forEach((h, i) => facturasHeaders[h] = i);
+    const H = facturasHeaders;
+
+    if(H.PROYECTO === undefined || H.FECHA_FACTURA === undefined || H.MONTO === undefined){
+      throw new Error('Faltan columnas. Corre "Reparar fórmulas" en Settings.');
+    }
+
+    const rows = raw.slice(1);
+    const filtered = rows.filter(r => {
+      if(!r[H.ID]) return false;
+      const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
+      if(estado === 'activas' && eliminado) return false;
+      if(estado === 'eliminadas' && !eliminado) return false;
+      if(obra && r[H.PROYECTO] !== obra) return false;
+      if(buscar){
+        const text = ((r[H.SUPLIDOR] || '') + ' ' + (r[H.NCF] || '') + ' ' + (r[H.NO_REPORTE] || '')).toLowerCase();
+        if(!text.includes(buscar)) return false;
+      }
+      return true;
+    }).map((r, i) => {
+      // Guardar índice de fila original en el Sheet (para saber dónde escribir al editar)
+      const origIdx = rows.indexOf(r);
+      return {row: r, sheetRow: origIdx + 2}; // +2 porque sheets es 1-indexed y hay header
+    });
+
+    facturasCache = filtered;
+    renderFacturas();
+    document.getElementById('fac-sub').textContent = filtered.length + ' factura(s) encontrada(s)';
+    loading(false);
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+function renderFacturas(){
+  const box = document.getElementById('fac-lista');
+  if(facturasCache.length === 0){
+    box.innerHTML = '<div class="alert alert-amber" style="margin-top:14px">Ninguna factura cumple los filtros</div>';
+    return;
+  }
+  const H = facturasHeaders;
+  box.innerHTML = facturasCache.map((f, i) => {
+    const r = f.row;
+    const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
+    const url = r[H.URL_FACTURA] || '';
+    const proj = masters.projects.find(p => p.cod === r[H.PROYECTO]);
+    const catName = (masters.categories.find(c => c.cod === r[H.CATEGORIA]) || {nombre: r[H.CATEGORIA] || ''}).nombre;
+    return `
+    <div class="card" style="${eliminado ? 'opacity:0.6' : ''}">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        ${url ? `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;color:var(--text2);cursor:pointer" onclick="verFotoDrive('${url}')" title="Ver foto">📄</div>` : '<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">−</div>'}
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:500">${r[H.SUPLIDOR] || '(sin suplidor)'}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">
+                ${r[H.PROYECTO]} · ${r[H.FECHA_FACTURA] || ''}
+                ${r[H.NO_REPORTE] ? ' · <span style="font-family:var(--mono);color:var(--amber)">'+r[H.NO_REPORTE]+'</span>' : ''}
+              </div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">
+                ${catName} ${r[H.NCF] ? ' · <span style="font-family:var(--mono)">'+r[H.NCF]+'</span>' : ''}
+              </div>
+              ${eliminado ? '<span class="badge badge-bad" style="margin-top:6px">ELIMINADO</span>' : ''}
+            </div>
+            <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--red);white-space:nowrap">${fmt(parseFloat(r[H.MONTO])||0)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:10px">
+        ${eliminado
+          ? `<button class="btn btn-green" style="padding:8px;font-size:12px" onclick="restaurarFactura(${i})">Restaurar</button>
+             <button class="btn btn-red" style="padding:8px;font-size:12px" onclick="eliminarFacturaPermanente(${i})">Borrar definitivo</button>`
+          : `<button class="btn btn-amber" style="padding:8px;font-size:12px" onclick="editarFactura(${i})">Editar</button>
+             <button class="btn btn-red" style="padding:8px;font-size:12px" onclick="eliminarFactura(${i})">Eliminar</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function verFotoDrive(url){
+  // Extraer ID del archivo de Drive de la URL
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if(!m){ window.open(url, '_blank'); return; }
+  const fileId = m[1];
+  // Usar el endpoint de preview
+  showModal(`
+    <div style="text-align:center">
+      <img src="https://drive.google.com/thumbnail?id=${fileId}&sz=w1600" style="max-width:100%;max-height:65vh;border-radius:8px;object-fit:contain" onerror="this.onerror=null;this.style.display='none';this.nextElementSibling.style.display='block'">
+      <div style="display:none;color:var(--text2);padding:30px">No se pudo cargar la vista previa.<br><a href="${url}" target="_blank" style="color:var(--blue)">Abrir en Drive</a></div>
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:center">
+        <button class="btn" onclick="window.open('${url}','_blank')">Abrir en Drive</button>
+        <button class="btn" onclick="closeModal()">Cerrar</button>
+      </div>
+    </div>
+  `);
+}
+
+function verFotoUrl(src){
+  showModal(`
+    <div style="text-align:center">
+      <img src="${src}" style="max-width:100%;max-height:65vh;border-radius:8px;object-fit:contain">
+      <button class="btn" onclick="closeModal()" style="margin-top:14px">Cerrar</button>
+    </div>
+  `);
+}
+
+// ============================================================
+// EDITAR FACTURA
+// ============================================================
+let editContext = null;  // {sheetRow, original: {...}}
+
+function editarFactura(idx){
+  const f = facturasCache[idx];
+  const H = facturasHeaders;
+  const r = f.row;
+
+  editContext = {
+    sheetRow: f.sheetRow,
+    original: {
+      proyecto: r[H.PROYECTO] || '',
+      fecha: r[H.FECHA_FACTURA] || '',
+      suplidor: r[H.SUPLIDOR] || '',
+      rnc: r[H.RNC] || '',
+      ncf: r[H.NCF] || '',
+      categoria: r[H.CATEGORIA] || '',
+      tipo: r[H.TIPO] || 'GASTO',
+      monto: parseFloat(r[H.MONTO]) || 0,
+      aprobado: r[H.APROBADO] || 'SI',
+      no_reporte: H.NO_REPORTE !== undefined ? (r[H.NO_REPORTE] || '') : '',
+      observaciones: r[H.OBSERVACIONES] || '',
+      url_factura: r[H.URL_FACTURA] || '',
+      id: r[H.ID] || ''
+    }
+  };
+
+  // Llenar dropdowns
+  const pSel = document.getElementById('ed-proj');
+  pSel.innerHTML = masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
+  pSel.value = editContext.original.proyecto;
+
+  const cSel = document.getElementById('ed-cat');
+  cSel.innerHTML = masters.categories.map(c => `<option value="${c.cod}">${c.nombre}</option>`).join('');
+  cSel.value = editContext.original.categoria;
+
+  // Llenar campos
+  document.getElementById('ed-fecha').value = editContext.original.fecha;
+  document.getElementById('ed-reporte').value = editContext.original.no_reporte;
+  document.getElementById('ed-sup').value = editContext.original.suplidor;
+  document.getElementById('ed-rnc').value = editContext.original.rnc;
+  document.getElementById('ed-ncf').value = editContext.original.ncf;
+  document.getElementById('ed-monto').value = editContext.original.monto;
+  document.getElementById('ed-tipo').value = editContext.original.tipo;
+  document.getElementById('ed-aprobado').value = editContext.original.aprobado;
+  document.getElementById('ed-obs').value = editContext.original.observaciones;
+
+  // Thumbnail
+  const imgWrap = document.getElementById('ed-img-wrap');
+  const img = document.getElementById('ed-img');
+  if(editContext.original.url_factura){
+    const m = editContext.original.url_factura.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if(m){
+      img.src = `https://drive.google.com/thumbnail?id=${m[1]}&sz=w1200`;
+      imgWrap.style.display = 'block';
+    } else imgWrap.style.display = 'none';
+  } else imgWrap.style.display = 'none';
+
+  document.getElementById('ed-sub').textContent = 'ID: ' + editContext.original.id;
+  document.getElementById('ed-err').style.display = 'none';
+  validateNCFLiveEd();
+  show('pg-editar');
+}
+
+function validateNCFLiveEd(){
+  const v = document.getElementById('ed-ncf').value.toUpperCase().replace(/\s/g, '');
+  document.getElementById('ed-ncf').value = v;
+  const s = document.getElementById('ed-ncf-status');
+  if(!v){ s.className = 'ncf-status'; s.textContent = ''; return; }
+  if(NCF_REGEX.test(v)){
+    s.className = 'ncf-status ok';
+    s.innerHTML = '✓ NCF válido (DGII)';
+  } else {
+    s.className = 'ncf-status bad';
+    s.innerHTML = '✗ Formato inválido — revisa tipos y largo';
+  }
+}
+
+async function saveEdit(){
+  const err = document.getElementById('ed-err');
+  err.style.display = 'none';
+  if(!editContext){ toast('Contexto de edición perdido', 'err'); return; }
+
+  const nuevo = {
+    proyecto: document.getElementById('ed-proj').value,
+    fecha: document.getElementById('ed-fecha').value,
+    suplidor: document.getElementById('ed-sup').value.trim(),
+    rnc: document.getElementById('ed-rnc').value.trim(),
+    ncf: document.getElementById('ed-ncf').value.trim().toUpperCase(),
+    categoria: document.getElementById('ed-cat').value,
+    tipo: document.getElementById('ed-tipo').value,
+    monto: parseFloat(document.getElementById('ed-monto').value) || 0,
+    aprobado: document.getElementById('ed-aprobado').value,
+    no_reporte: document.getElementById('ed-reporte').value.trim(),
+    observaciones: document.getElementById('ed-obs').value.trim()
+  };
+
+  if(!nuevo.monto || nuevo.monto <= 0){
+    err.textContent = 'Monto inválido';
+    err.style.display = 'block'; return;
+  }
+  if(nuevo.ncf && !NCF_REGEX.test(nuevo.ncf)){
+    if(!confirm('El nuevo NCF no cumple formato DGII. ¿Guardar de todas formas?')) return;
+  }
+
+  loading(true, 'Guardando cambios', 'Actualizando Sheet...');
+  try {
+    const H = facturasHeaders;
+    const row = editContext.sheetRow;
+
+    // Escribir celdas una por una usando sus posiciones por header
+    // (evita escribir en columnas con fórmulas: I, J, W)
+    const updates = [];
+    const col = idx => String.fromCharCode(65 + idx); // 0-indexed -> letra
+    const add = (headerName, val) => {
+      if(H[headerName] !== undefined){
+        updates.push({range: `REGISTRO!${col(H[headerName])}${row}`, values: [[val]]});
+      }
+    };
+    add('PROYECTO', nuevo.proyecto);
+    add('NO_REPORTE', nuevo.no_reporte);
+    add('FECHA_FACTURA', nuevo.fecha);
+    add('SUPLIDOR', nuevo.suplidor);
+    add('RNC', nuevo.rnc);
+    add('NCF', nuevo.ncf);
+    add('CATEGORIA', nuevo.categoria);
+    add('TIPO', nuevo.tipo);
+    add('MONTO', nuevo.monto);
+    add('APROBADO', nuevo.aprobado);
+    add('OBSERVACIONES', nuevo.observaciones);
+
+    const token = getToken();
+    const ssid = localStorage.getItem(LS.SSID);
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchUpdate`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: updates})
+    });
+
+    // Renombrar/mover archivo en Drive si cambió algo relevante
+    const fechaCambio = nuevo.fecha !== editContext.original.fecha;
+    const supCambio = nuevo.suplidor !== editContext.original.suplidor;
+    const projCambio = nuevo.proyecto !== editContext.original.proyecto;
+    if((fechaCambio || supCambio || projCambio) && editContext.original.url_factura){
+      loading(true, 'Guardando cambios', 'Actualizando foto en Drive...');
+      await renameOrMoveFacturaFile(editContext.original.url_factura, {
+        proyectoNuevo: nuevo.proyecto,
+        proyectoViejo: editContext.original.proyecto,
+        fecha: nuevo.fecha,
+        suplidor: nuevo.suplidor,
+        id: editContext.original.id,
+        mover: projCambio
+      });
+    }
+
+    loading(false);
+    toast('Cambios guardados', 'ok');
+    editContext = null;
+    show('pg-facturas');
+    setTimeout(() => loadFacturas(), 500);
+    setTimeout(() => refreshBalance(true), 1500);
+  } catch(e){
+    loading(false);
+    err.textContent = 'Error: ' + e.message;
+    err.style.display = 'block';
+    console.error(e);
+  }
+}
+
+// Renombra el archivo en Drive al nuevo formato (fecha + suplidor + id).
+// Si mover=true, también lo mueve a la carpeta del proyecto nuevo.
+async function renameOrMoveFacturaFile(url, opts){
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if(!m) return;
+  const fileId = m[1];
+  const token = getToken();
+
+  // Nuevo nombre con formato estándar
+  const safeSup = (opts.suplidor || 'sin-suplidor').replace(/[^a-zA-Z0-9 -]/g, '').substring(0, 40);
+  const newName = `${opts.fecha || today()} ${safeSup} ${opts.id}.jpg`;
+
+  // Obtener padres actuales para poder removerlos si hay que mover
+  let addParents = '';
+  let removeParents = '';
+  if(opts.mover && opts.proyectoNuevo){
+    const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    const fm = await fileMeta.json();
+    const currentParents = (fm.parents || []).join(',');
+
+    const rootId = await ensureFolder(ROOT_FOLDER, null);
+    const projNuevo = masters.projects.find(p => p.cod === opts.proyectoNuevo);
+    const folderNameNuevo = projNuevo ? `${opts.proyectoNuevo} - ${projNuevo.nombre}` : opts.proyectoNuevo;
+    const newFolderId = await ensureFolder(folderNameNuevo, rootId);
+
+    addParents = newFolderId;
+    removeParents = currentParents;
+  }
+
+  let url2 = `https://www.googleapis.com/drive/v3/files/${fileId}`;
+  const qs = [];
+  if(addParents) qs.push('addParents=' + addParents);
+  if(removeParents) qs.push('removeParents=' + removeParents);
+  if(qs.length) url2 += '?' + qs.join('&');
+
+  await fetch(url2, {
+    method: 'PATCH',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({name: newName})
+  });
+}
+
+// ============================================================
+// ELIMINAR FACTURA (soft delete → Papelera)
+// ============================================================
+async function eliminarFactura(idx){
+  if(!confirm('Esto marcará la factura como ELIMINADA y moverá la foto a la Papelera del proyecto. ¿Continuar?')) return;
+
+  const f = facturasCache[idx];
+  const H = facturasHeaders;
+  const r = f.row;
+  const col = i => String.fromCharCode(65 + i);
+
+  loading(true, 'Eliminando', 'Marcando en Sheet...');
+  try {
+    const token = getToken();
+    const ssid = localStorage.getItem(LS.SSID);
+
+    // 1) Marcar ELIMINADO=SI
+    if(H.ELIMINADO === undefined) throw new Error('Falta columna ELIMINADO. Corre "Reparar fórmulas".');
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!${col(H.ELIMINADO)}${f.sheetRow}?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [['SI']]})
+    });
+
+    // 2) Mover foto a Papelera del proyecto
+    const url = r[H.URL_FACTURA];
+    if(url){
+      loading(true, 'Eliminando', 'Moviendo foto a Papelera...');
+      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(m){
+        const fileId = m[1];
+        const rootId = await ensureFolder(ROOT_FOLDER, null);
+        const proj = masters.projects.find(p => p.cod === r[H.PROYECTO]);
+        const projFolder = proj ? `${r[H.PROYECTO]} - ${proj.nombre}` : r[H.PROYECTO];
+        const projId = await ensureFolder(projFolder, rootId);
+        const papeleraId = await ensureFolder('Papelera', projId);
+
+        // Remover de padres actuales, agregar a Papelera
+        const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
+          headers: {'Authorization': 'Bearer ' + token}
+        });
+        const fm = await fileMeta.json();
+        const currentParents = (fm.parents || []).join(',');
+
+        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${papeleraId}&removeParents=${currentParents}`, {
+          method: 'PATCH',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({})
+        });
+      }
+    }
+
+    loading(false);
+    toast('Factura enviada a Papelera', 'ok');
+    await loadFacturas();
+    setTimeout(() => refreshBalance(true), 500);
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+async function restaurarFactura(idx){
+  if(!confirm('Esto restaurará la factura y moverá la foto de vuelta a la carpeta del proyecto. ¿Continuar?')) return;
+
+  const f = facturasCache[idx];
+  const H = facturasHeaders;
+  const r = f.row;
+  const col = i => String.fromCharCode(65 + i);
+
+  loading(true, 'Restaurando', 'Actualizando Sheet...');
+  try {
+    const token = getToken();
+    const ssid = localStorage.getItem(LS.SSID);
+
+    // 1) ELIMINADO=NO
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!${col(H.ELIMINADO)}${f.sheetRow}?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [['NO']]})
+    });
+
+    // 2) Mover foto de Papelera de vuelta a carpeta del proyecto
+    const url = r[H.URL_FACTURA];
+    if(url){
+      loading(true, 'Restaurando', 'Moviendo foto...');
+      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(m){
+        const fileId = m[1];
+        const rootId = await ensureFolder(ROOT_FOLDER, null);
+        const proj = masters.projects.find(p => p.cod === r[H.PROYECTO]);
+        const projFolder = proj ? `${r[H.PROYECTO]} - ${proj.nombre}` : r[H.PROYECTO];
+        const projId = await ensureFolder(projFolder, rootId);
+
+        const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
+          headers: {'Authorization': 'Bearer ' + token}
+        });
+        const fm = await fileMeta.json();
+        const currentParents = (fm.parents || []).join(',');
+
+        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${projId}&removeParents=${currentParents}`, {
+          method: 'PATCH',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({})
+        });
+      }
+    }
+
+    loading(false);
+    toast('Factura restaurada', 'ok');
+    await loadFacturas();
+    setTimeout(() => refreshBalance(true), 500);
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+  }
+}
+
+async function eliminarFacturaPermanente(idx){
+  if(!confirm('Esto ELIMINA PERMANENTEMENTE la factura del Sheet y la foto de Drive. NO se puede deshacer. ¿Continuar?')) return;
+  if(!confirm('Segundo aviso: vas a perder el comprobante físico. ¿Realmente continuar?')) return;
+
+  const f = facturasCache[idx];
+  const H = facturasHeaders;
+  const r = f.row;
+
+  loading(true, 'Eliminando permanentemente', 'Borrando foto y fila...');
+  try {
+    const token = getToken();
+    const ssid = localStorage.getItem(LS.SSID);
+
+    // 1) Borrar foto de Drive (si existe)
+    const url = r[H.URL_FACTURA];
+    if(url){
+      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(m){
+        await fetch(`https://www.googleapis.com/drive/v3/files/${m[1]}`, {
+          method: 'DELETE',
+          headers: {'Authorization': 'Bearer ' + token}
+        });
+      }
+    }
+
+    // 2) Borrar fila del Sheet (obtener sheetId de REGISTRO)
+    const ssRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    const ssData = await ssRes.json();
+    const regSheet = ssData.sheets.find(s => s.properties.title === 'REGISTRO');
+    if(regSheet){
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          requests: [{
+            deleteDimension: {
+              range: {
+                sheetId: regSheet.properties.sheetId,
+                dimension: 'ROWS',
+                startIndex: f.sheetRow - 1, // 0-indexed
+                endIndex: f.sheetRow
+              }
+            }
+          }]
+        })
+      });
+    }
+
+    loading(false);
+    toast('Eliminada permanentemente', 'ok');
+    await loadFacturas();
+    setTimeout(() => refreshBalance(true), 500);
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+// ============================================================
+// SINCRONIZAR ARCHIVOS DE DRIVE CON EL SHEET
+// Recorre REGISTRO y renombra/mueve archivos para que coincidan con los datos.
+// ============================================================
+async function syncDriveFilesWithSheet(){
+  if(!confirm('Esto recorrerá TODAS las facturas del Sheet y renombrará/moverá los archivos en Drive para que coincidan. Puede tomar varios minutos si hay muchas facturas. ¿Continuar?')) return;
+
+  loading(true, 'Sincronizando', 'Leyendo REGISTRO...');
+  try {
+    const raw = await sheetsGet('REGISTRO!A1:Z');
+    if(!raw || raw.length < 2){ loading(false); toast('REGISTRO vacío', 'err'); return; }
+
+    const H = {};
+    (raw[0] || []).forEach((h, i) => H[h] = i);
+    if(H.URL_FACTURA === undefined) throw new Error('Falta columna URL_FACTURA');
+
+    const rows = raw.slice(1);
+    const token = getToken();
+    const rootId = await ensureFolder(ROOT_FOLDER, null);
+
+    let updated = 0, skipped = 0, errors = 0;
+    for(let i = 0; i < rows.length; i++){
+      const r = rows[i];
+      if(!r[H.ID] || !r[H.URL_FACTURA]){ skipped++; continue; }
+
+      loading(true, 'Sincronizando', `Fila ${i+1} de ${rows.length}...`);
+
+      const url = r[H.URL_FACTURA];
+      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(!m){ skipped++; continue; }
+      const fileId = m[1];
+
+      const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
+      const projCod = r[H.PROYECTO];
+      const proj = masters.projects.find(p => p.cod === projCod);
+      const projFolderName = proj ? `${projCod} - ${proj.nombre}` : projCod;
+
+      const safeSup = (r[H.SUPLIDOR] || 'sin-suplidor').replace(/[^a-zA-Z0-9 -]/g, '').substring(0, 40);
+      const expectedName = `${r[H.FECHA_FACTURA] || today()} ${safeSup} ${r[H.ID]}.jpg`;
+
+      try {
+        // Obtener metadata actual del archivo
+        const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,parents`, {
+          headers: {'Authorization': 'Bearer ' + token}
+        });
+        if(!metaRes.ok){ errors++; continue; }
+        const meta = await metaRes.json();
+        const currentParents = (meta.parents || []);
+
+        // Carpeta esperada
+        const projId = await ensureFolder(projFolderName, rootId);
+        const expectedFolderId = eliminado
+          ? await ensureFolder('Papelera', projId)
+          : projId;
+
+        const nameNeedsChange = meta.name !== expectedName;
+        const folderNeedsChange = !currentParents.includes(expectedFolderId);
+
+        if(!nameNeedsChange && !folderNeedsChange){ skipped++; continue; }
+
+        let url2 = `https://www.googleapis.com/drive/v3/files/${fileId}`;
+        const qs = [];
+        if(folderNeedsChange){
+          qs.push('addParents=' + expectedFolderId);
+          qs.push('removeParents=' + currentParents.join(','));
+        }
+        if(qs.length) url2 += '?' + qs.join('&');
+
+        const patchRes = await fetch(url2, {
+          method: 'PATCH',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify(nameNeedsChange ? {name: expectedName} : {})
+        });
+        if(patchRes.ok) updated++;
+        else errors++;
+
+        // Pequeño delay para no pegar rate limit
+        await new Promise(r => setTimeout(r, 150));
+      } catch(e) {
+        errors++;
+        console.error('Error en fila ' + (i+1) + ':', e);
+      }
+    }
+
+    loading(false);
+    toast(`Sincronizado: ${updated} actualizados, ${skipped} sin cambios, ${errors} errores`, 'ok');
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error(e);
+  }
 }
 
 // ============================================================
