@@ -457,6 +457,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Spreadsheet ID</div>
       <div id="set-ssid" style="font-family:var(--mono);font-size:11px;color:var(--text);word-break:break-all"></div>
       <button class="btn" onclick="openSheet()" style="margin-top:10px">Abrir en Sheets</button>
+      <button class="btn btn-blue" onclick="refreshData()" style="margin-top:8px">Actualizar datos desde Sheet</button>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si cambiaste nombres de obras, suplidores o categorías en el Sheet, toca para traer los cambios.</div>
     </div>
 
     <div class="card">
@@ -469,7 +471,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
     <div class="card">
       <h3>Mantenimiento</h3>
-      <button class="btn btn-red" onclick="resetApp()">Borrar todo y empezar de cero</button>
+      <button class="btn btn-amber" onclick="repairFormulas()">Reparar fórmulas del Dashboard</button>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Úsalo una vez si el balance muestra valores incorrectos (ej. el mismo balance para todas las obras).</div>
+      <button class="btn btn-red" onclick="resetApp()" style="margin-top:10px">Borrar todo y empezar de cero</button>
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
@@ -500,7 +504,11 @@ const LS = {
   PROJ: 'cc_proj',
   BALCACHE: 'cc_bal',
   MASTERS: 'cc_masters',
+  FOLDERS: 'cc_folders',
 };
+
+// Carpeta raíz en Drive donde se organiza todo
+const ROOT_FOLDER = 'Caja Chica Obras';
 
 // Regex NCF/e-CF oficial DGII (abril 2026)
 const NCF_REGEX = /^((B0[1-9]|B1[1-6])\d{8}|(E3[1-4]|E4[1-7])\d{10})$/;
@@ -738,11 +746,11 @@ async function createNewSheet(){
     // 2. Poblar con headers y datos iniciales (un solo batchUpdate)
     const email = localStorage.getItem(LS.EMAIL);
     const data = [
-      {range: 'REGISTRO!A1:V1', values: [[
+      {range: 'REGISTRO!A1:W1', values: [[
         'ID','PROYECTO','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF',
         'VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO','ITBIS',
         'APROBADO','OBSERVACIONES','URL_FACTURA','USUARIO','OCR_STATUS',
-        'OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT'
+        'OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO'
       ]]},
       {range: 'PROYECTOS!A1:F1', values: [['COD_PROYECTO','NOMBRE','UBICACION','FONDO_INICIAL','ESTADO','USUARIOS_ASIGNADOS']]},
       {range: 'PROYECTOS!A2:F3', values: [
@@ -773,25 +781,41 @@ async function createNewSheet(){
       body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: data})
     });
 
-    // 3. Fórmulas en DASHBOARD con ARRAYFORMULA (balance por proyecto)
+    // 3. Fórmulas en DASHBOARD (SUMIF con 1 sola condición — SÍ vectoriza)
     const dashFormulas = [
       ['=ARRAYFORMULA(IF(ROW(PROYECTOS!A2:A)=1,,IF(PROYECTOS!A2:A="",,PROYECTOS!A2:A)))',
-       '=ARRAYFORMULA(IF(A2:A="",,IFERROR(SUMIF(INGRESOS!C:C,A2:A,INGRESOS!E:E),0)-IFERROR(SUMIFS(REGISTRO!L:L,REGISTRO!B:B,A2:A,REGISTRO!N:N,"SI"),0)+IFERROR(VLOOKUP(A2:A,PROYECTOS!A:D,4,FALSE),0)))',
-       '=ARRAYFORMULA(IF(A2:A="",,COUNTIFS(REGISTRO!B:B,A2:A,REGISTRO!N:N,"SI")))'],
+       '=ARRAYFORMULA(IF(A2:A="",,IFERROR(SUMIF(INGRESOS!C:C,A2:A,INGRESOS!E:E),0)-IFERROR(SUMIF(REGISTRO!B:B,A2:A,REGISTRO!W:W),0)+IFERROR(VLOOKUP(A2:A,PROYECTOS!A:D,4,FALSE),0)))',
+       '=ARRAYFORMULA(IF(A2:A="",,COUNTIF(REGISTRO!B:B,A2:A)))'],
     ];
     await sheetsAppend('DASHBOARD!A2', dashFormulas);
 
-    // 4. Fórmulas de validación en REGISTRO (columnas H, I)
+    // 4. Fórmulas en REGISTRO: H=VALIDACION_NCF, I=DUPLICADO, W=MONTO_APROBADO
     const regFormulas = [
       ['=ARRAYFORMULA(IF(ROW(G:G)=1,"VALIDACION_NCF",IF(G:G="","",IF(REGEXMATCH(UPPER(G:G),"^((B0[1-9]|B1[1-6])\\d{8}|(E3[1-4]|E4[1-7])\\d{10})$"),"OK","INVALIDO"))))',
        '=ARRAYFORMULA(IF(ROW(G:G)=1,"DUPLICADO",IF(G:G="","",IF(COUNTIF(G:G,G:G)>1,"DUPLICADO","OK"))))']
     ];
-    // Estas fórmulas se colocan en H1 e I1 con ARRAYFORMULA así que reemplazamos los headers
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!H1:I1?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: JSON.stringify({values: regFormulas})
     });
+
+    // Columna W: MONTO_APROBADO (MONTO si APROBADO=SI, 0 si no). Usada por DASHBOARD.
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(L:L)=1,"MONTO_APROBADO",IF(N:N="SI",IFERROR(L:L*1,0),0)))']]})
+    });
+
+    // 5. Mover el Spreadsheet a la carpeta raíz de caja chica
+    try {
+      const rootFolderId = await ensureFolder(ROOT_FOLDER, null);
+      await fetch(`https://www.googleapis.com/drive/v3/files/${ssid}?addParents=${rootFolderId}&removeParents=root`, {
+        method: 'PATCH',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({})
+      });
+    } catch(e){ console.warn('No se pudo mover el sheet a carpeta raíz:', e.message); }
 
     loading(false);
     document.getElementById('ssid-status').innerHTML = '<span style="color:var(--green)">✓ Base creada: ' + ssid.slice(0,20) + '...</span>';
@@ -906,7 +930,7 @@ async function geminiOCR(imageBase64){
 - confianza: 0 a 1.
 Si no ves un campo, déjalo vacío o 0.`;
 
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=' + key;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=' + key;
   const r = await fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -965,6 +989,22 @@ async function loadMasters(){
     masters.categories = cat.filter(r => r[0]).map(r => ({cod: r[0], nombre: r[1], cuenta: r[2]}));
 
     localStorage.setItem(LS.MASTERS, JSON.stringify({...masters, at: Date.now()}));
+
+    // Resincronizar proyecto seleccionado — si cambió el nombre en el Sheet, actualizar
+    const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+    if(currentProj){
+      const updated = masters.projects.find(p => p.cod === currentProj.cod);
+      if(updated){
+        // Solo actualizar si cambió algo
+        if(JSON.stringify(updated) !== JSON.stringify(currentProj)){
+          localStorage.setItem(LS.PROJ, JSON.stringify(updated));
+        }
+      } else {
+        // El proyecto ya no está asignado o fue eliminado
+        localStorage.removeItem(LS.PROJ);
+      }
+    }
+
     populateDropdowns();
     refreshHome();
   } catch(e){
@@ -1336,9 +1376,72 @@ async function syncAll(){
   }
 }
 
+// Busca o crea una carpeta en Drive. Cache local para no re-buscar cada vez.
+async function ensureFolder(name, parentId){
+  const token = getToken();
+  if(!token) throw new Error('Sesión expirada');
+
+  // Cache local de folder IDs
+  const folders = JSON.parse(localStorage.getItem(LS.FOLDERS) || '{}');
+  const cacheKey = (parentId || 'root') + '::' + name;
+  if(folders[cacheKey]){
+    // Verificar rápido que aún existe (si no, la volvemos a buscar/crear)
+    try {
+      const chk = await fetch(`https://www.googleapis.com/drive/v3/files/${folders[cacheKey]}?fields=id,trashed`, {
+        headers: {'Authorization': 'Bearer ' + token}
+      });
+      if(chk.ok){
+        const chkData = await chk.json();
+        if(!chkData.trashed) return folders[cacheKey];
+      }
+    } catch {}
+    // No existe, limpia cache
+    delete folders[cacheKey];
+  }
+
+  // Buscar carpeta existente (solo las que la app puede ver con drive.file scope)
+  const escapedName = name.replace(/'/g, "\\'");
+  let q = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  if(parentId) q += ` and '${parentId}' in parents`;
+
+  const searchUrl = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&fields=files(id,name)';
+  const searchRes = await fetch(searchUrl, {
+    headers: {'Authorization': 'Bearer ' + token}
+  });
+  if(searchRes.ok){
+    const searchData = await searchRes.json();
+    if(searchData.files && searchData.files.length > 0){
+      folders[cacheKey] = searchData.files[0].id;
+      localStorage.setItem(LS.FOLDERS, JSON.stringify(folders));
+      return searchData.files[0].id;
+    }
+  }
+
+  // Crear carpeta nueva
+  const metadata = {name: name, mimeType: 'application/vnd.google-apps.folder'};
+  if(parentId) metadata.parents = [parentId];
+
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify(metadata)
+  });
+  if(!createRes.ok) throw new Error('No se pudo crear carpeta: ' + name);
+  const createData = await createRes.json();
+  folders[cacheKey] = createData.id;
+  localStorage.setItem(LS.FOLDERS, JSON.stringify(folders));
+  return createData.id;
+}
+
 async function uploadImage(entry){
   const token = getToken();
   if(!token) throw new Error('Sesión expirada');
+
+  // Estructura de carpetas: /Caja Chica Obras/{COD - Nombre del proyecto}/
+  const rootId = await ensureFolder(ROOT_FOLDER, null);
+  const proj = masters.projects.find(p => p.cod === entry.proyecto);
+  const projFolderName = proj ? `${entry.proyecto} - ${proj.nombre}` : entry.proyecto;
+  const projFolderId = await ensureFolder(projFolderName, rootId);
 
   // Convertir base64 a blob
   const binary = atob(entry.image_base64);
@@ -1346,10 +1449,14 @@ async function uploadImage(entry){
   for(let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
   const blob = new Blob([arr], {type: entry.image_mime || 'image/jpeg'});
 
-  // Multipart upload con metadata
+  // Nombre legible: fecha - suplidor - id (para que ordenado cronológicamente)
+  const safeSup = (entry.suplidor || 'sin-suplidor').replace(/[^a-zA-Z0-9 -]/g, '').substring(0, 40);
+  const fileName = `${entry.fecha_factura || today()} ${safeSup} ${entry.id}.jpg`;
+
   const metadata = {
-    name: `${entry.proyecto}_${entry.id}.jpg`,
-    mimeType: entry.image_mime || 'image/jpeg'
+    name: fileName,
+    mimeType: entry.image_mime || 'image/jpeg',
+    parents: [projFolderId]
   };
   const boundary = '-------314159265358979323846';
   const body = new Blob([
@@ -1379,6 +1486,62 @@ async function uploadImage(entry){
 function openSheet(){
   const id = localStorage.getItem(LS.SSID);
   if(id) window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`, '_blank');
+}
+
+// Refresca nombres de proyectos, suplidores, categorías desde el Sheet
+async function refreshData(){
+  loading(true, 'Actualizando', 'Leyendo Sheet...');
+  try {
+    await loadMasters();
+    await refreshBalance(true);
+    loading(false);
+    toast('Datos actualizados', 'ok');
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+  }
+}
+
+// Repara fórmulas del DASHBOARD (para sheets creados con versión vieja de la app)
+// Agrega columna W = MONTO_APROBADO a REGISTRO y reescribe fórmulas de DASHBOARD
+async function repairFormulas(){
+  if(!confirm('Esto reescribirá las fórmulas del DASHBOARD y agregará una columna auxiliar en REGISTRO. ¿Continuar?')) return;
+
+  const token = getToken();
+  if(!token){ toast('Sesión expirada', 'err'); return; }
+  const ssid = localStorage.getItem(LS.SSID);
+  if(!ssid){ toast('Sin base de datos', 'err'); return; }
+
+  loading(true, 'Reparando', 'Actualizando fórmulas...');
+  try {
+    // 1. Columna auxiliar MONTO_APROBADO en REGISTRO!W
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(L:L)=1,"MONTO_APROBADO",IF(N:N="SI",IFERROR(L:L*1,0),0)))']]})
+    });
+
+    // 2. Fórmulas corregidas en DASHBOARD A2:C2 (SUMIF con 1 condición sí se vectoriza)
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/DASHBOARD!A2:C2?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [[
+        '=ARRAYFORMULA(IF(ROW(PROYECTOS!A2:A)=1,,IF(PROYECTOS!A2:A="",,PROYECTOS!A2:A)))',
+        '=ARRAYFORMULA(IF(A2:A="",,IFERROR(SUMIF(INGRESOS!C:C,A2:A,INGRESOS!E:E),0)-IFERROR(SUMIF(REGISTRO!B:B,A2:A,REGISTRO!W:W),0)+IFERROR(VLOOKUP(A2:A,PROYECTOS!A:D,4,FALSE),0)))',
+        '=ARRAYFORMULA(IF(A2:A="",,COUNTIF(REGISTRO!B:B,A2:A)))'
+      ]]})
+    });
+
+    // 3. Header de REGISTRO!W1 — lo escribimos de nuevo por si el sheet viejo no lo tenía
+    // (la fórmula ya puesta arriba pone el header automáticamente via IF(ROW=1,"MONTO_APROBADO",...))
+
+    loading(false);
+    toast('Fórmulas reparadas', 'ok');
+    setTimeout(() => refreshBalance(true), 800);
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+  }
 }
 
 function resetApp(){
