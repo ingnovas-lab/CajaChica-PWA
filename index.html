@@ -861,6 +861,15 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div id="consolidar-status" style="font-size:11px;color:var(--text2);margin-top:8px"></div>
     </div>
 
+    <div class="card">
+      <h3>Ayuda</h3>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Guía rápida de uso de la app. Si tienes dudas, llama al Ing. Joel Novas al +1 (809) 975-5757.</div>
+      <button class="btn btn-blue" onclick="show('pg-help')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Ver guía de uso
+      </button>
+    </div>
+
     <div class="card" data-admin-only>
       <h3>Mantenimiento</h3>
       <button class="btn btn-amber" onclick="repairFormulas()">Reparar fórmulas del Dashboard</button>
@@ -872,6 +881,236 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
       Caja Chica Obras · v1.0 · gratis
+    </div>
+  </div>
+</div>
+
+<!-- ========== PAGE: AYUDA / TUTORIAL ========== -->
+<div class="page" id="pg-help">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-settings')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Guía de uso</div>
+      <div class="topbar-sub">Todo lo que necesitas saber</div>
+    </div>
+  </div>
+  <div class="body" style="padding-bottom:40px">
+
+    <!-- Índice rápido -->
+    <div class="card" style="margin-bottom:14px">
+      <h3 style="margin-bottom:10px">Contenido</h3>
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:13px">
+        <a href="#h-seleccionar" style="color:var(--blue);text-decoration:none;padding:6px 0">1. Seleccionar obra</a>
+        <a href="#h-capturar" style="color:var(--blue);text-decoration:none;padding:6px 0">2. Capturar factura con NCF</a>
+        <a href="#h-informal" style="color:var(--blue);text-decoration:none;padding:6px 0">3. Facturas sin NCF</a>
+        <a href="#h-revisar" style="color:var(--blue);text-decoration:none;padding:6px 0">4. Mis facturas</a>
+        <a href="#h-editar" style="color:var(--blue);text-decoration:none;padding:6px 0">5. Editar una factura</a>
+        <a href="#h-eliminar" style="color:var(--blue);text-decoration:none;padding:6px 0">6. Eliminar una factura</a>
+        <a href="#h-sincronizar" style="color:var(--blue);text-decoration:none;padding:6px 0">7. Sincronizar al final del día</a>
+        <a href="#h-offline" style="color:var(--blue);text-decoration:none;padding:6px 0">8. Trabajar sin internet</a>
+        <a href="#h-problemas" style="color:var(--blue);text-decoration:none;padding:6px 0">9. Problemas comunes</a>
+        <a href="#h-reglas" style="color:var(--blue);text-decoration:none;padding:6px 0">10. Las 5 reglas de oro</a>
+      </div>
+    </div>
+
+    <!-- Contacto destacado -->
+    <div style="background:rgba(245,158,11,0.12);border:1px solid var(--amber);border-radius:var(--r);padding:14px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:600;color:var(--amber);margin-bottom:6px">¿Necesitas ayuda?</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.5">Llama al <strong>Ing. Joel Novas</strong> al <a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a>. No te guardes las dudas.</div>
+    </div>
+
+    <!-- Sección 1 -->
+    <div class="card" style="margin-bottom:14px" id="h-seleccionar">
+      <h3 style="color:var(--amber);margin-bottom:10px">1. Seleccionar una obra</h3>
+      <div style="font-size:13px;line-height:1.6">
+        La app trabaja con una obra a la vez. Antes de capturar cualquier factura, selecciona en cuál estás trabajando.
+        <ol style="margin:10px 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">En la pantalla principal, arriba, toca donde dice "Seleccionar obra".</li>
+          <li style="margin-bottom:6px">Aparece la lista de tus obras asignadas.</li>
+          <li style="margin-bottom:6px">Toca la obra que quieres usar.</li>
+          <li>El balance de la obra aparece abajo.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Sección 2 -->
+    <div class="card" style="margin-bottom:14px" id="h-capturar">
+      <h3 style="color:var(--amber);margin-bottom:10px">2. Capturar una factura con NCF</h3>
+      <div style="font-size:13px;line-height:1.6">
+        El flujo principal de la app.
+        <ol style="margin:10px 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">Verifica que la obra correcta esté seleccionada.</li>
+          <li style="margin-bottom:6px">Toca el botón "+ Registrar gasto".</li>
+          <li style="margin-bottom:6px">Elige "Tomar foto" o "De galería".</li>
+          <li style="margin-bottom:6px">Toma una foto clara: que se vean NCF, monto, suplidor y fecha.</li>
+          <li style="margin-bottom:6px">Espera que la app lea la factura.</li>
+          <li style="margin-bottom:6px">Revisa cada campo. Corrige lo que esté mal.</li>
+          <li style="margin-bottom:6px">Selecciona la Categoría (Materiales, Mano de obra, etc.).</li>
+          <li style="margin-bottom:6px">Escribe el "No. de reporte".</li>
+          <li>Toca "Guardar".</li>
+        </ol>
+        <div style="background:rgba(245,158,11,0.08);border-left:3px solid var(--amber);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          <strong>Fotos buenas:</strong> superficie plana, buena luz, sin sombras, enfocada. Si la factura está arrugada, estírala primero.
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección 3 -->
+    <div class="card" style="margin-bottom:14px" id="h-informal">
+      <h3 style="color:var(--amber);margin-bottom:10px">3. Facturas sin NCF (tiquetes, informales)</h3>
+      <div style="font-size:13px;line-height:1.6">
+        Tiquetes de gasolinera, recibos hechos a mano o facturas sin NCF. La app también las acepta.
+        <ol style="margin:10px 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">Haz el mismo flujo de capturar.</li>
+          <li style="margin-bottom:6px">En la pantalla de confirmar, deja el NCF vacío.</li>
+          <li style="margin-bottom:6px">Escribe bien el suplidor (es obligatorio).</li>
+          <li>Guárdala normal.</li>
+        </ol>
+        <div style="margin-top:10px">Se guardan como <strong style="color:var(--amber)">"Por revisar"</strong>. El admin las valida después.</div>
+      </div>
+    </div>
+
+    <!-- Sección 4 -->
+    <div class="card" style="margin-bottom:14px" id="h-revisar">
+      <h3 style="color:var(--amber);margin-bottom:10px">4. Revisar mis facturas</h3>
+      <div style="font-size:13px;line-height:1.6">
+        <ol style="margin:0 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">Toca "Mis facturas" en la pantalla principal.</li>
+          <li style="margin-bottom:6px">Arriba puedes filtrar por Obra, Estado, o buscar por suplidor / NCF.</li>
+          <li>Los filtros se aplican automáticamente.</li>
+        </ol>
+        <div style="margin-top:12px"><strong>Estados:</strong></div>
+        <ul style="margin:6px 0 0 20px;padding:0">
+          <li style="margin-bottom:4px"><strong>Activas:</strong> facturas procesadas</li>
+          <li style="margin-bottom:4px"><strong>Por revisar:</strong> sin NCF, pendiente de validar</li>
+          <li style="margin-bottom:4px"><strong>Papelera:</strong> eliminadas (recuperables)</li>
+          <li><strong>Todas:</strong> todas juntas</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Sección 5 -->
+    <div class="card" style="margin-bottom:14px" id="h-editar">
+      <h3 style="color:var(--amber);margin-bottom:10px">5. Editar una factura</h3>
+      <div style="font-size:13px;line-height:1.6">
+        <div style="font-weight:600;margin-bottom:6px">Pendiente (no sincronizada):</div>
+        <ol style="margin:0 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">En la pantalla principal, toca cualquier factura de "Últimos registros".</li>
+          <li style="margin-bottom:6px">Te abre el editor con aviso "(sin sincronizar)".</li>
+          <li style="margin-bottom:6px">Modifica lo que necesites.</li>
+          <li style="margin-bottom:6px">Puedes cambiar la foto con los botones "Cambiar foto" / "De galería".</li>
+          <li>Toca "Guardar cambios".</li>
+        </ol>
+        <div style="font-weight:600;margin-top:14px;margin-bottom:6px">Ya sincronizada:</div>
+        <ol style="margin:0 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">Ve a "Mis facturas".</li>
+          <li style="margin-bottom:6px">Toca "Editar" en la factura.</li>
+          <li>Modifica y guarda.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Sección 6 -->
+    <div class="card" style="margin-bottom:14px" id="h-eliminar">
+      <h3 style="color:var(--amber);margin-bottom:10px">6. Eliminar una factura</h3>
+      <div style="font-size:13px;line-height:1.6">
+        <div style="font-weight:600;margin-bottom:6px">Pendiente:</div>
+        <div style="margin-bottom:12px">Ve a "Ver pendientes" → toca "Eliminar". Se borra del celular.</div>
+        <div style="font-weight:600;margin-bottom:6px">Sincronizada:</div>
+        <div>Ve a "Mis facturas" → toca "Eliminar". Pasa a la Papelera de esa obra (recuperable desde el filtro Papelera → Restaurar).</div>
+      </div>
+    </div>
+
+    <!-- Sección 7 -->
+    <div class="card" style="margin-bottom:14px" id="h-sincronizar">
+      <h3 style="color:var(--amber);margin-bottom:10px">7. Sincronizar al final del día</h3>
+      <div style="font-size:13px;line-height:1.6">
+        Todas las facturas que capturas quedan primero en tu celular. Al final del día, con buena señal, las subes al sistema.
+        <ol style="margin:10px 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">Abre la app.</li>
+          <li style="margin-bottom:6px">Toca el recuadro "POR SINCRONIZAR" en la pantalla principal.</li>
+          <li style="margin-bottom:6px">Entras a "Por sincronizar" con tu lista pendiente.</li>
+          <li style="margin-bottom:6px">Toca "Sincronizar todo".</li>
+          <li>Espera a que termine.</li>
+        </ol>
+        <div style="background:rgba(239,68,68,0.12);border-left:3px solid var(--red);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          <strong>¡Importante!</strong> Sincroniza <strong>todos los días</strong>. Si pierdes el celular o se daña, las facturas no sincronizadas se pierden. No acumules varios días.
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección 8 -->
+    <div class="card" style="margin-bottom:14px" id="h-offline">
+      <h3 style="color:var(--amber);margin-bottom:10px">8. Trabajar sin internet</h3>
+      <div style="font-size:13px;line-height:1.6">
+        <div style="font-weight:600;color:var(--green);margin-bottom:6px">SÍ funciona sin internet:</div>
+        <ul style="margin:0 0 14px 20px;padding:0">
+          <li style="margin-bottom:4px">Tomar fotos de facturas</li>
+          <li style="margin-bottom:4px">Ver facturas pendientes</li>
+          <li>Editar o eliminar pendientes</li>
+        </ul>
+        <div style="font-weight:600;color:var(--red);margin-bottom:6px">NO funciona sin internet:</div>
+        <ul style="margin:0 0 0 20px;padding:0">
+          <li style="margin-bottom:4px">Lectura automática de factura (OCR). La foto se guarda pero escribes los datos manualmente.</li>
+          <li style="margin-bottom:4px">Ver facturas ya sincronizadas</li>
+          <li>Sincronizar (hay que esperar señal)</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Sección 9 -->
+    <div class="card" style="margin-bottom:14px" id="h-problemas">
+      <h3 style="color:var(--amber);margin-bottom:10px">9. Problemas comunes</h3>
+      <div style="font-size:13px;line-height:1.6">
+        <div style="font-weight:600;margin-bottom:4px">La app me pide iniciar sesión otra vez</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Normal por seguridad. Toca "Conectar con Google" y selecciona tu correo. No pierdes nada.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">Lee mal los datos de la factura</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Corrígelos tú mismo antes de guardar. Si pasa seguido, mejora la luz y toma la foto de nuevo.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">No veo una obra que debería tener</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Settings → "Actualizar datos desde Sheet". Si aún no aparece, llama al Ing. Joel.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">La app está lenta</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Cierra completamente y vuelve a abrirla. Cierra otras apps abiertas.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">Me dice "Sesión expirada"</div>
+        <div style="color:var(--text2)">Toca "Conectar con Google" cuando te lo pida.</div>
+      </div>
+    </div>
+
+    <!-- Sección 10 -->
+    <div class="card" style="margin-bottom:14px;border:1.5px solid var(--amber)" id="h-reglas">
+      <h3 style="color:var(--amber);margin-bottom:12px">10. Las 5 reglas de oro</h3>
+      <div style="font-size:13px;line-height:1.6">
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600">1. Siempre revisa los datos antes de guardar</div>
+          <div style="color:var(--text2);margin-top:2px">La IA se equivoca. Tu ojo es la última validación.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600">2. Selecciona la obra correcta antes de capturar</div>
+          <div style="color:var(--text2);margin-top:2px">Un gasto en la obra equivocada desorganiza todo.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600">3. Sincroniza todos los días</div>
+          <div style="color:var(--text2);margin-top:2px">Si pierdes el celular, las facturas no sincronizadas se pierden.</div>
+        </div>
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600">4. Fotos claras y enteras</div>
+          <div style="color:var(--text2);margin-top:2px">Que se vea NCF, suplidor, fecha y monto. Sin cortar bordes.</div>
+        </div>
+        <div style="padding:8px 0">
+          <div style="font-weight:600">5. Si tienes dudas, pregunta</div>
+          <div style="color:var(--text2);margin-top:2px">Mejor preguntar 10 veces que hacer algo mal 1 vez.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px">
+      Caja Chica Obras — Guía de usuario — v1.0<br>
+      Ing. Joel Novas · LVP
     </div>
   </div>
 </div>
