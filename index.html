@@ -1118,7 +1118,7 @@ async function refreshHome(){
     rw.style.display = 'block';
     box.innerHTML = myPending.slice(0, 3).map(p => {
       const thumb = p.image_base64
-        ? `<img class="entry-thumb" src="data:${p.image_mime || 'image/jpeg'};base64,${p.image_base64}" alt="" onclick="verFoto('${p.id}')">`
+        ? `<img src="data:${p.image_mime || 'image/jpeg'};base64,${p.image_base64}" alt="" onclick="verFoto('${p.id}')" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:block">`
         : `<div class="entry-icon">${p.tipo_registro === 'ABONO' ? '+' : '−'}</div>`;
       return `
       <div class="entry">
@@ -1354,8 +1354,8 @@ async function renderHistory(){
   body.innerHTML = all.map(e => {
     const isAbono = e.tipo_registro === 'ABONO';
     const thumb = e.image_base64
-      ? `<img class="hcard-thumb" src="data:${e.image_mime || 'image/jpeg'};base64,${e.image_base64}" alt="" onclick="verFoto('${e.id}')">`
-      : `<div class="entry-icon" style="width:56px;height:56px;border-radius:10px;font-size:20px">${isAbono ? '+' : '−'}</div>`;
+      ? `<img src="data:${e.image_mime || 'image/jpeg'};base64,${e.image_base64}" alt="" onclick="verFoto('${e.id}')" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:block">`
+      : `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">${isAbono ? '+' : '−'}</div>`;
     return `
     <div class="card">
       <div style="display:flex;gap:12px;align-items:flex-start">
@@ -1715,69 +1715,93 @@ async function generarReporte(){
 
   loading(true, 'Generando reporte', 'Leyendo datos del Sheet...');
   try {
-    // Leer REGISTRO e INGRESOS del Sheet (desde la nueva estructura)
-    const [regData, ingData] = await sheetsBatchGet(['REGISTRO!A2:W', 'INGRESOS!A2:F']);
-    const registros = regData.values || [];
-    const ingresos = ingData.values || [];
+    // Leer REGISTRO completo (incluidos headers) e INGRESOS
+    const [regData, ingData] = await sheetsBatchGet(['REGISTRO!A1:Z', 'INGRESOS!A1:F']);
+    const regAll = regData.values || [];
+    const ingAll = ingData.values || [];
+    if(regAll.length === 0) throw new Error('REGISTRO vacío');
 
-    // Filtrar registros según criterios
-    // Estructura nueva: [ID, PROYECTO, NO_REPORTE, FECHA_REG, FECHA_FAC, SUP, RNC, NCF, VAL, DUP, CAT, TIPO, MONTO, APROB, OBS, URL, USR, OCR, CONF, EXP, F_EXP, LOTE, M_APROB]
+    // Mapear columnas por nombre (robusto a cualquier estructura del Sheet)
+    const regH = {};
+    (regAll[0] || []).forEach((h, i) => regH[h] = i);
+    const ingH = {};
+    (ingAll[0] || []).forEach((h, i) => ingH[h] = i);
+
+    // Verificar columnas críticas
+    const required = ['PROYECTO', 'FECHA_FACTURA', 'MONTO', 'APROBADO'];
+    const missing = required.filter(c => regH[c] === undefined);
+    if(missing.length > 0){
+      throw new Error('Columnas faltantes en REGISTRO: ' + missing.join(', ') + '. Corre "Reparar fórmulas" en Settings.');
+    }
+
+    const registros = regAll.slice(1);
+    const ingresos = ingAll.slice(1);
+
+    // Filtrar registros aprobados del periodo
     const filtrados = registros.filter(r => {
-      if(!r[0]) return false;
-      const projMatch = !proyecto || r[1] === proyecto;
-      const fecha = r[4] || r[3]; // FECHA_FACTURA o FECHA_REGISTRO como fallback
+      if(!r[regH.ID] && !r[0]) return false;
+      const projMatch = !proyecto || r[regH.PROYECTO] === proyecto;
+      const fecha = r[regH.FECHA_FACTURA] || r[regH.FECHA_REGISTRO] || '';
       const fechaMatch = fecha >= desde && fecha <= hasta;
-      const numMatch = !numero || (r[2] || '').toLowerCase().includes(numero.toLowerCase());
-      const aprobMatch = r[13] === 'SI';
+      const repNum = regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '';
+      const numMatch = !numero || repNum.toLowerCase().includes(numero.toLowerCase());
+      const aprobMatch = r[regH.APROBADO] === 'SI';
       return projMatch && fechaMatch && numMatch && aprobMatch;
     });
 
     // Ingresos del periodo
-    // Estructura: [ID, FECHA, PROYECTO, TIPO, MONTO, REFERENCIA]
     const ingFiltrados = ingresos.filter(r => {
       if(!r[0]) return false;
-      const projMatch = !proyecto || r[2] === proyecto;
-      const fechaMatch = r[1] >= desde && r[1] <= hasta;
+      const projMatch = !proyecto || r[ingH.PROYECTO] === proyecto;
+      const fechaMatch = (r[ingH.FECHA] || '') >= desde && (r[ingH.FECHA] || '') <= hasta;
       return projMatch && fechaMatch;
     });
 
-    // Calcular totales
-    const totalEgresos = filtrados.reduce((s, r) => s + (parseFloat(r[12]) || 0), 0);
-    const totalIngresos = ingFiltrados.reduce((s, r) => s + (parseFloat(r[4]) || 0), 0);
+    // Totales
+    const totalEgresos = filtrados.reduce((s, r) => s + (parseFloat(r[regH.MONTO]) || 0), 0);
+    const totalIngresos = ingFiltrados.reduce((s, r) => s + (parseFloat(r[ingH.MONTO]) || 0), 0);
 
     // Agrupar por categoría
     const porCategoria = {};
     filtrados.forEach(r => {
-      const cat = r[10] || 'OTR';
+      const cat = r[regH.CATEGORIA] || 'OTR';
       const catNombre = (masters.categories.find(c => c.cod === cat) || {nombre: cat}).nombre;
-      porCategoria[catNombre] = (porCategoria[catNombre] || 0) + (parseFloat(r[12]) || 0);
+      porCategoria[catNombre] = (porCategoria[catNombre] || 0) + (parseFloat(r[regH.MONTO]) || 0);
     });
 
     // Agrupar por obra (si es "todas")
     const porObra = {};
     if(!proyecto){
       filtrados.forEach(r => {
-        const cod = r[1];
+        const cod = r[regH.PROYECTO];
         const projObj = masters.projects.find(p => p.cod === cod);
         const nombre = projObj ? projObj.nombre : cod;
-        porObra[cod + ' · ' + nombre] = (porObra[cod + ' · ' + nombre] || 0) + (parseFloat(r[12]) || 0);
+        const key = cod + ' · ' + nombre;
+        porObra[key] = (porObra[key] || 0) + (parseFloat(r[regH.MONTO]) || 0);
       });
     }
 
-    // Nombre del proyecto para mostrar
+    // Nombre de obra para el header del reporte
     const projObj = proyecto ? masters.projects.find(p => p.cod === proyecto) : null;
     const nombreObra = projObj ? projObj.nombre : 'Todas las obras';
     const codObra = projObj ? projObj.cod : '';
 
-    // Renderizar
-    const reporteHTML = renderReporte({
+    // Mapear filtrados a formato normalizado para renderizar
+    const filasNormalizadas = filtrados.map(r => ({
+      fecha: r[regH.FECHA_FACTURA] || r[regH.FECHA_REGISTRO] || '',
+      suplidor: r[regH.SUPLIDOR] || '',
+      ncf: r[regH.NCF] || '',
+      categoria: (masters.categories.find(c => c.cod === r[regH.CATEGORIA]) || {nombre: r[regH.CATEGORIA] || ''}).nombre,
+      no_reporte: regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '',
+      monto: parseFloat(r[regH.MONTO]) || 0
+    }));
+
+    document.getElementById('rep-resultado').innerHTML = renderReporte({
       nombreObra, codObra, desde, hasta, numero,
       totalEgresos, totalIngresos, neto: totalIngresos - totalEgresos,
-      porCategoria, porObra, filtrados,
+      porCategoria, porObra, filtrados: filasNormalizadas,
       fechaGeneracion: new Date().toLocaleString('es-DO')
     });
-
-    document.getElementById('rep-resultado').innerHTML = reporteHTML;
     document.getElementById('rep-resultado').style.display = 'block';
     loading(false);
 
@@ -1797,14 +1821,14 @@ function renderReporte(d){
     .map(([k,v]) => `<tr><td>${k}</td><td style="text-align:right;font-family:var(--mono)">${fmt(v)}</td></tr>`).join('');
 
   const detRows = d.filtrados
-    .sort((a,b) => (a[4]||'').localeCompare(b[4]||''))
+    .sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
     .map(r => `<tr>
-      <td>${r[4] || r[3] || ''}</td>
-      <td>${r[5] || ''}</td>
-      <td style="font-family:var(--mono);font-size:11px">${r[7] || ''}</td>
-      <td>${(masters.categories.find(c => c.cod === r[10]) || {nombre: r[10] || ''}).nombre}</td>
-      <td style="font-family:var(--mono)">${r[2] || ''}</td>
-      <td style="text-align:right;font-family:var(--mono)">${fmt(parseFloat(r[12])||0)}</td>
+      <td>${r.fecha}</td>
+      <td>${r.suplidor}</td>
+      <td style="font-family:var(--mono);font-size:11px">${r.ncf}</td>
+      <td>${r.categoria}</td>
+      <td style="font-family:var(--mono)">${r.no_reporte}</td>
+      <td style="text-align:right;font-family:var(--mono)">${fmt(r.monto)}</td>
     </tr>`).join('');
 
   const filtrosTexto = [];
