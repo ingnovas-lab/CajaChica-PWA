@@ -144,6 +144,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
 /* ============ IMPRESIÓN ============ */
 /* Al imprimir, ocultamos TODO menos el reporte y forzamos colores claros */
+@page {
+  margin: 1.2cm 1.2cm 1.5cm 1.2cm;
+  size: A4;
+}
 @media print {
   body{background:#fff !important;color:#111 !important;max-width:none !important}
   .topbar, nav, #toast, .modal-bg, #loader, .alert, button, .btn,
@@ -153,17 +157,21 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   .body { padding:0 !important }
   .card { background:#fff !important; color:#111 !important; border:none !important; box-shadow:none !important; padding:0 !important }
   h3, h4 { color:#111 !important }
-  table { border-collapse:collapse !important; width:100% !important }
+  table { border-collapse:collapse !important; width:100% !important; page-break-inside:auto }
+  tr { page-break-inside:avoid; page-break-after:auto }
+  thead { display:table-header-group }
   table td, table th { color:#111 !important; padding:6px 8px !important; border-bottom:1px solid #ddd !important }
   table th { background:#f5f5f5 !important; font-size:10px !important; text-transform:uppercase }
   .stats { display:flex !important; gap:10px !important; margin-bottom:12px !important }
-  .stat { flex:1 !important; background:#fff !important; border:1px solid #ccc !important; color:#111 !important; padding:10px !important; border-radius:6px !important }
-  .stat-val { color:#111 !important }
+  /* STATS centrados en impresión */
+  .stat { flex:1 !important; background:#fff !important; border:1px solid #cbd5e1 !important; color:#111 !important; padding:12px 10px !important; border-radius:6px !important; text-align:center !important }
+  .stat-val { color:#111 !important; font-size:18pt !important; font-weight:700 !important }
   .stat-val.green { color:#15803d !important }
   .stat-val.red { color:#b91c1c !important }
-  .stat-label { color:#666 !important }
+  .stat-label { color:#666 !important; font-size:9pt !important }
+  /* Neto del periodo: fondo ámbar suave para que destaque */
+  .stat-neto { background:#fef3c7 !important; border:1.5px solid #f59e0b !important }
   .entry-thumb, .hcard-thumb, img { display:none !important }
-  @page { margin:1cm }
 }
 </style>
 </head>
@@ -1870,10 +1878,10 @@ function renderReporte(d){
       </div>
 
       <div class="stats" style="margin-bottom:14px">
-        <div class="stat"><div class="stat-label">Ingresos</div><div class="stat-val green mono">${fmt(d.totalIngresos)}</div></div>
-        <div class="stat"><div class="stat-label">Egresos</div><div class="stat-val red mono">${fmt(d.totalEgresos)}</div></div>
+        <div class="stat" style="text-align:center"><div class="stat-label">Ingresos</div><div class="stat-val green mono">${fmt(d.totalIngresos)}</div></div>
+        <div class="stat" style="text-align:center"><div class="stat-label">Egresos</div><div class="stat-val red mono">${fmt(d.totalEgresos)}</div></div>
       </div>
-      <div class="stat" style="margin-bottom:16px;background:${d.neto >= 0 ? '#052e16' : '#450a0a'};border-color:${d.neto >= 0 ? '#166534' : '#991b1b'}">
+      <div class="stat stat-neto" style="margin-bottom:16px;text-align:center;background:${d.neto >= 0 ? '#052e16' : '#450a0a'};border-color:${d.neto >= 0 ? '#166534' : '#991b1b'}">
         <div class="stat-label">Neto del periodo</div>
         <div class="stat-val mono" style="color:${d.neto >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(d.neto)}</div>
       </div>
