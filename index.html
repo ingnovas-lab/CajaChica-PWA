@@ -273,6 +273,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button class="btn" onclick="show('pg-history')">Ver pendientes</button>
     </div>
 
+    <button class="btn btn-purple" onclick="show('pg-reportes')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Generar reporte de balance
+    </button>
+
     <div id="home-recent" style="display:none">
       <div style="display:flex;align-items:center;justify-content:space-between;margin:4px 0 8px">
         <span style="font-size:11px;color:var(--text2);font-weight:500;text-transform:uppercase;letter-spacing:.05em">Últimos registros</span>
@@ -342,24 +347,24 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div id="ncf-status" class="ncf-status"></div>
     </div>
 
-    <div class="grid2">
-      <div class="field">
-        <div class="lbl">Monto (RD$)</div>
-        <input type="number" id="f-monto" placeholder="0.00" min="0" step="0.01" style="font-family:var(--mono);font-weight:600;color:var(--amber)">
-      </div>
-      <div class="field">
-        <div class="lbl">ITBIS (RD$)</div>
-        <input type="number" id="f-itbis" placeholder="0.00" min="0" step="0.01" style="font-family:var(--mono)">
-      </div>
+    <div class="field">
+      <div class="lbl">Monto (RD$)</div>
+      <input type="number" id="f-monto" placeholder="0.00" min="0" step="0.01" style="font-family:var(--mono);font-size:22px;font-weight:600;color:var(--amber)">
     </div>
 
-    <div class="field">
-      <div class="lbl">Tipo</div>
-      <select id="f-tipo">
-        <option value="GASTO">Gasto</option>
-        <option value="ANTICIPO">Anticipo</option>
-        <option value="REEMBOLSO">Reembolso</option>
-      </select>
+    <div class="grid2">
+      <div class="field">
+        <div class="lbl">Tipo</div>
+        <select id="f-tipo">
+          <option value="GASTO">Gasto</option>
+          <option value="ANTICIPO">Anticipo</option>
+          <option value="REEMBOLSO">Reembolso</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="lbl">No. de reporte</div>
+        <input type="text" id="f-reporte" placeholder="ej. R-042" style="font-family:var(--mono)">
+      </div>
     </div>
 
     <div class="field">
@@ -434,6 +439,48 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       Sincronizar con Google Sheets
     </button>
+  </div>
+</div>
+
+<!-- ========== PAGE: REPORTES ========== -->
+<div class="page" id="pg-reportes">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-home')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Reporte de balance</div>
+      <div class="topbar-sub">Filtra y genera PDF</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="card" id="rep-filtros">
+      <h3>Filtros</h3>
+      <div class="field">
+        <div class="lbl">Obra</div>
+        <select id="rep-proyecto"></select>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <div class="lbl">Desde</div>
+          <input type="date" id="rep-desde">
+        </div>
+        <div class="field">
+          <div class="lbl">Hasta</div>
+          <input type="date" id="rep-hasta">
+        </div>
+      </div>
+      <div class="field">
+        <div class="lbl">No. de reporte (opcional)</div>
+        <input type="text" id="rep-numero" placeholder="Deja vacío para todos" style="font-family:var(--mono)">
+      </div>
+      <button class="btn btn-amber" onclick="generarReporte()" style="padding:14px;margin-top:10px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Generar reporte
+      </button>
+    </div>
+
+    <div id="rep-resultado" style="display:none"></div>
   </div>
 </div>
 
@@ -537,6 +584,7 @@ function show(id){
     document.getElementById('set-ssid').textContent = localStorage.getItem(LS.SSID) || '—';
   }
   if(id==='pg-abono') document.getElementById('ab-fecha').value = today();
+  if(id==='pg-reportes') initReportes();
 }
 
 function loading(on, title, msg){
@@ -747,8 +795,8 @@ async function createNewSheet(){
     const email = localStorage.getItem(LS.EMAIL);
     const data = [
       {range: 'REGISTRO!A1:W1', values: [[
-        'ID','PROYECTO','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF',
-        'VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO','ITBIS',
+        'ID','PROYECTO','NO_REPORTE','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF',
+        'VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO',
         'APROBADO','OBSERVACIONES','URL_FACTURA','USUARIO','OCR_STATUS',
         'OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO'
       ]]},
@@ -789,22 +837,22 @@ async function createNewSheet(){
     ];
     await sheetsAppend('DASHBOARD!A2', dashFormulas);
 
-    // 4. Fórmulas en REGISTRO: H=VALIDACION_NCF, I=DUPLICADO, W=MONTO_APROBADO
+    // 4. Fórmulas en REGISTRO: I=VALIDACION_NCF, J=DUPLICADO, W=MONTO_APROBADO (NCF está en H)
     const regFormulas = [
-      ['=ARRAYFORMULA(IF(ROW(G:G)=1,"VALIDACION_NCF",IF(G:G="","",IF(REGEXMATCH(UPPER(G:G),"^((B0[1-9]|B1[1-6])\\d{8}|(E3[1-4]|E4[1-7])\\d{10})$"),"OK","INVALIDO"))))',
-       '=ARRAYFORMULA(IF(ROW(G:G)=1,"DUPLICADO",IF(G:G="","",IF(COUNTIF(G:G,G:G)>1,"DUPLICADO","OK"))))']
+      ['=ARRAYFORMULA(IF(ROW(H:H)=1,"VALIDACION_NCF",IF(H:H="","",IF(REGEXMATCH(UPPER(H:H),"^((B0[1-9]|B1[1-6])\\d{8}|(E3[1-4]|E4[1-7])\\d{10})$"),"OK","INVALIDO"))))',
+       '=ARRAYFORMULA(IF(ROW(H:H)=1,"DUPLICADO",IF(H:H="","",IF(COUNTIF(H:H,H:H)>1,"DUPLICADO","OK"))))']
     ];
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!H1:I1?valueInputOption=USER_ENTERED`, {
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!I1:J1?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: JSON.stringify({values: regFormulas})
     });
 
-    // Columna W: MONTO_APROBADO (MONTO si APROBADO=SI, 0 si no). Usada por DASHBOARD.
+    // Columna W: MONTO_APROBADO (MONTO si APROBADO=SI, 0 si no). MONTO está en M, APROBADO en N.
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(L:L)=1,"MONTO_APROBADO",IF(N:N="SI",IFERROR(L:L*1,0),0)))']]})
+      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF(N:N="SI",IFERROR(M:M*1,0),0)))']]})
     });
 
     // 5. Mover el Spreadsheet a la carpeta raíz de caja chica
@@ -914,7 +962,6 @@ async function geminiOCR(imageBase64){
       ncf: {type: 'string'},
       fecha: {type: 'string'},
       monto_total: {type: 'number'},
-      itbis: {type: 'number'},
       categoria_sugerida: {type: 'string'},
       confianza: {type: 'number'}
     },
@@ -925,7 +972,7 @@ async function geminiOCR(imageBase64){
 - NCF: B01-B16 + 8 dígitos (11 total) o E31-E47 + 10 dígitos (13 total). Si no cumple, vacío.
 - RNC: 9 u 11 dígitos solo números.
 - Fecha: YYYY-MM-DD.
-- Monto total: número con decimales.
+- Monto total: número con decimales. IMPORTANTE: siempre el TOTAL de la factura (incluye impuestos).
 - categoria_sugerida: MAT (materiales) / MOB (mano de obra) / TRA (transporte) / EQU (equipos) / COM (combustible) / SER (servicios) / OTR (otros).
 - confianza: 0 a 1.
 Si no ves un campo, déjalo vacío o 0.`;
@@ -1067,16 +1114,20 @@ async function refreshHome(){
   const rw = document.getElementById('home-recent');
   if(myPending.length > 0){
     rw.style.display = 'block';
-    box.innerHTML = myPending.slice(0, 3).map(p => `
+    box.innerHTML = myPending.slice(0, 3).map(p => {
+      const thumb = p.image_base64
+        ? `<img class="entry-thumb" src="data:${p.image_mime || 'image/jpeg'};base64,${p.image_base64}" alt="">`
+        : `<div class="entry-icon">${p.tipo_registro === 'ABONO' ? '+' : '−'}</div>`;
+      return `
       <div class="entry">
-        <div class="entry-icon">${p.tipo_registro === 'ABONO' ? '+' : '−'}</div>
+        ${thumb}
         <div class="entry-info">
-          <div class="entry-name">${p.suplidor || '(sin suplidor)'}</div>
-          <div class="entry-meta">${p.categoria || ''} · ${p.fecha || ''}</div>
+          <div class="entry-name">${p.suplidor || (p.tipo_registro === 'ABONO' ? 'Abono · ' + (p.tipo || '') : '(sin suplidor)')}</div>
+          <div class="entry-meta">${p.no_reporte ? p.no_reporte + ' · ' : ''}${p.categoria || ''} · ${p.fecha_factura || p.fecha || ''}</div>
         </div>
         <div class="entry-amt ${p.tipo_registro === 'ABONO' ? 'green' : 'red'}">${fmt(p.monto)}</div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   } else rw.style.display = 'none';
 }
 
@@ -1089,8 +1140,9 @@ async function refreshBalance(forceRemote){
   document.getElementById('balance-status').textContent = 'Actualizando...';
 
   try {
-    // EFICIENCIA CLAVE: leer solo la fila del DASHBOARD de este proyecto.
-    // No descargar el archivo entero.
+    // 1) Refrescar masters (proyectos, suplidores, categorías) — detecta cambios de nombres
+    await loadMasters();
+    // 2) Leer balance del proyecto actual
     const rows = await sheetsGet('DASHBOARD!A2:B');
     const row = rows.find(r => r[0] === proj.cod);
     const balance = row ? parseFloat(row[1]) || 0 : 0;
@@ -1153,6 +1205,8 @@ function onFile(inp){
     document.getElementById('cfm-img').src = e.target.result;
     document.getElementById('cfm-img-wrap').style.display = 'block';
     document.getElementById('f-fecha').value = today();
+    // Pre-rellenar con último No. de reporte usado (facilita registros en lote)
+    document.getElementById('f-reporte').value = localStorage.getItem('cc_last_reporte') || '';
     show('pg-confirm');
     await runOCR();
   };
@@ -1175,7 +1229,6 @@ async function runOCR(){
     if(data.fecha) document.getElementById('f-fecha').value = data.fecha;
     if(data.ncf) document.getElementById('f-ncf').value = (data.ncf || '').toUpperCase().replace(/\s/g,'');
     if(data.monto_total) document.getElementById('f-monto').value = data.monto_total;
-    if(data.itbis) document.getElementById('f-itbis').value = data.itbis;
     if(data.categoria_sugerida){
       const sel = document.getElementById('f-cat');
       if([...sel.options].find(o => o.value === data.categoria_sugerida)){
@@ -1234,6 +1287,7 @@ async function saveEntry(){
     id: uid(),
     tipo_registro: 'GASTO',
     proyecto: proj.cod,
+    no_reporte: document.getElementById('f-reporte').value.trim(),
     fecha_registro: new Date().toISOString(),
     fecha_factura: document.getElementById('f-fecha').value,
     suplidor: document.getElementById('f-sup').value.trim(),
@@ -1242,7 +1296,6 @@ async function saveEntry(){
     categoria: document.getElementById('f-cat').value,
     tipo: document.getElementById('f-tipo').value,
     monto: monto,
-    itbis: parseFloat(document.getElementById('f-itbis').value) || 0,
     aprobado: NCF_REGEX.test(ncf) ? 'SI' : 'PENDIENTE',
     observaciones: document.getElementById('f-obs').value.trim(),
     usuario: localStorage.getItem(LS.EMAIL),
@@ -1255,6 +1308,8 @@ async function saveEntry(){
 
   await dbAdd('pending', entry);
   currentCapture = null;
+  // Recordar último no_reporte para facilitar siguiente registro
+  if(entry.no_reporte) localStorage.setItem('cc_last_reporte', entry.no_reporte);
   toast('Guardado localmente', 'ok');
   show('pg-home');
 }
@@ -1342,12 +1397,15 @@ async function syncAll(){
       }
     }
 
-    // 2) Preparar filas para REGISTRO y INGRESOS
+    // 2) Preparar filas para REGISTRO (nueva estructura: NO_REPORTE en C, sin ITBIS)
+    // Orden: ID, PROYECTO, NO_REPORTE, FECHA_REGISTRO, FECHA_FACTURA, SUPLIDOR, RNC, NCF,
+    //        VAL_NCF(fórmula), DUP(fórmula), CATEGORIA, TIPO, MONTO, APROBADO, OBSERVACIONES,
+    //        URL_FACTURA, USUARIO, OCR_STATUS, OCR_CONFIDENCE, EXPORTADO, FECHA_EXPORT, LOTE_EXPORT
     const regRows = gastos.map(e => [
-      e.id, e.proyecto, e.fecha_registro.slice(0,10), e.fecha_factura,
-      e.suplidor, e.rnc, e.ncf.toUpperCase(),
-      '', '', // VALIDACION_NCF y DUPLICADO son fórmulas (ARRAYFORMULA en H1/I1), NO escribir aquí
-      e.categoria, e.tipo, e.monto, e.itbis,
+      e.id, e.proyecto, e.no_reporte || '', e.fecha_registro.slice(0,10), e.fecha_factura,
+      e.suplidor, e.rnc, (e.ncf || '').toUpperCase(),
+      '', '', // VALIDACION_NCF y DUPLICADO son fórmulas (ARRAYFORMULA en I1/J1), NO escribir aquí
+      e.categoria, e.tipo, e.monto,
       e.aprobado, e.observaciones, e.url_factura || '',
       e.usuario, e.ocr_status, e.ocr_confidence || 0,
       'NO', '', ''
@@ -1502,26 +1560,69 @@ async function refreshData(){
   }
 }
 
-// Repara fórmulas del DASHBOARD (para sheets creados con versión vieja de la app)
-// Agrega columna W = MONTO_APROBADO a REGISTRO y reescribe fórmulas de DASHBOARD
+// Repara fórmulas del DASHBOARD + migra estructura del Sheet a la versión actual
+// (inserta columna NO_REPORTE en C si no existe, actualiza fórmulas)
 async function repairFormulas(){
-  if(!confirm('Esto reescribirá las fórmulas del DASHBOARD y agregará una columna auxiliar en REGISTRO. ¿Continuar?')) return;
+  if(!confirm('Esto migrará el Sheet a la estructura actualizada: agrega columna NO_REPORTE y repara las fórmulas. Tus datos existentes se preservan. ¿Continuar?')) return;
 
   const token = getToken();
   if(!token){ toast('Sesión expirada', 'err'); return; }
   const ssid = localStorage.getItem(LS.SSID);
   if(!ssid){ toast('Sin base de datos', 'err'); return; }
 
-  loading(true, 'Reparando', 'Actualizando fórmulas...');
+  loading(true, 'Migrando', 'Leyendo estructura...');
   try {
-    // 1. Columna auxiliar MONTO_APROBADO en REGISTRO!W
+    // 1. Obtener sheetId de REGISTRO y headers actuales
+    const ssRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    const ssData = await ssRes.json();
+    const regSheet = ssData.sheets.find(s => s.properties.title === 'REGISTRO');
+    if(!regSheet) throw new Error('Hoja REGISTRO no encontrada');
+    const regSheetId = regSheet.properties.sheetId;
+
+    const headers = await sheetsGet('REGISTRO!A1:Z1');
+    const headerRow = headers[0] || [];
+    const hasNoReporte = headerRow.includes('NO_REPORTE');
+
+    // 2. Si no tiene NO_REPORTE, insertarla en columna C
+    if(!hasNoReporte){
+      loading(true, 'Migrando', 'Insertando columna NO_REPORTE...');
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          requests: [{
+            insertDimension: {
+              range: {
+                sheetId: regSheetId,
+                dimension: 'COLUMNS',
+                startIndex: 2,  // columna C (0-indexed)
+                endIndex: 3
+              },
+              inheritFromBefore: false
+            }
+          }]
+        })
+      });
+
+      // 3. Poner el header NO_REPORTE en C1
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!C1?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({values: [['NO_REPORTE']]})
+      });
+    }
+
+    // 4. Reescribir fórmulas MONTO_APROBADO con las nuevas posiciones (M=MONTO, N=APROBADO)
+    loading(true, 'Migrando', 'Actualizando fórmulas...');
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(L:L)=1,"MONTO_APROBADO",IF(N:N="SI",IFERROR(L:L*1,0),0)))']]})
+      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF(N:N="SI",IFERROR(M:M*1,0),0)))']]})
     });
 
-    // 2. Fórmulas corregidas en DASHBOARD A2:C2 (SUMIF con 1 condición sí se vectoriza)
+    // 5. Fórmulas de DASHBOARD (balance por proyecto)
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/DASHBOARD!A2:C2?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
@@ -1532,15 +1633,13 @@ async function repairFormulas(){
       ]]})
     });
 
-    // 3. Header de REGISTRO!W1 — lo escribimos de nuevo por si el sheet viejo no lo tenía
-    // (la fórmula ya puesta arriba pone el header automáticamente via IF(ROW=1,"MONTO_APROBADO",...))
-
     loading(false);
-    toast('Fórmulas reparadas', 'ok');
+    toast(hasNoReporte ? 'Fórmulas actualizadas' : 'Migración completa', 'ok');
     setTimeout(() => refreshBalance(true), 800);
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
+    console.error(e);
   }
 }
 
@@ -1556,6 +1655,216 @@ function showModal(html){
   document.getElementById('modal').classList.add('show');
 }
 function closeModal(){ document.getElementById('modal').classList.remove('show'); }
+
+// ============================================================
+// REPORTES DE BALANCE
+// ============================================================
+function initReportes(){
+  // Llenar dropdown de obras
+  const sel = document.getElementById('rep-proyecto');
+  sel.innerHTML = '<option value="">— Todas las obras —</option>' +
+    masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
+
+  // Preseleccionar obra actual
+  const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+  if(currentProj) sel.value = currentProj.cod;
+
+  // Defaults de fechas: últimos 30 días
+  const hoy = new Date();
+  const hace30 = new Date(hoy.getTime() - 30 * 86400000);
+  document.getElementById('rep-desde').value = hace30.toISOString().slice(0,10);
+  document.getElementById('rep-hasta').value = hoy.toISOString().slice(0,10);
+  document.getElementById('rep-numero').value = '';
+
+  // Ocultar resultado previo
+  document.getElementById('rep-resultado').style.display = 'none';
+}
+
+async function generarReporte(){
+  const proyecto = document.getElementById('rep-proyecto').value;
+  const desde = document.getElementById('rep-desde').value;
+  const hasta = document.getElementById('rep-hasta').value;
+  const numero = document.getElementById('rep-numero').value.trim();
+
+  if(!desde || !hasta){ toast('Selecciona fechas', 'err'); return; }
+  if(desde > hasta){ toast('La fecha desde es mayor que hasta', 'err'); return; }
+
+  loading(true, 'Generando reporte', 'Leyendo datos del Sheet...');
+  try {
+    // Leer REGISTRO e INGRESOS del Sheet (desde la nueva estructura)
+    const [regData, ingData] = await sheetsBatchGet(['REGISTRO!A2:W', 'INGRESOS!A2:F']);
+    const registros = regData.values || [];
+    const ingresos = ingData.values || [];
+
+    // Filtrar registros según criterios
+    // Estructura nueva: [ID, PROYECTO, NO_REPORTE, FECHA_REG, FECHA_FAC, SUP, RNC, NCF, VAL, DUP, CAT, TIPO, MONTO, APROB, OBS, URL, USR, OCR, CONF, EXP, F_EXP, LOTE, M_APROB]
+    const filtrados = registros.filter(r => {
+      if(!r[0]) return false;
+      const projMatch = !proyecto || r[1] === proyecto;
+      const fecha = r[4] || r[3]; // FECHA_FACTURA o FECHA_REGISTRO como fallback
+      const fechaMatch = fecha >= desde && fecha <= hasta;
+      const numMatch = !numero || (r[2] || '').toLowerCase().includes(numero.toLowerCase());
+      const aprobMatch = r[13] === 'SI';
+      return projMatch && fechaMatch && numMatch && aprobMatch;
+    });
+
+    // Ingresos del periodo
+    // Estructura: [ID, FECHA, PROYECTO, TIPO, MONTO, REFERENCIA]
+    const ingFiltrados = ingresos.filter(r => {
+      if(!r[0]) return false;
+      const projMatch = !proyecto || r[2] === proyecto;
+      const fechaMatch = r[1] >= desde && r[1] <= hasta;
+      return projMatch && fechaMatch;
+    });
+
+    // Calcular totales
+    const totalEgresos = filtrados.reduce((s, r) => s + (parseFloat(r[12]) || 0), 0);
+    const totalIngresos = ingFiltrados.reduce((s, r) => s + (parseFloat(r[4]) || 0), 0);
+
+    // Agrupar por categoría
+    const porCategoria = {};
+    filtrados.forEach(r => {
+      const cat = r[10] || 'OTR';
+      const catNombre = (masters.categories.find(c => c.cod === cat) || {nombre: cat}).nombre;
+      porCategoria[catNombre] = (porCategoria[catNombre] || 0) + (parseFloat(r[12]) || 0);
+    });
+
+    // Agrupar por obra (si es "todas")
+    const porObra = {};
+    if(!proyecto){
+      filtrados.forEach(r => {
+        const cod = r[1];
+        const projObj = masters.projects.find(p => p.cod === cod);
+        const nombre = projObj ? projObj.nombre : cod;
+        porObra[cod + ' · ' + nombre] = (porObra[cod + ' · ' + nombre] || 0) + (parseFloat(r[12]) || 0);
+      });
+    }
+
+    // Nombre del proyecto para mostrar
+    const projObj = proyecto ? masters.projects.find(p => p.cod === proyecto) : null;
+    const nombreObra = projObj ? projObj.nombre : 'Todas las obras';
+    const codObra = projObj ? projObj.cod : '';
+
+    // Renderizar
+    const reporteHTML = renderReporte({
+      nombreObra, codObra, desde, hasta, numero,
+      totalEgresos, totalIngresos, neto: totalIngresos - totalEgresos,
+      porCategoria, porObra, filtrados,
+      fechaGeneracion: new Date().toLocaleString('es-DO')
+    });
+
+    document.getElementById('rep-resultado').innerHTML = reporteHTML;
+    document.getElementById('rep-resultado').style.display = 'block';
+    loading(false);
+
+    // Scroll al resultado
+    setTimeout(() => document.getElementById('rep-resultado').scrollIntoView({behavior:'smooth', block:'start'}), 100);
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+function renderReporte(d){
+  const catRows = Object.entries(d.porCategoria).sort((a,b) => b[1]-a[1])
+    .map(([k,v]) => `<tr><td>${k}</td><td style="text-align:right;font-family:var(--mono)">${fmt(v)}</td></tr>`).join('');
+  const obraRows = Object.entries(d.porObra).sort((a,b) => b[1]-a[1])
+    .map(([k,v]) => `<tr><td>${k}</td><td style="text-align:right;font-family:var(--mono)">${fmt(v)}</td></tr>`).join('');
+
+  const detRows = d.filtrados
+    .sort((a,b) => (a[4]||'').localeCompare(b[4]||''))
+    .map(r => `<tr>
+      <td>${r[4] || r[3] || ''}</td>
+      <td>${r[5] || ''}</td>
+      <td style="font-family:var(--mono);font-size:11px">${r[7] || ''}</td>
+      <td>${(masters.categories.find(c => c.cod === r[10]) || {nombre: r[10] || ''}).nombre}</td>
+      <td style="font-family:var(--mono)">${r[2] || ''}</td>
+      <td style="text-align:right;font-family:var(--mono)">${fmt(parseFloat(r[12])||0)}</td>
+    </tr>`).join('');
+
+  const filtrosTexto = [];
+  if(d.numero) filtrosTexto.push(`No. reporte: <strong>${d.numero}</strong>`);
+  filtrosTexto.push(`Del <strong>${d.desde}</strong> al <strong>${d.hasta}</strong>`);
+
+  return `
+  <div id="reporte-body" class="card" style="padding:16px">
+    <div id="reporte-printable">
+      <div style="text-align:center;border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:16px">
+        <div style="font-size:16px;font-weight:600">REPORTE DE BALANCE</div>
+        <div style="font-size:13px;color:var(--text2);margin-top:3px">${d.nombreObra}${d.codObra ? ' · '+d.codObra : ''}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:6px">${filtrosTexto.join(' · ')}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px">Generado: ${d.fechaGeneracion}</div>
+      </div>
+
+      <div class="stats" style="margin-bottom:14px">
+        <div class="stat"><div class="stat-label">Ingresos</div><div class="stat-val green mono">${fmt(d.totalIngresos)}</div></div>
+        <div class="stat"><div class="stat-label">Egresos</div><div class="stat-val red mono">${fmt(d.totalEgresos)}</div></div>
+      </div>
+      <div class="stat" style="margin-bottom:16px;background:${d.neto >= 0 ? '#052e16' : '#450a0a'};border-color:${d.neto >= 0 ? '#166534' : '#991b1b'}">
+        <div class="stat-label">Neto del periodo</div>
+        <div class="stat-val mono" style="color:${d.neto >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(d.neto)}</div>
+      </div>
+
+      ${obraRows ? `<h4 style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text2);margin-bottom:8px">Egresos por obra</h4>
+      <table style="width:100%;font-size:13px;margin-bottom:14px">
+        <tbody>${obraRows}</tbody>
+      </table>` : ''}
+
+      <h4 style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text2);margin-bottom:8px">Egresos por categoría</h4>
+      <table style="width:100%;font-size:13px;margin-bottom:14px">
+        <tbody>${catRows || '<tr><td colspan="2" style="color:var(--text2);text-align:center">Sin datos</td></tr>'}</tbody>
+      </table>
+
+      <h4 style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text2);margin-bottom:8px">Detalle de facturas (${d.filtrados.length})</h4>
+      <div style="overflow-x:auto">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="border-bottom:1px solid var(--border);color:var(--text2);font-size:10px;text-transform:uppercase;letter-spacing:.04em">
+          <th style="text-align:left;padding:6px 4px">Fecha</th>
+          <th style="text-align:left;padding:6px 4px">Suplidor</th>
+          <th style="text-align:left;padding:6px 4px">NCF</th>
+          <th style="text-align:left;padding:6px 4px">Categoría</th>
+          <th style="text-align:left;padding:6px 4px">No. Rep.</th>
+          <th style="text-align:right;padding:6px 4px">Monto</th>
+        </tr></thead>
+        <tbody>${detRows || '<tr><td colspan="6" style="color:var(--text2);text-align:center;padding:16px">Sin facturas en este periodo</td></tr>'}</tbody>
+      </table>
+      </div>
+    </div>
+
+    <button class="btn btn-amber" onclick="imprimirReporte()" style="margin-top:16px;padding:13px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+      Imprimir / Guardar PDF
+    </button>
+  </div>`;
+}
+
+function imprimirReporte(){
+  // Abrir ventana de impresión solo con el contenido del reporte
+  const body = document.getElementById('reporte-printable');
+  if(!body){ toast('No hay reporte para imprimir', 'err'); return; }
+
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reporte de balance</title>
+    <style>
+      body{font-family:Arial,sans-serif;color:#111;background:#fff;margin:24px;font-size:12px;line-height:1.5}
+      table{width:100%;border-collapse:collapse;margin:10px 0}
+      th,td{padding:6px 8px;text-align:left;border-bottom:1px solid #ddd}
+      th{background:#f5f5f5;font-size:10px;text-transform:uppercase;color:#555;letter-spacing:.04em}
+      .stats{display:flex;gap:10px;margin-bottom:14px}
+      .stat{flex:1;border:1px solid #ddd;padding:12px;border-radius:6px;text-align:center}
+      .stat-label{font-size:10px;text-transform:uppercase;color:#666;margin-bottom:4px}
+      .stat-val{font-size:20px;font-weight:600}
+      .stat-val.green{color:#15803d}
+      .stat-val.red{color:#b91c1c}
+      .mono{font-family:'Courier New',monospace}
+      h4{font-size:11px;text-transform:uppercase;color:#555;letter-spacing:.04em;margin:16px 0 6px}
+      @media print{body{margin:0}}
+    </style>
+    </head><body>${body.innerHTML}</body></html>`);
+  win.document.close();
+  setTimeout(() => { win.print(); }, 300);
+}
 
 // ============================================================
 // SERVICE WORKER (PWA real)
