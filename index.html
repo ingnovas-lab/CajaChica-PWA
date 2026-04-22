@@ -1555,24 +1555,34 @@ function applyRoleUI(){
 
 async function loadMasters(){
   try {
-    const email = localStorage.getItem(LS.EMAIL);
+    const email = (localStorage.getItem(LS.EMAIL) || '').trim().toLowerCase();
     const batch = await sheetsBatchGet(['PROYECTOS!A2:F', 'SUPLIDORES!A2:D', 'CATEGORIAS!A2:C', 'USUARIOS!A2:D']);
     const [proj, sup, cat, usr] = batch.map(b => b.values || []);
 
     // Filtrar proyectos por USUARIOS_ASIGNADOS del usuario actual
-    const myRow = usr.find(r => r[0] === email);
+    // Normalizamos emails (minúsculas + trim) para evitar problemas de case/espacios
+    const myRow = usr.find(r => (r[0] || '').trim().toLowerCase() === email);
     const myProjCodes = myRow ? (myRow[3] || '').split(',').map(s => s.trim()).filter(Boolean) : [];
-    const amAdmin = myRow && myRow[2] === 'ADMIN';
+    const amAdmin = myRow && (myRow[2] || '').trim().toUpperCase() === 'ADMIN';
     masters.myRole = amAdmin ? 'ADMIN' : 'USUARIO';
 
+    // Log útil para diagnosticar problemas de permisos
+    if(!myRow){
+      console.warn('[loadMasters] No se encontró fila para email actual:', email, '— Usuarios en Sheet:', usr.map(r => r[0]));
+    } else if(!amAdmin && myProjCodes.length === 0){
+      console.warn('[loadMasters] Usuario sin obras asignadas. Revisa columna D (PROYECTOS_ASIGNADOS) del Sheet para:', email);
+    }
+
     masters.projects = proj
-      .filter(r => r[0] && (r[4] === 'ACTIVO'))
-      .filter(r => amAdmin || myProjCodes.includes(r[0]))
-      .map(r => ({cod: r[0], nombre: r[1], ubicacion: r[2], fondo: +r[3]||0}));
+      .filter(r => r[0] && (r[4] || '').trim().toUpperCase() === 'ACTIVO')
+      .filter(r => amAdmin || myProjCodes.includes((r[0] || '').trim()))
+      .map(r => ({cod: (r[0] || '').trim(), nombre: r[1], ubicacion: r[2], fondo: +r[3]||0}));
 
     // Lista COMPLETA de usuarios (solo el admin la usa en Gestionar usuarios)
     masters.users = usr.filter(r => r[0]).map(r => ({
-      email: r[0], nombre: r[1] || '', rol: r[2] || 'USUARIO',
+      email: (r[0] || '').trim().toLowerCase(),
+      nombre: r[1] || '',
+      rol: (r[2] || 'USUARIO').trim().toUpperCase(),
       proyectos: (r[3] || '').split(',').map(s => s.trim()).filter(Boolean)
     }));
 
