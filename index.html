@@ -790,6 +790,37 @@ async function sheetsAppend(range, values){
     if(existing[i] && existing[i][0]) lastRow = i + 1; // 1-indexed
   }
   const nextRow = lastRow + 1;
+  const finalRow = nextRow + values.length - 1;
+
+  // Asegurar que el Sheet tiene suficientes filas físicas.
+  // Si el usuario borró filas y la hoja quedó reducida, un update en una fila
+  // fuera de rango falla con "exceeds grid limits". Solución: expandir el grid
+  // con appendDimension antes de escribir.
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`, {
+    headers: {'Authorization': 'Bearer ' + token}
+  });
+  const metaData = await metaRes.json();
+  const sheetMeta = metaData.sheets.find(s => s.properties.title === sheetName);
+  if(!sheetMeta) throw new Error('Hoja ' + sheetName + ' no encontrada');
+  const currentRows = sheetMeta.properties.gridProperties.rowCount;
+  const sheetId = sheetMeta.properties.sheetId;
+
+  if(finalRow > currentRows){
+    const rowsToAdd = finalRow - currentRows + 50; // +50 de buffer para futuras escrituras
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        requests: [{
+          appendDimension: {
+            sheetId: sheetId,
+            dimension: 'ROWS',
+            length: rowsToAdd
+          }
+        }]
+      })
+    });
+  }
 
   // Update directo en la siguiente fila vacía
   const writeRange = `${sheetName}!A${nextRow}`;
