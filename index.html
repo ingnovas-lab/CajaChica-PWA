@@ -41,8 +41,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .btn-blue{background:#172554;border-color:#1e40af;color:var(--blue)}
 .btn-purple{background:#2e1065;border-color:#6d28d9;color:#c4b5fd}
 
-input,select,textarea{font-family:var(--font);font-size:15px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;width:100%;outline:none;-webkit-appearance:none;appearance:none}
-input:focus,select:focus,textarea:focus{border-color:var(--amber)}
+input:not([type=checkbox]):not([type=radio]),select,textarea{font-family:var(--font);font-size:15px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;width:100%;outline:none;-webkit-appearance:none;appearance:none}
+input:not([type=checkbox]):not([type=radio]):focus,select:focus,textarea:focus{border-color:var(--amber)}
+input[type=checkbox],input[type=radio]{width:20px;height:20px;accent-color:var(--amber);cursor:pointer;flex-shrink:0;margin:0}
 textarea{min-height:70px;resize:vertical;font-family:var(--font)}
 select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:38px}
 input[type=date]{color-scheme:dark}
@@ -616,12 +617,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:10px">
         Comparte este link con el usuario (WhatsApp, email, etc.). Al abrirlo desde su teléfono, la app queda configurada automáticamente.
       </div>
-      <div id="inv-link" style="font-family:var(--mono);font-size:10px;background:var(--bg);padding:10px;border-radius:8px;word-break:break-all;border:1px solid var(--border);margin-bottom:10px"></div>
+      <div id="inv-link" style="font-family:var(--mono);font-size:10px;background:var(--bg);padding:10px;border-radius:8px;word-break:break-all;border:1px solid var(--border);margin-bottom:10px;overflow:hidden;max-width:100%"></div>
       <div class="grid2">
         <button class="btn btn-blue" onclick="copiarLinkInvitacion()">Copiar link</button>
         <button class="btn btn-green" onclick="compartirLinkInvitacion()">Compartir</button>
       </div>
-      <button class="btn" onclick="show('pg-users')" style="margin-top:10px">Listo</button>
+      <button class="btn" onclick="show('pg-users')" style="margin-top:10px;width:100%;display:block">Listo</button>
     </div>
   </div>
 </div>
