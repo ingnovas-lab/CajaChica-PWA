@@ -410,12 +410,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div class="card" style="padding:12px">
       <div class="field" style="margin-bottom:8px">
         <div class="lbl">Obra</div>
-        <select id="fac-filtro-obra"></select>
+        <select id="fac-filtro-obra" onchange="loadFacturas()"></select>
       </div>
       <div class="grid2">
         <div class="field" style="margin-bottom:0">
           <div class="lbl">Estado</div>
-          <select id="fac-filtro-estado">
+          <select id="fac-filtro-estado" onchange="loadFacturas()">
             <option value="activas">Activas</option>
             <option value="revisar">Por revisar</option>
             <option value="eliminadas">Papelera</option>
@@ -424,10 +424,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         </div>
         <div class="field" style="margin-bottom:0">
           <div class="lbl">Buscar</div>
-          <input type="text" id="fac-filtro-buscar" placeholder="Suplidor, NCF...">
+          <input type="text" id="fac-filtro-buscar" placeholder="Suplidor, NCF..." oninput="debounceBuscar()">
         </div>
       </div>
-      <button class="btn btn-amber" onclick="loadFacturas()" style="margin-top:10px;padding:11px">Buscar</button>
     </div>
     <div id="fac-lista"></div>
   </div>
@@ -2435,24 +2434,45 @@ async function createProject(){
 let facturasCache = [];  // cache de la última carga
 let facturasHeaders = {}; // mapeo header->índice
 
+// Estado de los filtros persistente entre entradas a la pantalla (para volver después de editar)
+let facturasFiltrosState = null;
+
 function initFacturas(){
   // Llenar dropdown de obras
   const sel = document.getElementById('fac-filtro-obra');
   sel.innerHTML = '<option value="">— Todas las obras —</option>' +
     masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
 
-  const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
-  if(currentProj) sel.value = currentProj.cod;
+  // Restaurar filtros previos si existen (ej. volviendo de editar una factura)
+  if(facturasFiltrosState){
+    sel.value = facturasFiltrosState.obra || '';
+    document.getElementById('fac-filtro-estado').value = facturasFiltrosState.estado || 'activas';
+    document.getElementById('fac-filtro-buscar').value = facturasFiltrosState.buscar || '';
+  } else {
+    const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+    if(currentProj) sel.value = currentProj.cod;
+    document.getElementById('fac-filtro-estado').value = 'activas';
+    document.getElementById('fac-filtro-buscar').value = '';
+  }
 
-  document.getElementById('fac-filtro-estado').value = 'activas';
-  document.getElementById('fac-filtro-buscar').value = '';
-  document.getElementById('fac-lista').innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px 0;font-size:13px">Selecciona filtros y toca Buscar</div>';
+  // Auto-cargar
+  loadFacturas();
+}
+
+// Debounce para el campo de búsqueda (evita una llamada por cada letra)
+let buscarTimeout = null;
+function debounceBuscar(){
+  clearTimeout(buscarTimeout);
+  buscarTimeout = setTimeout(() => loadFacturas(), 400);
 }
 
 async function loadFacturas(){
   const obra = document.getElementById('fac-filtro-obra').value;
   const estado = document.getElementById('fac-filtro-estado').value;
   const buscar = document.getElementById('fac-filtro-buscar').value.trim().toLowerCase();
+
+  // Guardar estado para poder restaurar filtros al volver de editar
+  facturasFiltrosState = {obra, estado, buscar};
 
   loading(true, 'Cargando', 'Leyendo facturas...');
   try {
@@ -2882,7 +2902,7 @@ async function saveEdit(){
     toast('Cambios guardados', 'ok');
     editContext = null;
     show('pg-facturas');
-    setTimeout(() => loadFacturas(), 500);
+    // initFacturas() ya dispara loadFacturas() con los filtros preservados
     invalidateRevisarCache();
     setTimeout(() => refreshBalance(true), 1500);
   } catch(e){
