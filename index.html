@@ -766,19 +766,42 @@ async function sheetsGet(range){
   return d.values || [];
 }
 
+// sheetsAppend — evita el bug de Google Sheets API con values:append donde
+// las ARRAYFORMULA son consideradas "datos" y empujan nuevos registros a filas
+// muy altas (1000+). En su lugar leemos la columna A (IDs, sin fórmulas) para
+// saber la última fila real y hacemos update directo.
 async function sheetsAppend(range, values){
   const token = getToken();
   if(!token) throw new Error('Sesión expirada');
   const ssid = localStorage.getItem(LS.SSID);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+
+  // Extraer nombre de hoja del range (ej: "REGISTRO!A2" -> "REGISTRO")
+  const sheetName = range.split('!')[0];
+
+  // Leer columna A de la hoja (solo IDs — nunca tiene fórmulas que arrastren)
+  const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(sheetName + '!A:A')}`;
+  const getRes = await fetch(getUrl, {headers: {'Authorization': 'Bearer ' + token}});
+  if(!getRes.ok) throw new Error('Error leyendo columna A: ' + getRes.status);
+  const existing = (await getRes.json()).values || [];
+
+  // Buscar última fila con contenido real en A (no vacía)
+  let lastRow = 0;
+  for(let i = 0; i < existing.length; i++){
+    if(existing[i] && existing[i][0]) lastRow = i + 1; // 1-indexed
+  }
+  const nextRow = lastRow + 1;
+
+  // Update directo en la siguiente fila vacía
+  const writeRange = `${sheetName}!A${nextRow}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(writeRange)}?valueInputOption=USER_ENTERED`;
   const r = await fetch(url, {
-    method: 'POST',
+    method: 'PUT',
     headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
     body: JSON.stringify({values: values})
   });
   if(!r.ok){
     const err = await r.text();
-    throw new Error('Error append: ' + err);
+    throw new Error('Error escribiendo filas: ' + err);
   }
   return r.json();
 }
