@@ -1708,9 +1708,12 @@ async function probarScript(){
 
   loading(true, 'Probando', 'Contactando Apps Script...');
   try {
+    // IMPORTANTE: Content-Type debe ser 'text/plain' (no 'application/json')
+    // para que la petición sea "simple" y evite el CORS preflight OPTIONS
+    // que Apps Script Web Apps no soporta.
     const res = await fetch(url, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
       body: JSON.stringify({action: 'ping'})
     });
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -4186,10 +4189,10 @@ async function consolidarFacturas(){
 
   loading(true, 'Consolidando', 'Ejecutando Apps Script en la nube...');
   try {
-    // Apps Script Web App — endpoint POST con trigger=manual
+    // Content-Type text/plain para evitar CORS preflight (Apps Script no soporta OPTIONS)
     const res = await fetch(scriptUrl, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
       body: JSON.stringify({action: 'consolidar', trigger: 'manual'})
     });
 
