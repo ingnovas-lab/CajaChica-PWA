@@ -260,9 +260,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin:2px 4px 6px">
       <div style="font-size:18px;font-weight:600;color:var(--text);letter-spacing:.01em">Proyecto Activo</div>
-      <div onclick="show('pg-help')" style="width:34px;height:34px;border-radius:10px;background:rgba(245,158,11,0.15);border:1px solid var(--amber);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;color:var(--amber)" title="Guía de uso">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-      </div>
+      <div onclick="show('pg-help')" style="width:44px;height:34px;border-radius:10px;background:rgba(245,158,11,0.15);border:1px solid var(--amber);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;color:var(--amber);font-size:20px;font-weight:700;line-height:1;font-family:var(--font)" title="Guía de uso">?</div>
     </div>
 
     <div class="proj-bar" onclick="show('pg-proj-select')">
@@ -274,7 +272,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
     </div>
 
-    <div id="consolidar-banner" data-admin-only style="display:none;background:rgba(59,130,246,0.12);border:1px solid var(--blue);border-radius:var(--r);padding:12px 14px;margin-top:8px;cursor:pointer" onclick="show('pg-settings')">
+    <div id="consolidar-banner" data-admin-only style="display:none;background:rgba(59,130,246,0.12);border:1px solid var(--blue);border-radius:var(--r);padding:12px 14px;margin-top:8px;cursor:pointer" onclick="consolidarFacturas()">
       <div style="display:flex;align-items:center;gap:10px">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         <div style="flex:1">
@@ -2488,6 +2486,25 @@ async function uploadImage(entry){
   });
   if(!r.ok) throw new Error('Upload Drive falló: ' + r.status);
   const data = await r.json();
+
+  // Hacer el archivo accesible por link — necesario para que el ADMIN pueda
+  // consolidar (descargar + copiar) las fotos subidas por otros usuarios.
+  // Sin este paso, el scope drive.file solo permite acceso al que lo creó.
+  try {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({role: 'reader', type: 'anyone'})
+    });
+  } catch(e){
+    // No fatal — si falla, la foto queda privada. El admin puede no poder consolidarla,
+    // pero el sheet tiene toda la información relevante.
+    console.warn('No se pudo hacer la foto accesible por link:', e);
+  }
+
   return `https://drive.google.com/file/d/${data.id}/view`;
 }
 
@@ -4096,24 +4113,52 @@ async function consolidarFacturas(){
       const origenFileId = m[1];
 
       try {
-        // 1) Obtener metadata del archivo origen
-        const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?fields=name,mimeType`, {
-          headers: {'Authorization': 'Bearer ' + token}
-        });
-        if(!metaRes.ok){
-          // Sin acceso al archivo de otro usuario → error esperado si no lo compartió contigo
+        // 1) Obtener metadata del archivo origen — intenta via API (requiere acceso)
+        let fileName = `consolidada-${r[H.ID]}.jpg`;
+        let mimeType = 'image/jpeg';
+        try {
+          const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?fields=name,mimeType`, {
+            headers: {'Authorization': 'Bearer ' + token}
+          });
+          if(metaRes.ok){
+            const meta = await metaRes.json();
+            fileName = meta.name || fileName;
+            mimeType = meta.mimeType || mimeType;
+          }
+          // Si falla, continuamos con valores por defecto y descargamos por link público
+        } catch(e){ /* seguir */ }
+
+        // 2) Descargar el contenido — primero intenta con API (auth), luego por link público
+        let blob = null;
+        try {
+          const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?alt=media`, {
+            headers: {'Authorization': 'Bearer ' + token}
+          });
+          if(downloadRes.ok){
+            blob = await downloadRes.blob();
+          }
+        } catch(e){ /* seguir al fallback */ }
+
+        // Fallback: descarga pública (solo funciona si el archivo tiene permiso "anyone")
+        if(!blob){
+          try {
+            const publicUrl = `https://drive.google.com/uc?export=download&id=${origenFileId}`;
+            const pubRes = await fetch(publicUrl);
+            if(pubRes.ok){
+              const ct = pubRes.headers.get('content-type') || '';
+              // Google a veces devuelve HTML de confirmación en vez del archivo
+              if(ct.startsWith('image/') || ct.startsWith('application/octet-stream')){
+                blob = await pubRes.blob();
+              }
+            }
+          } catch(e){ /* seguir */ }
+        }
+
+        if(!blob){
           errores++;
-          console.warn(`No hay acceso al archivo ${origenFileId} (fila ${sheetRow})`);
+          console.warn(`[consolidar] No se pudo descargar el archivo ${origenFileId} (fila ${sheetRow}, suplidor: ${r[H.SUPLIDOR]}). El usuario que lo subió debe actualizar la app para que las fotos nuevas sean accesibles.`);
           continue;
         }
-        const meta = await metaRes.json();
-
-        // 2) Descargar el contenido
-        const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?alt=media`, {
-          headers: {'Authorization': 'Bearer ' + token}
-        });
-        if(!downloadRes.ok){ errores++; continue; }
-        const blob = await downloadRes.blob();
 
         // 3) Determinar carpeta destino (carpeta del proyecto en mi Drive; papelera si eliminado)
         const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
@@ -4126,8 +4171,8 @@ async function consolidarFacturas(){
         // 4) Subir a mi Drive
         const boundary = '-------consolidar' + Math.random().toString(36).slice(2);
         const metadata = {
-          name: meta.name || `consolidada-${r[H.ID]}.jpg`,
-          mimeType: meta.mimeType || 'image/jpeg',
+          name: fileName,
+          mimeType: mimeType,
           parents: [destId]
         };
         const body = new Blob([
@@ -4142,7 +4187,11 @@ async function consolidarFacturas(){
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}`},
           body: body
         });
-        if(!upRes.ok){ errores++; continue; }
+        if(!upRes.ok){
+          errores++;
+          console.warn(`[consolidar] Error subiendo fila ${sheetRow}:`, upRes.status);
+          continue;
+        }
         const upData = await upRes.json();
         const nuevaUrl = `https://drive.google.com/file/d/${upData.id}/view`;
 
@@ -4167,7 +4216,13 @@ async function consolidarFacturas(){
     }
 
     loading(false);
-    toast(`Consolidación completa: ${consolidadas} copiadas, ${omitidas} omitidas, ${errores} errores`, 'ok');
+    if(errores > 0 && consolidadas === 0){
+      toast(`No se pudo consolidar. ${errores} fallo(s). Los usuarios deben actualizar su app primero.`, 'err');
+    } else if(errores > 0){
+      toast(`${consolidadas} copiadas, ${errores} con error. Revisa consola (F12) para detalles.`, 'ok');
+    } else {
+      toast(`Consolidación completa: ${consolidadas} copiadas`, 'ok');
+    }
     checkConsolidarStatus();
   } catch(e){
     loading(false);
