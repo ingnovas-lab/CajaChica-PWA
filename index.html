@@ -2551,9 +2551,12 @@ async function uploadImage(entry){
   for(let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
   const blob = new Blob([arr], {type: entry.image_mime || 'image/jpeg'});
 
-  // Nombre legible: fecha - suplidor - id (para que ordenado cronológicamente)
+  // Nombre legible: fecha _ suplidor _ id  (fecha con puntos para orden visual limpio)
+  // Ej: "2026.03.20 _ BRAVO SA _ R-260423-57B0.jpg"
   const safeSup = (entry.suplidor || 'sin-suplidor').replace(/[^a-zA-Z0-9 -]/g, '').substring(0, 40);
-  const fileName = `${entry.fecha_factura || today()} ${safeSup} ${entry.id}.jpg`;
+  const fechaRaw = entry.fecha_factura || today();
+  const fechaDot = fechaRaw.replace(/-/g, '.'); // 2026-03-20 → 2026.03.20
+  const fileName = `${fechaDot} _ ${safeSup} _ ${entry.id}.jpg`;
 
   const metadata = {
     name: fileName,
