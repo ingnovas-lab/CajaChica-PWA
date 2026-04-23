@@ -856,8 +856,18 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
     <div class="card" data-admin-only>
       <h3>Consolidar facturas</h3>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Las fotos subidas por otros usuarios viven en sus Drives. Consolidar las copia a tu Drive y actualiza los enlaces del Sheet.</div>
-      <button class="btn btn-blue" onclick="consolidarFacturas()">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Las fotos subidas por otros usuarios viven en sus Drives. El Apps Script las copia a tu Drive automáticamente todos los días a las 10 PM, y puedes ejecutarlo manualmente aquí.</div>
+
+      <div class="field">
+        <div class="lbl">URL del Apps Script Web App</div>
+        <input type="text" id="set-scripturl" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="none" autocomplete="off" style="font-family:var(--mono);font-size:11px">
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="btn btn-amber" onclick="updateScriptUrl()" style="padding:10px;font-size:12px">Guardar URL</button>
+        <button class="btn" onclick="probarScript()" style="padding:10px;font-size:12px">Probar conexión</button>
+      </div>
+
+      <button class="btn btn-blue" onclick="consolidarFacturas()" style="margin-top:10px">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Consolidar facturas ahora
       </button>
@@ -1141,6 +1151,7 @@ const LS = {
   BALCACHE: 'cc_bal',
   MASTERS: 'cc_masters',
   FOLDERS: 'cc_folders',
+  SCRIPTURL: 'cc_scripturl',  // URL del Apps Script Web App (para consolidación)
 };
 
 // Carpeta raíz en Drive donde se organiza todo
@@ -1172,6 +1183,8 @@ function show(id){
     document.getElementById('set-email').textContent = localStorage.getItem(LS.EMAIL) || '—';
     document.getElementById('set-ssid').textContent = localStorage.getItem(LS.SSID) || '—';
     document.getElementById('set-rol').textContent = masters.myRole || 'USUARIO';
+    const scriptInput = document.getElementById('set-scripturl');
+    if(scriptInput) scriptInput.value = localStorage.getItem(LS.SCRIPTURL) || '';
     checkConsolidarStatus();
   }
   if(id==='pg-abono') document.getElementById('ab-fecha').value = today();
@@ -1672,6 +1685,46 @@ function updateGeminiKey(){
   if(!k.startsWith('AIza')){ toast('Clave inválida', 'err'); return; }
   localStorage.setItem(LS.GEMINI, k);
   toast('Clave actualizada', 'ok');
+}
+
+function updateScriptUrl(){
+  const u = document.getElementById('set-scripturl').value.trim();
+  if(!u){
+    localStorage.removeItem(LS.SCRIPTURL);
+    toast('URL eliminada', 'ok');
+    return;
+  }
+  if(!u.startsWith('https://script.google.com/')){
+    toast('URL inválida. Debe comenzar con https://script.google.com/', 'err');
+    return;
+  }
+  localStorage.setItem(LS.SCRIPTURL, u);
+  toast('URL guardada', 'ok');
+}
+
+async function probarScript(){
+  const url = localStorage.getItem(LS.SCRIPTURL);
+  if(!url){ toast('Primero guarda la URL del script', 'err'); return; }
+
+  loading(true, 'Probando', 'Contactando Apps Script...');
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'ping'})
+    });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    loading(false);
+    if(data.ok){
+      toast(`✓ Conexión OK. Script responde como: ${data.email || '(sin email)'}`, 'ok');
+    } else {
+      toast('Respuesta inválida del script: ' + JSON.stringify(data), 'err');
+    }
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message + '. Verifica que el script esté desplegado como Web App con acceso "Cualquiera".', 'err');
+  }
 }
 
 function checkSetupReady(){
@@ -2487,25 +2540,53 @@ async function uploadImage(entry){
   if(!r.ok) throw new Error('Upload Drive falló: ' + r.status);
   const data = await r.json();
 
-  // Hacer el archivo accesible por link — necesario para que el ADMIN pueda
-  // consolidar (descargar + copiar) las fotos subidas por otros usuarios.
-  // Sin este paso, el scope drive.file solo permite acceso al que lo creó.
-  try {
-    await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({role: 'reader', type: 'anyone'})
-    });
-  } catch(e){
-    // No fatal — si falla, la foto queda privada. El admin puede no poder consolidarla,
-    // pero el sheet tiene toda la información relevante.
-    console.warn('No se pudo hacer la foto accesible por link:', e);
-  }
+  // Compartir automáticamente con los admins del sistema.
+  // Esto permite que el Apps Script del admin pueda leer el archivo para consolidar.
+  // Transparente al usuario — no requiere ninguna acción manual.
+  await sharePhotoWithAdmins(data.id);
 
   return `https://drive.google.com/file/d/${data.id}/view`;
+}
+
+// Comparte un archivo de Drive con todos los admins registrados en USUARIOS.
+// Se llama automáticamente después de subir cada foto.
+// No bloquea — si falla, solo avisa en consola.
+async function sharePhotoWithAdmins(fileId){
+  try {
+    // Obtener lista de admins desde masters (ya cargados) o del cache
+    const admins = (masters.users || [])
+      .filter(u => (u.rol || '').toUpperCase() === 'ADMIN')
+      .map(u => u.email)
+      .filter(Boolean);
+
+    if(admins.length === 0){
+      console.warn('[sharePhoto] No hay admins en USUARIOS para compartir la foto');
+      return;
+    }
+
+    const token = getToken();
+    // Compartir con cada admin (lectura)
+    for(const adminEmail of admins){
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?sendNotificationEmail=false`, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            role: 'reader',
+            type: 'user',
+            emailAddress: adminEmail
+          })
+        });
+      } catch(e){
+        console.warn(`[sharePhoto] No se pudo compartir con ${adminEmail}:`, e);
+      }
+    }
+  } catch(e){
+    console.warn('[sharePhoto] Error general:', e);
+  }
 }
 
 // ============================================================
@@ -4084,171 +4165,62 @@ async function contarFacturasSinConsolidar(){
   }).length;
 }
 
+// Consolidación delegada al Apps Script (corre en servidores de Google, sin CORS).
+// El admin debe configurar una vez la URL del Web App desde Settings → Gestión de usuarios.
+// La URL se guarda en localStorage (LS.SCRIPTURL) como parte de su instalación.
 async function consolidarFacturas(){
-  if(!confirm('Esto copiará a tu Drive las fotos subidas por otros usuarios. Puede tomar varios minutos si hay muchas. ¿Continuar?')) return;
+  const scriptUrl = localStorage.getItem(LS.SCRIPTURL);
+  if(!scriptUrl){
+    showModal(`<h3>Apps Script no configurado</h3>
+      <div style="margin:10px 0;font-size:13px;line-height:1.5">
+        Para consolidar facturas automáticamente, primero tienes que configurar el Apps Script.
+        <br><br>
+        Ve a <strong>Configuración → Apps Script (consolidación)</strong> y sigue la guía paso a paso.
+      </div>
+      <button class="btn btn-amber" onclick="closeModal();show('pg-settings')">Ir a Configuración</button>
+      <button class="btn" onclick="closeModal()" style="margin-top:8px">Cerrar</button>`);
+    return;
+  }
 
-  const miEmail = localStorage.getItem(LS.EMAIL);
-  loading(true, 'Consolidando', 'Leyendo REGISTRO...');
+  if(!confirm('Esto ejecutará el script que copia a tu Drive las fotos subidas por otros usuarios. ¿Continuar?')) return;
+
+  loading(true, 'Consolidando', 'Ejecutando Apps Script en la nube...');
   try {
-    const raw = await sheetsGet('REGISTRO!A1:Z');
-    if(!raw || raw.length < 2){ loading(false); toast('Nada que consolidar', 'err'); return; }
+    // Apps Script Web App — endpoint POST con trigger=manual
+    const res = await fetch(scriptUrl, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'consolidar', trigger: 'manual'})
+    });
 
-    const H = {};
-    (raw[0] || []).forEach((h, i) => H[h] = i);
-    if(H.URL_FACTURA === undefined || H.USUARIO === undefined) throw new Error('Faltan columnas URL_FACTURA o USUARIO');
-
-    const rows = raw.slice(1);
-    const token = getToken();
-    const ssid = localStorage.getItem(LS.SSID);
-    const rootId = await ensureFolder(ROOT_FOLDER, null);
-
-    let consolidadas = 0, omitidas = 0, errores = 0;
-
-    for(let i = 0; i < rows.length; i++){
-      const r = rows[i];
-      if(!r[H.ID] || !r[H.URL_FACTURA]){ omitidas++; continue; }
-      if(r[H.USUARIO] === miEmail){ omitidas++; continue; } // Ya es mía
-
-      loading(true, 'Consolidando', `Fila ${i+1} de ${rows.length}: ${r[H.SUPLIDOR] || ''}...`);
-
-      const sheetRow = i + 2; // 1-indexed + header
-      const url = r[H.URL_FACTURA];
-      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      if(!m){ errores++; continue; }
-      const origenFileId = m[1];
-
-      try {
-        // 1) Obtener metadata del archivo origen — intenta via API (requiere acceso)
-        let fileName = `consolidada-${r[H.ID]}.jpg`;
-        let mimeType = 'image/jpeg';
-        try {
-          const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?fields=name,mimeType`, {
-            headers: {'Authorization': 'Bearer ' + token}
-          });
-          if(metaRes.ok){
-            const meta = await metaRes.json();
-            fileName = meta.name || fileName;
-            mimeType = meta.mimeType || mimeType;
-          }
-          // Si falla, continuamos con valores por defecto y descargamos por link público
-        } catch(e){ /* seguir */ }
-
-        // 2) Descargar el contenido — primero intenta con API (auth), luego por link público
-        let blob = null;
-        let lastError = null;
-
-        try {
-          const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?alt=media`, {
-            headers: {'Authorization': 'Bearer ' + token}
-          });
-          if(downloadRes.ok){
-            blob = await downloadRes.blob();
-            console.log(`[consolidar] ✓ Fila ${sheetRow}: descarga via API autenticada OK`);
-          } else {
-            lastError = `API privada: HTTP ${downloadRes.status} ${downloadRes.statusText}`;
-            console.log(`[consolidar] API privada falló fila ${sheetRow}: ${lastError}`);
-          }
-        } catch(e){
-          lastError = `API privada: ${e.message}`;
-          console.log(`[consolidar] API privada excepción fila ${sheetRow}:`, e);
-        }
-
-        // Fallback: descarga pública (solo funciona si el archivo tiene permiso "anyone")
-        if(!blob){
-          try {
-            const publicUrl = `https://drive.google.com/uc?export=download&id=${origenFileId}`;
-            const pubRes = await fetch(publicUrl);
-            if(pubRes.ok){
-              const ct = pubRes.headers.get('content-type') || '';
-              // Google a veces devuelve HTML de confirmación en vez del archivo
-              if(ct.startsWith('image/') || ct.startsWith('application/octet-stream')){
-                blob = await pubRes.blob();
-                console.log(`[consolidar] ✓ Fila ${sheetRow}: descarga pública OK`);
-              } else {
-                lastError += ` | Pública: tipo incorrecto (${ct})`;
-              }
-            } else {
-              lastError += ` | Pública: HTTP ${pubRes.status}`;
-            }
-          } catch(e){
-            lastError += ` | Pública: ${e.message}`;
-          }
-        }
-
-        if(!blob){
-          errores++;
-          console.warn(`[consolidar] ✗ Fila ${sheetRow}, suplidor "${r[H.SUPLIDOR]}", archivo ${origenFileId}. Razones: ${lastError}`);
-          continue;
-        }
-
-        // 3) Determinar carpeta destino (carpeta del proyecto en mi Drive; papelera si eliminado)
-        const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
-        const projCod = r[H.PROYECTO];
-        const proj = masters.projects.find(p => p.cod === projCod);
-        const projFolderName = proj ? `${projCod} - ${proj.nombre}` : projCod;
-        const projId = await ensureFolder(projFolderName, rootId);
-        const destId = eliminado ? await ensureFolder('Papelera', projId) : projId;
-
-        // 4) Subir a mi Drive
-        const boundary = '-------consolidar' + Math.random().toString(36).slice(2);
-        const metadata = {
-          name: fileName,
-          mimeType: mimeType,
-          parents: [destId]
-        };
-        const body = new Blob([
-          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
-          JSON.stringify(metadata),
-          `\r\n--${boundary}\r\nContent-Type: ${metadata.mimeType}\r\n\r\n`,
-          blob,
-          `\r\n--${boundary}--`
-        ]);
-        const upRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-          method: 'POST',
-          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}`},
-          body: body
-        });
-        if(!upRes.ok){
-          errores++;
-          console.warn(`[consolidar] Error subiendo fila ${sheetRow}:`, upRes.status);
-          continue;
-        }
-        const upData = await upRes.json();
-        const nuevaUrl = `https://drive.google.com/file/d/${upData.id}/view`;
-
-        // 5) Actualizar celdas en el Sheet: URL_FACTURA y USUARIO
-        const col = idx => String.fromCharCode(65 + idx);
-        const updates = [
-          {range: `REGISTRO!${col(H.URL_FACTURA)}${sheetRow}`, values: [[nuevaUrl]]},
-          {range: `REGISTRO!${col(H.USUARIO)}${sheetRow}`, values: [[miEmail]]}
-        ];
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchUpdate`, {
-          method: 'POST',
-          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-          body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: updates})
-        });
-
-        consolidadas++;
-        await new Promise(r => setTimeout(r, 150)); // Delay anti-rate-limit
-      } catch(e){
-        errores++;
-        console.error('Error en fila ' + sheetRow + ':', e);
-      }
+    if(!res.ok){
+      throw new Error(`Script HTTP ${res.status}. Revisa que la URL sea correcta y el script esté desplegado.`);
     }
 
+    const data = await res.json();
     loading(false);
-    if(errores > 0 && consolidadas === 0){
-      toast(`No se pudo consolidar. ${errores} fallo(s). Los usuarios deben actualizar su app primero.`, 'err');
-    } else if(errores > 0){
-      toast(`${consolidadas} copiadas, ${errores} con error. Revisa consola (F12) para detalles.`, 'ok');
-    } else {
-      toast(`Consolidación completa: ${consolidadas} copiadas`, 'ok');
+
+    if(data.error){
+      toast('Error en script: ' + data.error, 'err');
+      return;
     }
+
+    const { consolidadas = 0, omitidas = 0, errores = 0 } = data;
+    if(errores > 0 && consolidadas === 0){
+      toast(`${errores} fallo(s). Revisa la hoja LOG_CONSOLIDACION del Sheet para ver qué pasó.`, 'err');
+    } else if(errores > 0){
+      toast(`${consolidadas} copiadas, ${errores} con error. Ver LOG_CONSOLIDACION.`, 'ok');
+    } else if(consolidadas === 0){
+      toast('No había nada para consolidar. Todo está al día.', 'ok');
+    } else {
+      toast(`✓ Consolidación completa: ${consolidadas} factura(s) copiada(s)`, 'ok');
+    }
+
     checkConsolidarStatus();
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
-    console.error(e);
+    console.error('[consolidar via script]', e);
   }
 }
 
