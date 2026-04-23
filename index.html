@@ -3989,6 +3989,11 @@ async function guardarInvitacion(){
       }
       // Agregar fila al Sheet
       await sheetsAppend('USUARIOS!A2', [[email, nombre, rol, proyectosStr]]);
+      // Pequeño delay para dar tiempo a Google Sheets a propagar la escritura
+      // antes de leerla en el loadMasters siguiente (previene eventual consistency)
+      await new Promise(r => setTimeout(r, 800));
+      // Invalidar cache local para forzar lectura fresca
+      localStorage.removeItem(LS.MASTERS);
     }
 
     // Generar link de invitación (se muestra tanto al invitar como al editar)
@@ -4130,14 +4135,23 @@ async function consolidarFacturas(){
 
         // 2) Descargar el contenido — primero intenta con API (auth), luego por link público
         let blob = null;
+        let lastError = null;
+
         try {
           const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${origenFileId}?alt=media`, {
             headers: {'Authorization': 'Bearer ' + token}
           });
           if(downloadRes.ok){
             blob = await downloadRes.blob();
+            console.log(`[consolidar] ✓ Fila ${sheetRow}: descarga via API autenticada OK`);
+          } else {
+            lastError = `API privada: HTTP ${downloadRes.status} ${downloadRes.statusText}`;
+            console.log(`[consolidar] API privada falló fila ${sheetRow}: ${lastError}`);
           }
-        } catch(e){ /* seguir al fallback */ }
+        } catch(e){
+          lastError = `API privada: ${e.message}`;
+          console.log(`[consolidar] API privada excepción fila ${sheetRow}:`, e);
+        }
 
         // Fallback: descarga pública (solo funciona si el archivo tiene permiso "anyone")
         if(!blob){
@@ -4149,14 +4163,21 @@ async function consolidarFacturas(){
               // Google a veces devuelve HTML de confirmación en vez del archivo
               if(ct.startsWith('image/') || ct.startsWith('application/octet-stream')){
                 blob = await pubRes.blob();
+                console.log(`[consolidar] ✓ Fila ${sheetRow}: descarga pública OK`);
+              } else {
+                lastError += ` | Pública: tipo incorrecto (${ct})`;
               }
+            } else {
+              lastError += ` | Pública: HTTP ${pubRes.status}`;
             }
-          } catch(e){ /* seguir */ }
+          } catch(e){
+            lastError += ` | Pública: ${e.message}`;
+          }
         }
 
         if(!blob){
           errores++;
-          console.warn(`[consolidar] No se pudo descargar el archivo ${origenFileId} (fila ${sheetRow}, suplidor: ${r[H.SUPLIDOR]}). El usuario que lo subió debe actualizar la app para que las fotos nuevas sean accesibles.`);
+          console.warn(`[consolidar] ✗ Fila ${sheetRow}, suplidor "${r[H.SUPLIDOR]}", archivo ${origenFileId}. Razones: ${lastError}`);
           continue;
         }
 
@@ -4248,6 +4269,10 @@ function processInviteHash(){
     // Aplicar configuración recibida
     if(payload.k) localStorage.setItem(LS.GEMINI, payload.k);
     if(payload.s) localStorage.setItem(LS.SSID, payload.s);
+    // Invalidar caches para que el usuario invitado lea datos frescos del Sheet
+    // (previene el caso de abrir un link nuevo pero leer cache viejo donde no estaba)
+    localStorage.removeItem(LS.MASTERS);
+    localStorage.removeItem(LS.BALCACHE);
     // Si viene otro Client ID, se ignora — el que usa la app viene hardcodeado
     // Limpiar hash del URL para no exponer secretos en historial
     history.replaceState(null, '', window.location.pathname + window.location.search);
