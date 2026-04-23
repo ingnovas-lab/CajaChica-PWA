@@ -1730,6 +1730,43 @@ async function probarScript(){
   }
 }
 
+// Comparte el Sheet con un usuario como Editor (vía Apps Script)
+// Retorna null si el script no está configurado, o el resultado del script
+async function compartirSheetConUsuario(email){
+  const url = localStorage.getItem(LS.SCRIPTURL);
+  if(!url) return null;  // Sin script, no se hace — no bloquea el flujo de invitación
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({action: 'compartirSheet', email: email})
+    });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch(e){
+    console.warn('[compartirSheet] Error:', e);
+    return {error: e.message};
+  }
+}
+
+// Revoca el acceso al Sheet de un usuario (vía Apps Script)
+async function revocarAccesoSheet(email){
+  const url = localStorage.getItem(LS.SCRIPTURL);
+  if(!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({action: 'revocarSheet', email: email})
+    });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch(e){
+    console.warn('[revocarSheet] Error:', e);
+    return {error: e.message};
+  }
+}
+
 function checkSetupReady(){
   const ok = getToken() && localStorage.getItem(LS.GEMINI) && localStorage.getItem(LS.SSID);
   document.getElementById('btn-finish-setup').disabled = !ok;
@@ -3968,6 +4005,16 @@ async function eliminarUsuario(idx){
       })
     });
 
+    // Revocar acceso al Sheet (vía Apps Script — no bloqueante)
+    try {
+      const revResult = await revocarAccesoSheet(u.email);
+      if(revResult && revResult.revoked){
+        console.log(`[eliminar] Acceso al Sheet revocado para ${u.email}`);
+      }
+    } catch(e){
+      console.warn('[eliminar] No se pudo revocar acceso al Sheet:', e);
+    }
+
     await loadMasters();
     loading(false);
     toast('Usuario eliminado', 'ok');
@@ -4073,10 +4120,18 @@ async function guardarInvitacion(){
       }
       // Agregar fila al Sheet
       await sheetsAppend('USUARIOS!A2', [[email, nombre, rol, proyectosStr]]);
+
+      // Compartir automáticamente el Sheet con el nuevo usuario (vía Apps Script)
+      // Esto evita tener que hacerlo manualmente después.
+      const shareResult = await compartirSheetConUsuario(email);
+      if(shareResult && shareResult.shared){
+        console.log(`[invitar] Sheet compartido con ${email}`);
+      } else if(shareResult && shareResult.error){
+        console.warn(`[invitar] No se pudo compartir el Sheet: ${shareResult.error}`);
+      }
+
       // Pequeño delay para dar tiempo a Google Sheets a propagar la escritura
-      // antes de leerla en el loadMasters siguiente (previene eventual consistency)
       await new Promise(r => setTimeout(r, 800));
-      // Invalidar cache local para forzar lectura fresca
       localStorage.removeItem(LS.MASTERS);
     }
 
