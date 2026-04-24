@@ -1417,6 +1417,7 @@ function show(id){
   if(id==='pg-abono') document.getElementById('ab-fecha').value = today();
   if(id==='pg-reportes') initReportes();
   if(id==='pg-new-proj') initNewProj();
+  if(id==='pg-new-company') initNewCompany();
   if(id==='pg-facturas') initFacturas();
   if(id==='pg-users') initUsers();
   if(id==='pg-invite') initInvite();
@@ -2674,6 +2675,39 @@ async function saveGeminiKeyToIndex(key){
 // ============================================================
 
 let newCompanyContext = null; // holds {nombre, folderId, sheetId} while wizard runs
+
+// Resetea el estado del wizard cada vez que se entra a la pantalla
+// Previene el bug de "saltar al paso 2" si la sesión anterior no se finalizó
+function initNewCompany(){
+  // Limpiar contexto en memoria
+  newCompanyContext = null;
+
+  // Reset del input de nombre
+  const inpNombre = document.getElementById('newcomp-nombre');
+  if(inpNombre) inpNombre.value = '';
+
+  // Reset del input de URL script
+  const inpUrl = document.getElementById('newcomp-scripturl');
+  if(inpUrl) inpUrl.value = '';
+
+  // Reset del botón crear (visible y habilitado)
+  const btn = document.getElementById('btn-crear-empresa');
+  if(btn){
+    btn.disabled = false;
+    btn.style.display = '';
+  }
+
+  // Ocultar el card del paso final
+  const scriptCard = document.getElementById('newcomp-script-card');
+  if(scriptCard) scriptCard.style.display = 'none';
+
+  // Ocultar el progress indicator
+  const progressEl = document.getElementById('newcomp-progress');
+  if(progressEl){
+    progressEl.style.display = 'none';
+    progressEl.innerHTML = '';
+  }
+}
 
 async function crearEmpresa(){
   const nombre = document.getElementById('newcomp-nombre').value.trim();
