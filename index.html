@@ -1245,6 +1245,8 @@ const LS = {
   SCRIPTURL: 'cc_scripturl',    // DEPRECATED: reemplazado por getCurrentCompany().scriptUrl - se mantiene para migración
   COMPANIES: 'cc_companies',    // JSON array de empresas conocidas por la app
   CURRENT_COMPANY: 'cc_current_company', // código de empresa activa
+  LAST_REPORTE: LS.LAST_REPORTE, // último NO_REPORTE usado, para auto-llenar el siguiente registro
+  PENDING_USER_CONFIG_SAVE: LS.PENDING_USER_CONFIG_SAVE, // flag: hay cambios de config pendientes de subir a Drive
 };
 
 // Email del SUPER_ADMIN (pasaporte universal, crea y ve todas las empresas)
@@ -1682,7 +1684,7 @@ function initGoogleAuth(){
           //   → leer configuración de Drive y aplicar
           document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
           try {
-            const pending = localStorage.getItem('cc_pending_user_config_save') === '1';
+            const pending = localStorage.getItem(LS.PENDING_USER_CONFIG_SAVE) === '1';
 
             if(pending){
               // Guardar configuración actual al User Config
@@ -1696,7 +1698,7 @@ function initGoogleAuth(){
                 toSave.EMPRESA_CREATED_AT = current.createdAt || new Date().toISOString();
               }
               await saveToUserConfig(toSave);
-              localStorage.removeItem('cc_pending_user_config_save');
+              localStorage.removeItem(LS.PENDING_USER_CONFIG_SAVE);
               document.getElementById('gauth-status').textContent = `✓ Conectado: ${info.email} · Configuración guardada en Drive`;
             } else {
               // Intentar leer User Config existente
@@ -3650,7 +3652,7 @@ function onFile(inp){
     document.getElementById('cfm-dup-badge').style.display = 'none';
     document.getElementById('f-fecha').value = today();
     // Pre-rellenar con último No. de reporte usado (facilita registros en lote)
-    document.getElementById('f-reporte').value = localStorage.getItem('cc_last_reporte') || '';
+    document.getElementById('f-reporte').value = localStorage.getItem(LS.LAST_REPORTE) || '';
     show('pg-confirm');
     await runOCR();
     // Verificar duplicado una vez que el OCR rellene el NCF
@@ -3796,13 +3798,12 @@ async function saveEntry(){
     ocr_confidence: 0,
     image_base64: currentCapture ? currentCapture.base64 : null,
     image_mime: currentCapture ? currentCapture.mime : null,
-    synced: false,
   };
 
   await dbAdd('pending', entry);
   currentCapture = null;
   // Recordar último no_reporte para facilitar siguiente registro
-  if(entry.no_reporte) localStorage.setItem('cc_last_reporte', entry.no_reporte);
+  if(entry.no_reporte) localStorage.setItem(LS.LAST_REPORTE, entry.no_reporte);
   toast('Guardado localmente', 'ok');
   show('pg-home');
 }
@@ -3824,7 +3825,6 @@ async function saveAbono(){
     monto: monto,
     referencia: document.getElementById('ab-ref').value.trim(),
     usuario: localStorage.getItem(LS.EMAIL),
-    synced: false,
   };
   await dbAdd('pending', entry);
   toast('Abono guardado', 'ok');
@@ -5913,7 +5913,7 @@ function processInviteHash(){
     }
     // Marcar para persistir al User Config DESPUÉS del login OAuth.
     // No podemos llamar a Drive todavía porque el usuario aún no tiene token.
-    localStorage.setItem('cc_pending_user_config_save', '1');
+    localStorage.setItem(LS.PENDING_USER_CONFIG_SAVE, '1');
     // Invalidar caches para que el usuario invitado lea datos frescos del Sheet
     localStorage.removeItem(LS.MASTERS);
     localStorage.removeItem(LS.BALCACHE);
