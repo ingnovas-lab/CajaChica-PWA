@@ -983,6 +983,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button class="btn btn-red" onclick="resetApp()" style="margin-top:10px">Borrar todo y empezar de cero</button>
     </div>
 
+    <div class="card">
+      <h3>App</h3>
+      <button class="btn btn-blue" onclick="forceAppUpdate()">Forzar actualización</button>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Limpia el caché de la PWA y recarga la última versión publicada. Tu sesión, claves y datos locales se mantienen intactos.</div>
+    </div>
+
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
       Control de Caja Chica · v1.0
     </div>
@@ -4145,6 +4151,29 @@ function resetApp(){
   location.reload();
 }
 
+// Limpia caché del Service Worker y recarga la página con la última versión.
+// NO toca localStorage ni IndexedDB — la sesión, claves y pendientes se mantienen.
+// Es la salida segura cuando una versión vieja del HTML quedó cacheada en el celular.
+async function forceAppUpdate(){
+  if(!confirm('Limpiar caché y recargar para aplicar la última versión publicada?')) return;
+  try {
+    // 1) Borrar todos los Cache Storage de la app
+    if('caches' in window){
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    // 2) Desregistrar Service Workers (forzará re-registro fresco al recargar)
+    if('serviceWorker' in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch(e){
+    console.warn('[forceAppUpdate] Limpieza parcial:', e.message);
+  }
+  // 3) Recargar bypassing el caché del navegador
+  location.reload();
+}
+
 function showModal(html){
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal').classList.add('show');
@@ -5900,6 +5929,30 @@ document.addEventListener('visibilitychange', async () => {
     }
   }
 });
+
+// ============================================================
+// SERVICE WORKER — evita el caché agresivo de iOS al desplegar
+// nuevas versiones. Estrategia: network-first para mismo origen,
+// las APIs externas pasan sin tocar. Detalles en sw.js.
+// ============================================================
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      // Si llega una versión nueva del HTML mientras la app está abierta,
+      // notificar al usuario para que recargue. El SW network-first ya la trajo;
+      // el toast es solo aviso visual.
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if(!sw) return;
+        sw.addEventListener('statechange', () => {
+          if(sw.state === 'installed' && navigator.serviceWorker.controller){
+            try { toast('Hay una versión nueva de la app — recarga para aplicarla', 'ok'); } catch(_){}
+          }
+        });
+      });
+    }).catch(e => console.warn('[SW] registro falló:', e.message));
+  });
+}
 </script>
 </body>
 </html>
