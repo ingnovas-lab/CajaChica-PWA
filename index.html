@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Caja Chica">
 <meta name="theme-color" content="#0f172a">
-<title>Caja Chica Obras</title>
+<title>Control de Caja Chica</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -501,8 +501,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div style="font-size:11px;color:var(--text2);line-height:1.5;padding:0 4px;margin-top:14px">
       Al crear la obra:<br>
       • Se agrega al Sheet en la hoja PROYECTOS<br>
-      • Se crea la carpeta <span style="font-family:var(--mono)">/Caja Chica Obras/{COD - Nombre}/</span> en Drive<br>
-      • Se crea la subcarpeta <span style="font-family:var(--mono)">/Papelera/</span>
+      • Se crea la carpeta <span style="font-family:var(--mono)">Proyectos/{Nombre}/</span> en Drive<br>
+      • Se crean las subcarpetas <span style="font-family:var(--mono)">Fotos</span>, <span style="font-family:var(--mono)">Reportes</span> y <span style="font-family:var(--mono)">Papelera</span>
     </div>
   </div>
 </div>
@@ -967,7 +967,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
     <div class="card">
       <h3>Ayuda</h3>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Guía rápida de uso de la app. Si tienes dudas, llama al Ing. Joel Novas al +1 (809) 975-5757.</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Guía rápida de uso de la app. Si tienes dudas, llama al Ing. Joel Novas al <a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a>.</div>
       <button class="btn btn-blue" onclick="show('pg-help')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         Ver guía de uso
@@ -984,7 +984,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
-      Caja Chica Obras · v1.0 · gratis
+      Control de Caja Chica · v1.0
     </div>
   </div>
 </div>
@@ -1121,7 +1121,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <h3 style="color:var(--amber);margin-bottom:10px">6. Eliminar una factura</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;margin-bottom:6px">Pendiente:</div>
-        <div style="margin-bottom:12px">Ve a "Ver pendientes" → toca "Eliminar". Se borra del celular.</div>
+        <div style="margin-bottom:12px">Ve a "Registros pendientes" (toca "Por sincronizar" en el home) → toca "Eliminar". Se borra del celular.</div>
         <div style="font-weight:600;margin-bottom:6px">Sincronizada:</div>
         <div>Ve a "Mis facturas" → toca "Eliminar". Pasa a la Papelera de esa obra (recuperable desde el filtro Papelera → Restaurar).</div>
       </div>
@@ -1134,9 +1134,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         Todas las facturas que capturas quedan primero en tu celular. Al final del día, con buena señal, las subes al sistema.
         <ol style="margin:10px 0 0 20px;padding:0">
           <li style="margin-bottom:6px">Abre la app.</li>
-          <li style="margin-bottom:6px">Toca el recuadro "POR SINCRONIZAR" en la pantalla principal.</li>
-          <li style="margin-bottom:6px">Entras a "Por sincronizar" con tu lista pendiente.</li>
-          <li style="margin-bottom:6px">Toca "Sincronizar todo".</li>
+          <li style="margin-bottom:6px">Toca el recuadro "Por sincronizar" en la pantalla principal.</li>
+          <li style="margin-bottom:6px">Entras a "Registros pendientes" con tu lista.</li>
+          <li style="margin-bottom:6px">Toca "Sincronizar con Google Sheets".</li>
           <li>Espera a que termine.</li>
         </ol>
         <div style="background:rgba(239,68,68,0.12);border-left:3px solid var(--red);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
@@ -1213,8 +1213,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px">
-      Caja Chica Obras — Guía de usuario — v1.0<br>
-      Ing. Joel Novas · LVP
+      Control de Caja Chica — Guía de usuario — v1.0<br>
+      Ing. Joel Novas
     </div>
   </div>
 </div>
@@ -5496,10 +5496,12 @@ function copiarLinkInvitacion(){
 
 async function compartirLinkInvitacion(){
   if(!window._inviteLink){ toast('No hay link', 'err'); return; }
-  const texto = `Hola ${window._inviteUserName || ''}, aquí está tu acceso a Caja Chica Obras:\n\n${window._inviteLink}\n\nÁbrelo desde tu celular y autoriza con tu correo Google.`;
+  const current = getCurrentCompany();
+  const empresaNombre = current ? current.nombre : 'Control de Caja Chica';
+  const texto = `Hola ${window._inviteUserName || ''}, aquí está tu acceso a ${empresaNombre}:\n\n${window._inviteLink}\n\nÁbrelo desde tu celular y autoriza con tu correo Google.`;
   if(navigator.share){
     try {
-      await navigator.share({title: 'Invitación a Caja Chica Obras', text: texto});
+      await navigator.share({title: `Invitación a ${empresaNombre}`, text: texto});
     } catch(e){ /* usuario canceló */ }
   } else {
     // Fallback: WhatsApp web
