@@ -1674,6 +1674,51 @@ function initGoogleAuth(){
             console.warn('[login] Sync falló:', e.message);
             document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
           }
+        } else {
+          // Usuario regular: sincronizar con su User Config personal
+          // Caso 1: hay pendiente de guardar (acaba de usar link de invitación)
+          //   → guardar configuración actual al User Config
+          // Caso 2: no hay pendiente, pero puede haber User Config existente
+          //   → leer configuración de Drive y aplicar
+          document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
+          try {
+            const pending = localStorage.getItem('cc_pending_user_config_save') === '1';
+
+            if(pending){
+              // Guardar configuración actual al User Config
+              const gemini = localStorage.getItem(LS.GEMINI) || '';
+              const current = getCurrentCompany();
+              const toSave = {GEMINI_KEY: gemini};
+              if(current){
+                toSave.EMPRESA_NOMBRE = current.nombre;
+                toSave.EMPRESA_SHEET_ID = current.sheetId;
+                toSave.EMPRESA_SCRIPT_URL = current.scriptUrl || '';
+                toSave.EMPRESA_CREATED_AT = current.createdAt || new Date().toISOString();
+              }
+              await saveToUserConfig(toSave);
+              localStorage.removeItem('cc_pending_user_config_save');
+              document.getElementById('gauth-status').textContent = `✓ Conectado: ${info.email} · Configuración guardada en Drive`;
+            } else {
+              // Intentar leer User Config existente
+              const cfg = await syncFromUserConfig();
+              if(cfg && cfg.EMPRESA_NOMBRE){
+                document.getElementById('gauth-status').textContent = `✓ Conectado: ${info.email} · ${cfg.EMPRESA_NOMBRE}`;
+                const geminiStatus = document.getElementById('gemini-status');
+                if(geminiStatus && localStorage.getItem(LS.GEMINI)){
+                  geminiStatus.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada desde Drive</span>';
+                }
+                const ssidStatus = document.getElementById('ssid-status');
+                if(ssidStatus){
+                  ssidStatus.innerHTML = '<span style="color:var(--green)">✓ Empresa sincronizada desde Drive</span>';
+                }
+              } else {
+                document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
+              }
+            }
+          } catch(e){
+            console.warn('[login] User Config sync falló:', e.message);
+            document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
+          }
         }
 
         checkSetupReady();
@@ -2387,6 +2432,204 @@ function exitToLogin(){
 
 const ADMIN_INDEX_NAME = '_CC_Admin_Index';
 const LS_ADMIN_INDEX_ID = 'cc_admin_index_id'; // cache del ID del Sheet
+
+// User Config: Sheet personal del usuario regular (en su propio Drive, raíz).
+// Guarda: Gemini key, empresa activa con su sheetId/scriptUrl.
+// Permite autologin desde cualquier dispositivo una vez autorizado Google.
+const USER_CONFIG_NAME = '_CC_UserConfig';
+const LS_USER_CONFIG_ID = 'cc_user_config_id'; // cache del ID del Sheet
+
+// ============================================================
+// USER CONFIG — Autologin multi-dispositivo para usuarios regulares
+// ============================================================
+// Este sistema es análogo al Admin Index pero para usuarios NO SUPER_ADMIN.
+// Cada usuario tiene un Sheet personal _CC_UserConfig en la raíz de SU Drive
+// que guarda su configuración (Gemini key + empresa activa).
+//
+// Al login en un dispositivo nuevo (ej. instalar la PWA desde Home Screen de iOS),
+// la app busca automáticamente este archivo, lo lee, y el usuario entra al sistema
+// sin tener que pegar Gemini key ni link de invitación de nuevo.
+
+// Busca o crea el Sheet _CC_UserConfig en la raíz del Drive del usuario actual.
+async function ensureUserConfig(){
+  // Cache para evitar búsqueda repetida
+  const cached = localStorage.getItem(LS_USER_CONFIG_ID);
+  if(cached){
+    try {
+      const chk = await fetch(`https://www.googleapis.com/drive/v3/files/${cached}?fields=id,trashed`, {
+        headers: {'Authorization': 'Bearer ' + getToken()}
+      });
+      if(chk.ok){
+        const d = await chk.json();
+        if(!d.trashed) return cached;
+      }
+    } catch {}
+    localStorage.removeItem(LS_USER_CONFIG_ID);
+  }
+
+  const token = getToken();
+  if(!token) throw new Error('Sin sesión');
+
+  // Buscar Sheet existente en la raíz del Drive del usuario
+  const q = `name='${USER_CONFIG_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
+  const searchUrl = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&fields=files(id,name)';
+  const searchRes = await fetch(searchUrl, {headers: {'Authorization': 'Bearer ' + token}});
+  if(searchRes.ok){
+    const d = await searchRes.json();
+    if(d.files && d.files.length > 0){
+      localStorage.setItem(LS_USER_CONFIG_ID, d.files[0].id);
+      return d.files[0].id;
+    }
+  }
+
+  // No existe → crearlo en raíz del Drive
+  console.log('[userConfig] No existe, creando...');
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      name: USER_CONFIG_NAME,
+      mimeType: 'application/vnd.google-apps.spreadsheet'
+      // Sin 'parents' → va a raíz del Drive del usuario
+    })
+  });
+  if(!createRes.ok) throw new Error('No se pudo crear User Config');
+  const created = await createRes.json();
+  const sheetId = created.id;
+
+  // Inicializar con hoja CONFIG
+  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}`, {
+    headers: {'Authorization': 'Bearer ' + token}
+  });
+
+  const metaResSheets = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`, {
+    headers: {'Authorization': 'Bearer ' + token}
+  });
+  const meta = await metaResSheets.json();
+  const firstSheetId = meta.sheets[0].properties.sheetId;
+
+  // Renombrar Sheet1 a CONFIG
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      requests: [{updateSheetProperties: {properties: {sheetId: firstSheetId, title: 'CONFIG'}, fields: 'title'}}]
+    })
+  });
+
+  // Headers
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/CONFIG!A1?valueInputOption=USER_ENTERED`, {
+    method: 'PUT',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({values: [['KEY', 'VALUE']]})
+  });
+
+  localStorage.setItem(LS_USER_CONFIG_ID, sheetId);
+  return sheetId;
+}
+
+// Lee User Config desde Drive y sincroniza con localStorage.
+// Retorna los datos leídos o null si no se pudo.
+async function syncFromUserConfig(){
+  // No ejecutar si es SUPER_ADMIN (ya tiene su propio sistema via Admin Index)
+  if(isSuperAdmin()) return null;
+
+  try {
+    const configId = await ensureUserConfig();
+    const token = getToken();
+
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/CONFIG!A2:B`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(!res.ok) throw new Error('No se pudo leer User Config');
+    const data = await res.json();
+
+    const rows = data.values || [];
+    const cfg = {};
+    rows.forEach(r => { if(r[0]) cfg[r[0]] = r[1] || ''; });
+
+    // Aplicar Gemini key
+    if(cfg.GEMINI_KEY){
+      localStorage.setItem(LS.GEMINI, cfg.GEMINI_KEY);
+    }
+
+    // Aplicar empresa (si hay)
+    if(cfg.EMPRESA_NOMBRE && cfg.EMPRESA_SHEET_ID){
+      upsertCompany({
+        nombre: cfg.EMPRESA_NOMBRE,
+        sheetId: cfg.EMPRESA_SHEET_ID,
+        scriptUrl: cfg.EMPRESA_SCRIPT_URL || '',
+        folderId: '',
+        createdAt: cfg.EMPRESA_CREATED_AT || new Date().toISOString()
+      });
+      setCurrentCompany(cfg.EMPRESA_NOMBRE);
+    }
+
+    console.log('[userConfig] Configuración sincronizada');
+    return cfg;
+  } catch(e){
+    console.warn('[syncFromUserConfig] Error:', e.message);
+    return null;
+  }
+}
+
+// Guarda una o más claves en User Config (upsert por clave)
+async function saveToUserConfig(values){
+  if(isSuperAdmin()) return; // SUPER_ADMIN usa Admin Index
+  try {
+    const configId = await ensureUserConfig();
+    const token = getToken();
+
+    // Leer filas actuales para ver cuáles existen
+    const readRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/CONFIG!A2:B`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    const readData = await readRes.json();
+    const rows = readData.values || [];
+
+    // Para cada key a escribir, verificar si existe y actualizar o agregar
+    const updates = [];
+    const appends = [];
+
+    Object.entries(values).forEach(([key, value]) => {
+      const idx = rows.findIndex(r => r[0] === key);
+      if(idx >= 0){
+        const rowNum = idx + 2;
+        updates.push({range: `CONFIG!A${rowNum}:B${rowNum}`, values: [[key, value]]});
+      } else {
+        appends.push([key, value]);
+      }
+    });
+
+    // Hacer updates en batch
+    if(updates.length > 0){
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchUpdate`, {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: updates})
+      });
+    }
+
+    // Appends
+    if(appends.length > 0){
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/CONFIG!A2:append?valueInputOption=USER_ENTERED`, {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({values: appends})
+      });
+    }
+
+    console.log('[userConfig] Guardadas', Object.keys(values).length, 'clave(s)');
+  } catch(e){
+    console.warn('[saveToUserConfig] Error:', e.message);
+  }
+}
+
+// ============================================================
+// ADMIN INDEX — Sincronización automática entre dispositivos (SUPER_ADMIN)
+// ============================================================
 
 // Busca el Sheet _CC_Admin_Index dentro de /Caja Chica Master/.
 // Si no existe, lo crea con la estructura correcta.
@@ -5640,6 +5883,9 @@ function processInviteHash(){
       localStorage.setItem(LS.SSID, payload.s);
       if(payload.u) localStorage.setItem(LS.SCRIPTURL, payload.u);
     }
+    // Marcar para persistir al User Config DESPUÉS del login OAuth.
+    // No podemos llamar a Drive todavía porque el usuario aún no tiene token.
+    localStorage.setItem('cc_pending_user_config_save', '1');
     // Invalidar caches para que el usuario invitado lea datos frescos del Sheet
     localStorage.removeItem(LS.MASTERS);
     localStorage.removeItem(LS.BALCACHE);
@@ -5698,6 +5944,24 @@ function processInviteHash(){
       }
     } catch(e){
       console.warn('[init] Sync desde Admin Index falló:', e.message);
+    }
+  }
+
+  // NUEVO: Usuario regular con token pero sin empresa/gemini → leer User Config.
+  // Caso típico: usuario instaló la PWA en Home Screen del iPhone y la abre por primera vez.
+  // Safari y PWA tienen storage separado, entonces la PWA arranca vacía pero
+  // el usuario ya autorizó Google. Buscamos su User Config en Drive.
+  if(hasToken && !isSuperAdmin() && (!hasCompany || !hasGemini)){
+    loading(true, 'Iniciando', 'Buscando configuración en Drive...');
+    try {
+      const cfg = await syncFromUserConfig();
+      hasCompany = !!getCurrentCompany();
+      hasGemini = !!localStorage.getItem(LS.GEMINI);
+      if(cfg && cfg.EMPRESA_NOMBRE){
+        console.log('[init] User Config encontrado:', cfg.EMPRESA_NOMBRE);
+      }
+    } catch(e){
+      console.warn('[init] Sync desde User Config falló:', e.message);
     }
   }
 
