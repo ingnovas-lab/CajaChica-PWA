@@ -1237,12 +1237,10 @@ const LS = {
   TOKEN: 'cc_token',
   EMAIL: 'cc_email',
   GEMINI: 'cc_gemini',
-  SSID: 'cc_ssid',              // DEPRECATED: reemplazado por getCurrentCompany().sheetId - se mantiene para migración
   PROJ: 'cc_proj',
   BALCACHE: 'cc_bal',
   MASTERS: 'cc_masters',
   FOLDERS: 'cc_folders',
-  SCRIPTURL: 'cc_scripturl',    // DEPRECATED: reemplazado por getCurrentCompany().scriptUrl - se mantiene para migración
   COMPANIES: 'cc_companies',    // JSON array de empresas conocidas por la app
   CURRENT_COMPANY: 'cc_current_company', // código de empresa activa
   LAST_REPORTE: 'cc_last_reporte', // último NO_REPORTE usado, para auto-llenar el siguiente registro
@@ -1254,9 +1252,6 @@ const SUPER_ADMIN_EMAIL = 'ingnovas@gmail.com';
 
 // Carpeta raíz en Drive donde se organiza TODO el sistema multi-empresa
 const ROOT_MASTER = 'Caja Chica Master';
-
-// DEPRECATED: se mantiene por compatibilidad con código viejo durante transición
-const ROOT_FOLDER = 'Caja Chica Obras';
 
 // Regex NCF/e-CF oficial DGII (abril 2026)
 const NCF_REGEX = /^((B0[1-9]|B1[1-6])\d{8}|(E3[1-4]|E4[1-7])\d{10})$/;
@@ -1367,28 +1362,6 @@ function getActiveSheetId(){
 function getActiveScriptUrl(){
   const c = getCurrentCompany();
   return c ? (c.scriptUrl || null) : null;
-}
-
-// Migración: si hay LS.SSID y LS.SCRIPTURL pero no hay empresas, crear empresa default
-// Útil para primera vez que se abre la app después del upgrade a multi-empresa
-function migrateSingleToMultiCompany(){
-  const companies = getCompanies();
-  if(companies.length > 0) return; // Ya migró
-
-  const oldSsid = localStorage.getItem(LS.SSID);
-  const oldScript = localStorage.getItem(LS.SCRIPTURL);
-  if(!oldSsid) return; // No hay nada que migrar
-
-  // Crear empresa placeholder con los datos viejos
-  // El usuario puede renombrarla después desde el selector
-  upsertCompany({
-    nombre: 'Empresa Principal',
-    sheetId: oldSsid,
-    scriptUrl: oldScript || '',
-    createdAt: new Date().toISOString()
-  });
-  setCurrentCompany('Empresa Principal');
-  console.log('[migrate] Empresa placeholder creada desde datos legacy');
 }
 
 function toast(msg, type){
@@ -1843,151 +1816,25 @@ async function sheetsBatchGet(ranges){
   return (await r.json()).valueRanges || [];
 }
 
-// ============================================================
-// CREAR SPREADSHEET CON ESTRUCTURA COMPLETA (setup wizard)
-// ============================================================
-async function createNewSheet(){
-  const token = getToken();
-  if(!token){ toast('Conecta Google primero', 'err'); return; }
-  loading(true, 'Creando base de datos', 'Spreadsheet con 8 hojas + fórmulas...');
-  try {
-    // 1. Crear spreadsheet
-    const create = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        properties: {title: 'CajaChica_Obras_DB'},
-        sheets: [
-          {properties: {title: 'REGISTRO'}},
-          {properties: {title: 'PROYECTOS'}},
-          {properties: {title: 'SUPLIDORES'}},
-          {properties: {title: 'CATEGORIAS'}},
-          {properties: {title: 'USUARIOS'}},
-          {properties: {title: 'INGRESOS'}},
-          {properties: {title: 'LOG_OCR'}},
-          {properties: {title: 'DASHBOARD'}},
-        ]
-      })
-    });
-    const ss = await create.json();
-    if(ss.error) throw new Error(ss.error.message);
-    const ssid = ss.spreadsheetId;
-    localStorage.setItem(LS.SSID, ssid);
-
-    // 2. Poblar con headers y datos iniciales (un solo batchUpdate)
-    const email = localStorage.getItem(LS.EMAIL);
-    const data = [
-      {range: 'REGISTRO!A1:X1', values: [[
-        'ID','PROYECTO','NO_REPORTE','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF',
-        'VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO',
-        'APROBADO','OBSERVACIONES','URL_FACTURA','USUARIO','OCR_STATUS',
-        'OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO','ELIMINADO'
-      ]]},
-      {range: 'PROYECTOS!A1:F1', values: [['COD_PROYECTO','NOMBRE','UBICACION','FONDO_INICIAL','ESTADO','USUARIOS_ASIGNADOS']]},
-      {range: 'PROYECTOS!A2:F3', values: [
-        ['OBR-2026-001','Obra Demo 1','Santo Domingo',100000,'ACTIVO',email],
-        ['OBR-2026-002','Obra Demo 2','Santiago',50000,'ACTIVO',email],
-      ]},
-      {range: 'SUPLIDORES!A1:D1', values: [['RNC','NOMBRE','CATEGORIA_DEFAULT','ACTIVO']]},
-      {range: 'CATEGORIAS!A1:C1', values: [['CODIGO','NOMBRE','CUENTA_CONTABLE']]},
-      {range: 'CATEGORIAS!A2:C8', values: [
-        ['MAT','Materiales','5101'],
-        ['MOB','Mano de Obra','5102'],
-        ['TRA','Transporte','5103'],
-        ['EQU','Equipos/Herramientas','5104'],
-        ['COM','Combustible','5105'],
-        ['SER','Servicios','5106'],
-        ['OTR','Otros','5199'],
-      ]},
-      {range: 'USUARIOS!A1:D1', values: [['EMAIL','NOMBRE','ROL','PROYECTOS_ASIGNADOS']]},
-      {range: 'USUARIOS!A2:D2', values: [[email, email.split('@')[0], 'ADMIN', 'OBR-2026-001,OBR-2026-002']]},
-      {range: 'INGRESOS!A1:F1', values: [['ID','FECHA','PROYECTO','TIPO','MONTO','REFERENCIA']]},
-      {range: 'LOG_OCR!A1:F1', values: [['TIMESTAMP','ID_REGISTRO','CONFIDENCE','CAMPOS','ERROR','USUARIO']]},
-      {range: 'DASHBOARD!A1:C1', values: [['PROYECTO','BALANCE','# FACTURAS']]},
-    ];
-
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchUpdate`, {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: data})
-    });
-
-    // 3. Fórmulas en DASHBOARD (SUMIF con 1 sola condición — SÍ vectoriza)
-    const dashFormulas = [
-      ['=ARRAYFORMULA(IF(ROW(PROYECTOS!A2:A)=1,,IF(PROYECTOS!A2:A="",,PROYECTOS!A2:A)))',
-       '=ARRAYFORMULA(IF(A2:A="",,IFERROR(SUMIF(INGRESOS!C:C,A2:A,INGRESOS!E:E),0)-IFERROR(SUMIF(REGISTRO!B:B,A2:A,REGISTRO!W:W),0)+IFERROR(VLOOKUP(A2:A,PROYECTOS!A:D,4,FALSE),0)))',
-       '=ARRAYFORMULA(IF(A2:A="",,COUNTIF(REGISTRO!B:B,A2:A)))'],
-    ];
-    await sheetsAppend('DASHBOARD!A2', dashFormulas);
-
-    // 4. Fórmulas en REGISTRO: I=VALIDACION_NCF, J=DUPLICADO, W=MONTO_APROBADO (NCF está en H)
-    const regFormulas = [
-      ['=ARRAYFORMULA(IF(ROW(H:H)=1,"VALIDACION_NCF",IF(H:H="","",IF(REGEXMATCH(UPPER(H:H),"^((B0[1-9]|B1[1-6])\\d{8}|(E3[1-4]|E4[1-7])\\d{10})$"),"OK","INVALIDO"))))',
-       '=ARRAYFORMULA(IF(ROW(H:H)=1,"DUPLICADO",IF(H:H="","",IF(COUNTIF(H:H,H:H)>1,"DUPLICADO","OK"))))']
-    ];
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!I1:J1?valueInputOption=USER_ENTERED`, {
-      method: 'PUT',
-      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({values: regFormulas})
-    });
-
-    // Columna W: MONTO_APROBADO (MONTO si APROBADO=SI y NO está ELIMINADO). MONTO=M, APROBADO=N, ELIMINADO=X.
-    // Usamos multiplicación lógica (N:N="SI")*(X:X<>"SI") porque AND() no vectoriza en ARRAYFORMULA
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
-      method: 'PUT',
-      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF((N:N="SI")*(X:X<>"SI"),IFERROR(M:M*1,0),0)))']]})
-    });
-
-    // 5. Mover el Spreadsheet a la carpeta raíz de caja chica
-    try {
-      const rootFolderId = await ensureFolder(ROOT_FOLDER, null);
-      await fetch(`https://www.googleapis.com/drive/v3/files/${ssid}?addParents=${rootFolderId}&removeParents=root`, {
-        method: 'PATCH',
-        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-        body: JSON.stringify({})
-      });
-    } catch(e){ console.warn('No se pudo mover el sheet a carpeta raíz:', e.message); }
-
-    loading(false);
-    document.getElementById('ssid-status').innerHTML = '<span style="color:var(--green)">✓ Base creada: ' + ssid.slice(0,20) + '...</span>';
-    toast('Base de datos creada', 'ok');
-    checkSetupReady();
-  } catch(e){
-    loading(false);
-    document.getElementById('ssid-status').innerHTML = '<span style="color:var(--red)">Error: ' + e.message + '</span>';
-  }
-}
-
-async function useExistingSheet(){
-  const id = document.getElementById('inp-ssid').value.trim();
-  if(!id){ toast('Pega el ID del Spreadsheet', 'err'); return; }
-  // Validar acceso
-  loading(true, 'Validando', 'Leyendo base de datos...');
-  try {
-    localStorage.setItem(LS.SSID, id);
-    await sheetsGet('PROYECTOS!A1:A1');
-    loading(false);
-    document.getElementById('ssid-status').innerHTML = '<span style="color:var(--green)">✓ Acceso confirmado</span>';
-    checkSetupReady();
-  } catch(e){
-    loading(false);
-    localStorage.removeItem(LS.SSID);
-    document.getElementById('ssid-status').innerHTML = '<span style="color:var(--red)">No se pudo leer: ' + e.message + '</span>';
-  }
-}
-
 async function saveGeminiKey(){
   const k = document.getElementById('inp-gemini-key').value.trim();
   if(!k.startsWith('AIza')){ toast('Clave inválida', 'err'); return; }
   localStorage.setItem(LS.GEMINI, k);
-  document.getElementById('gemini-status').innerHTML = '<span style="color:var(--green)">✓ Clave guardada</span>';
-  // Si es SUPER_ADMIN, sincronizar al Admin Index en Drive
+  const status = document.getElementById('gemini-status');
+
   if(isSuperAdmin()){
-    try {
-      await saveGeminiKeyToIndex(k);
-      document.getElementById('gemini-status').innerHTML = '<span style="color:var(--green)">✓ Clave guardada y sincronizada</span>';
-    } catch(e){ console.warn('Sync Gemini falló:', e); }
+    status.innerHTML = '<span style="color:var(--text2)">⏳ Subiendo a Drive...</span>';
+    const ok = await saveGeminiKeyToIndex(k);
+    if(ok){
+      status.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada en Drive — disponible en otros dispositivos</span>';
+    } else {
+      // Falla NO silenciosa: la key vive sólo en localStorage y se perderá al reinstalar la PWA.
+      // El usuario debe ver el riesgo y reintentar luego (Configuración → Actualizar clave).
+      status.innerHTML = '<span style="color:var(--red)">⚠ Guardada solo en este dispositivo. No se subió a Drive — reintenta luego desde Configuración → Actualizar clave.</span>';
+      toast('No se sincronizó la clave en Drive', 'err');
+    }
+  } else {
+    status.innerHTML = '<span style="color:var(--green)">✓ Clave guardada</span>';
   }
   checkSetupReady();
 }
@@ -1997,9 +1844,11 @@ async function updateGeminiKey(){
   if(!k.startsWith('AIza')){ toast('Clave inválida', 'err'); return; }
   localStorage.setItem(LS.GEMINI, k);
   if(isSuperAdmin()){
-    try { await saveGeminiKeyToIndex(k); } catch(e){ console.warn(e); }
+    const ok = await saveGeminiKeyToIndex(k);
+    toast(ok ? 'Clave actualizada y sincronizada en Drive' : 'Clave actualizada solo en este dispositivo — reintentar', ok ? 'ok' : 'err');
+  } else {
+    toast('Clave actualizada', 'ok');
   }
-  toast('Clave actualizada', 'ok');
 }
 
 async function updateScriptUrl(){
@@ -2874,8 +2723,11 @@ async function removeCompanyFromIndex(nombre){
 }
 
 // Guarda la Gemini key en el Admin Index (para sincronizar a otros dispositivos)
+// Retorna true si se subió al Admin Index, false si falló (red, permisos, etc).
+// El caller DEBE manejar el resultado — no podemos tragar el error silencioso porque
+// si la sync falla, la key vive sólo en localStorage y se pierde al reinstalar la PWA.
 async function saveGeminiKeyToIndex(key){
-  if(!isSuperAdmin()) return;
+  if(!isSuperAdmin()) return false;
   try {
     const indexId = await ensureAdminIndex();
     const token = getToken();
@@ -2910,8 +2762,10 @@ async function saveGeminiKeyToIndex(key){
       );
     }
     console.log('[adminIndex] Gemini key sincronizada');
+    return true;
   } catch(e){
     console.warn('[saveGeminiKeyToIndex] Error:', e.message);
+    return false;
   }
 }
 
@@ -3055,12 +2909,15 @@ async function initializeSheetStructure(sheetId){
       name: 'REGISTRO',
       headers: ['ID','PROYECTO','NO_REPORTE','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF','VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO','APROBADO','OBSERVACIONES','URL_FACTURA','USUARIO','OCR_STATUS','OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO','ELIMINADO'],
       formulas: {
-        // VALIDACION_NCF (columna I, index 8)
-        I: '=ARRAYFORMULA(IF(ROW(H:H)=1,"VALIDACION_NCF",IF(H:H="","",IF(REGEXMATCH(UPPER(H:H),"^((B0[1-9]|B1[1-6])\\d{8}|(E3[1-4]|E4[1-7])\\d{10})$"),"VALIDO","INVALIDO"))))',
-        // DUPLICADO (columna J, index 9)
-        J: '=ARRAYFORMULA(IF(ROW(H:H)=1,"DUPLICADO",IF(H:H="","",IF(COUNTIF(H:H,H:H)>1,"SI","NO"))))',
-        // MONTO_APROBADO (columna W, index 22)
-        W: '=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF(AND(N:N="SI",X:X<>"SI"),M:M,0)))'
+        // VALIDACION_NCF (columna I): "OK" si el NCF cumple regex DGII, "INVALIDO" si no.
+        I: '=ARRAYFORMULA(IF(ROW(H:H)=1,"VALIDACION_NCF",IF(H:H="","",IF(REGEXMATCH(UPPER(H:H),"^((B0[1-9]|B1[1-6])\\d{8}|(E3[1-4]|E4[1-7])\\d{10})$"),"OK","INVALIDO"))))',
+        // DUPLICADO (columna J): "DUPLICADO" si el NCF aparece más de una vez, "OK" si es único.
+        J: '=ARRAYFORMULA(IF(ROW(H:H)=1,"DUPLICADO",IF(H:H="","",IF(COUNTIF(H:H,H:H)>1,"DUPLICADO","OK"))))',
+        // MONTO_APROBADO (columna W): MONTO si APROBADO=SI Y no está ELIMINADO; 0 si no.
+        // CRÍTICO: usa multiplicación lógica (N:N="SI")*(X:X<>"SI") porque AND() NO vectoriza
+        // dentro de ARRAYFORMULA — devolvería 0 para todas las filas y el balance no descontaría.
+        // Ver ADR-013 en docs/03-decisions.md.
+        W: '=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF((N:N="SI")*(X:X<>"SI"),IFERROR(M:M*1,0),0)))'
       }
     },
     {name: 'PROYECTOS', headers: ['COD_PROYECTO','NOMBRE','UBICACION','FONDO_INICIAL','ESTADO','USUARIOS_ASIGNADOS']},
@@ -5824,7 +5681,7 @@ async function contarFacturasSinConsolidar(){
 
 // Consolidación delegada al Apps Script (corre en servidores de Google, sin CORS).
 // El admin debe configurar una vez la URL del Web App desde Settings → Gestión de usuarios.
-// La URL se guarda en localStorage (LS.SCRIPTURL) como parte de su instalación.
+// La URL se guarda dentro de la empresa activa (getCurrentCompany().scriptUrl).
 async function consolidarFacturas(){
   const scriptUrl = getActiveScriptUrl();
   if(!scriptUrl){
@@ -5907,9 +5764,6 @@ function processInviteHash(){
         createdAt: new Date().toISOString()
       });
       setCurrentCompany(companyName);
-      // Mantener compat con código legacy durante transición
-      localStorage.setItem(LS.SSID, payload.s);
-      if(payload.u) localStorage.setItem(LS.SCRIPTURL, payload.u);
     }
     // Marcar para persistir al User Config DESPUÉS del login OAuth.
     // No podemos llamar a Drive todavía porque el usuario aún no tiene token.
@@ -5927,9 +5781,6 @@ function processInviteHash(){
 
 (async () => {
   loading(true, 'Iniciando', 'Cargando...');
-
-  // Migración transparente del sistema viejo (1 Sheet) al nuevo (multi-empresa)
-  migrateSingleToMultiCompany();
 
   // Aplicar configuración de invitación si aplica
   const fromInvite = processInviteHash();
