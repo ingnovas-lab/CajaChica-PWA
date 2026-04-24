@@ -226,21 +226,13 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div class="card">
       <h3>3. Base de datos</h3>
       <div class="muted" style="margin-bottom:10px">
-        Primera vez: crearemos un Google Sheet con toda la estructura (8 hojas + fórmulas). <br>
-        Si ya tienes uno del equipo: pega el ID.
+        En el siguiente paso podrás crear tu primera empresa desde la app — se generará automáticamente un Sheet con toda la estructura dentro de tu Drive.
       </div>
-      <div class="field">
-        <input type="text" id="inp-ssid" placeholder="ID del Spreadsheet (opcional)" style="font-family:var(--mono);font-size:13px">
-      </div>
-      <div class="grid2" style="margin-top:10px">
-        <button class="btn btn-purple" onclick="useExistingSheet()">Usar existente</button>
-        <button class="btn btn-green" onclick="createNewSheet()">Crear nuevo</button>
-      </div>
-      <div id="ssid-status" style="font-size:12px;margin-top:8px"></div>
+      <div id="ssid-status" style="font-size:12px;margin-top:8px"><span style="color:var(--text2)">Pendiente — lo configurarás al seleccionar/crear empresa</span></div>
     </div>
 
     <button class="btn btn-amber" id="btn-finish-setup" onclick="finishSetup()" disabled style="padding:15px">
-      Comenzar a usar
+      Continuar
     </button>
   </div>
 </div>
@@ -257,6 +249,16 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
   </div>
   <div class="body">
+
+    <!-- Chip de empresa activa (solo visible si hay empresa) -->
+    <div id="company-chip" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="handleCompanyChipClick()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.5"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21V12h6v9"/></svg>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--text2)">Empresa activa</div>
+        <div id="company-chip-name" style="font-size:14px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</div>
+      </div>
+      <div id="company-chip-action" style="font-size:11px;color:var(--amber);padding:4px 8px;border:1px solid var(--amber);border-radius:4px">Cambiar</div>
+    </div>
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin:2px 4px 6px">
       <div style="font-size:18px;font-weight:600;color:var(--text);letter-spacing:.01em">Proyecto Activo</div>
@@ -346,6 +348,90 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <span style="font-size:12px;color:var(--blue);cursor:pointer" onclick="show('pg-history')">Ver todos →</span>
       </div>
       <div class="card" id="home-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== PAGE: SELECT COMPANY (multi-empresa) ========== -->
+<div class="page" id="pg-select-company">
+  <div class="topbar">
+    <div class="ibtn" onclick="exitToLogin()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Seleccionar empresa</div>
+      <div class="topbar-sub">Escoge con cuál empresa trabajar</div>
+    </div>
+  </div>
+  <div class="body">
+    <div id="company-list" style="display:flex;flex-direction:column;gap:10px"></div>
+
+    <button class="btn btn-green" onclick="show('pg-new-company')" style="margin-top:16px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Nueva empresa
+    </button>
+
+    <div style="margin-top:20px;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text2);line-height:1.5">
+      Cada empresa tiene su propio Sheet y estructura de carpetas aislada. Los usuarios invitados solo ven la empresa a la que fueron invitados.
+    </div>
+  </div>
+</div>
+
+<!-- ========== PAGE: NEW COMPANY (wizard) ========== -->
+<div class="page" id="pg-new-company">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-select-company')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Nueva empresa</div>
+      <div class="topbar-sub">Se creará estructura completa en tu Drive</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="card">
+      <div class="field">
+        <div class="lbl">Nombre de la empresa</div>
+        <input type="text" id="newcomp-nombre" placeholder="Ej: Constructora Mabrick" autocapitalize="words">
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">Este nombre se usará para la carpeta en Drive y el nombre del Sheet</div>
+      </div>
+
+      <button class="btn btn-amber" onclick="crearEmpresa()" id="btn-crear-empresa" style="margin-top:12px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21V12h6v9"/></svg>
+        Crear empresa
+      </button>
+
+      <div id="newcomp-progress" style="display:none;margin-top:16px;padding:12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);font-size:12px;line-height:1.8"></div>
+    </div>
+
+    <div class="card" id="newcomp-script-card" style="display:none">
+      <h3>Último paso: asociar Apps Script</h3>
+      <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:10px">
+        Para que la consolidación y los PDFs funcionen, necesitas asociar el Apps Script al Sheet nuevo:
+      </div>
+      <ol style="font-size:13px;line-height:1.7;padding-left:20px;color:var(--text)">
+        <li>Abre el Sheet creado (botón abajo)</li>
+        <li>Ve a <strong>Extensiones → Apps Script</strong></li>
+        <li>Pega el código (el mismo que usaste antes)</li>
+        <li>Implementar → Nueva implementación → Web App</li>
+        <li>Ejecutar como: <strong>Yo</strong>, Acceso: <strong>Cualquiera</strong></li>
+        <li>Copia la URL que sale y pégala abajo</li>
+      </ol>
+      <button class="btn btn-blue" onclick="abrirSheetNuevaEmpresa()" style="margin-top:12px">Abrir Sheet recién creado</button>
+
+      <div class="field" style="margin-top:14px">
+        <div class="lbl">URL del Apps Script Web App</div>
+        <input type="text" id="newcomp-scripturl" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="none" autocomplete="off" style="font-family:var(--mono);font-size:11px">
+      </div>
+
+      <button class="btn btn-green" onclick="finalizarEmpresa()" style="margin-top:10px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Finalizar y activar empresa
+      </button>
+
+      <button class="btn" onclick="saltarScriptYActivar()" style="margin-top:8px;font-size:12px">
+        Omitir por ahora (puedo configurar script después)
+      </button>
     </div>
   </div>
 </div>
@@ -1146,15 +1232,23 @@ const LS = {
   TOKEN: 'cc_token',
   EMAIL: 'cc_email',
   GEMINI: 'cc_gemini',
-  SSID: 'cc_ssid',
+  SSID: 'cc_ssid',              // DEPRECATED: reemplazado por getCurrentCompany().sheetId - se mantiene para migración
   PROJ: 'cc_proj',
   BALCACHE: 'cc_bal',
   MASTERS: 'cc_masters',
   FOLDERS: 'cc_folders',
-  SCRIPTURL: 'cc_scripturl',  // URL del Apps Script Web App (para consolidación)
+  SCRIPTURL: 'cc_scripturl',    // DEPRECATED: reemplazado por getCurrentCompany().scriptUrl - se mantiene para migración
+  COMPANIES: 'cc_companies',    // JSON array de empresas conocidas por la app
+  CURRENT_COMPANY: 'cc_current_company', // código de empresa activa
 };
 
-// Carpeta raíz en Drive donde se organiza todo
+// Email del SUPER_ADMIN (pasaporte universal, crea y ve todas las empresas)
+const SUPER_ADMIN_EMAIL = 'ingnovas@gmail.com';
+
+// Carpeta raíz en Drive donde se organiza TODO el sistema multi-empresa
+const ROOT_MASTER = 'Caja Chica Master';
+
+// DEPRECATED: se mantiene por compatibilidad con código viejo durante transición
 const ROOT_FOLDER = 'Caja Chica Obras';
 
 // Regex NCF/e-CF oficial DGII (abril 2026)
@@ -1163,6 +1257,115 @@ const NCF_REGEX = /^((B0[1-9]|B1[1-6])\d{8}|(E3[1-4]|E4[1-7])\d{10})$/;
 const fmt = n => 'RD$ ' + Number(n||0).toLocaleString('es-DO',{minimumFractionDigits:2,maximumFractionDigits:2});
 const today = () => new Date().toISOString().slice(0,10);
 const uid = () => 'R-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,6).toUpperCase();
+
+// ============================================================
+// SISTEMA MULTI-EMPRESA — helpers
+// ============================================================
+
+// Detecta si el usuario actual es SUPER_ADMIN
+function isSuperAdmin(){
+  const email = (localStorage.getItem(LS.EMAIL) || '').trim().toLowerCase();
+  return email === SUPER_ADMIN_EMAIL.toLowerCase();
+}
+
+// Obtiene la lista de empresas conocidas (desde localStorage)
+function getCompanies(){
+  try {
+    const raw = localStorage.getItem(LS.COMPANIES);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e){
+    console.warn('[getCompanies] Error parseando:', e);
+    return [];
+  }
+}
+
+// Guarda la lista de empresas
+function saveCompanies(list){
+  localStorage.setItem(LS.COMPANIES, JSON.stringify(list || []));
+}
+
+// Agrega una empresa nueva (o actualiza si ya existe por nombre)
+function upsertCompany(company){
+  const list = getCompanies();
+  const idx = list.findIndex(c => c.nombre === company.nombre);
+  if(idx >= 0){
+    list[idx] = {...list[idx], ...company};
+  } else {
+    list.push(company);
+  }
+  saveCompanies(list);
+}
+
+// Obtiene la empresa activa actualmente (la última seleccionada)
+// Retorna null si no hay ninguna activa
+function getCurrentCompany(){
+  const list = getCompanies();
+  if(list.length === 0) return null;
+
+  const activeName = localStorage.getItem(LS.CURRENT_COMPANY);
+  if(activeName){
+    const found = list.find(c => c.nombre === activeName);
+    if(found) return found;
+  }
+
+  // Fallback: primera de la lista
+  return list[0];
+}
+
+// Activa una empresa por nombre
+function setCurrentCompany(nombre){
+  localStorage.setItem(LS.CURRENT_COMPANY, nombre);
+  // Limpiar caches asociados a la empresa anterior
+  localStorage.removeItem(LS.MASTERS);
+  localStorage.removeItem(LS.BALCACHE);
+  localStorage.removeItem(LS.FOLDERS);
+  localStorage.removeItem(LS.PROJ);
+}
+
+// Elimina una empresa de la lista (no borra datos en Drive)
+function removeCompany(nombre){
+  const list = getCompanies().filter(c => c.nombre !== nombre);
+  saveCompanies(list);
+  if(localStorage.getItem(LS.CURRENT_COMPANY) === nombre){
+    localStorage.removeItem(LS.CURRENT_COMPANY);
+  }
+}
+
+// Obtiene el Sheet ID de la empresa activa
+// Retorna null si no hay empresa activa
+function getActiveSheetId(){
+  const c = getCurrentCompany();
+  return c ? c.sheetId : null;
+}
+
+// Obtiene la URL del Apps Script de la empresa activa
+// Retorna null si no hay empresa activa o si no tiene script
+function getActiveScriptUrl(){
+  const c = getCurrentCompany();
+  return c ? (c.scriptUrl || null) : null;
+}
+
+// Migración: si hay LS.SSID y LS.SCRIPTURL pero no hay empresas, crear empresa default
+// Útil para primera vez que se abre la app después del upgrade a multi-empresa
+function migrateSingleToMultiCompany(){
+  const companies = getCompanies();
+  if(companies.length > 0) return; // Ya migró
+
+  const oldSsid = localStorage.getItem(LS.SSID);
+  const oldScript = localStorage.getItem(LS.SCRIPTURL);
+  if(!oldSsid) return; // No hay nada que migrar
+
+  // Crear empresa placeholder con los datos viejos
+  // El usuario puede renombrarla después desde el selector
+  upsertCompany({
+    nombre: 'Empresa Principal',
+    sheetId: oldSsid,
+    scriptUrl: oldScript || '',
+    createdAt: new Date().toISOString()
+  });
+  setCurrentCompany('Empresa Principal');
+  console.log('[migrate] Empresa placeholder creada desde datos legacy');
+}
 
 function toast(msg, type){
   const t = document.getElementById('toast');
@@ -1176,15 +1379,17 @@ function show(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.getElementById(id).classList.add('on');
   window.scrollTo(0,0);
-  if(id==='pg-home') refreshHome();
+  if(id==='pg-home'){ refreshHome(); refreshCompanyChip(); }
   if(id==='pg-history') renderHistory();
   if(id==='pg-proj-select') renderProjects();
+  if(id==='pg-select-company') renderCompanyList();
   if(id==='pg-settings'){
     document.getElementById('set-email').textContent = localStorage.getItem(LS.EMAIL) || '—';
-    document.getElementById('set-ssid').textContent = localStorage.getItem(LS.SSID) || '—';
+    const activeSheetId = getActiveSheetId();
+    document.getElementById('set-ssid').textContent = activeSheetId || '—';
     document.getElementById('set-rol').textContent = masters.myRole || 'USUARIO';
     const scriptInput = document.getElementById('set-scripturl');
-    if(scriptInput) scriptInput.value = localStorage.getItem(LS.SCRIPTURL) || '';
+    if(scriptInput) scriptInput.value = getActiveScriptUrl() || '';
     checkConsolidarStatus();
   }
   if(id==='pg-abono') document.getElementById('ab-fecha').value = today();
@@ -1460,7 +1665,7 @@ function logoutGoogle(){
 // Reemplaza xlsx round-trip del app original.
 // ============================================================
 async function sheetsGet(range){
-  const ssid = localStorage.getItem(LS.SSID);
+  const ssid = getActiveSheetId();
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(range)}`;
   const r = await authFetch(url);
   if(!r.ok) throw new Error('Error Sheets: ' + r.status);
@@ -1473,7 +1678,7 @@ async function sheetsGet(range){
 // muy altas (1000+). En su lugar leemos la columna A (IDs, sin fórmulas) para
 // saber la última fila real y hacemos update directo.
 async function sheetsAppend(range, values){
-  const ssid = localStorage.getItem(LS.SSID);
+  const ssid = getActiveSheetId();
 
   // Extraer nombre de hoja del range (ej: "REGISTRO!A2" -> "REGISTRO")
   const sheetName = range.split('!')[0];
@@ -1530,7 +1735,7 @@ async function sheetsAppend(range, values){
 }
 
 async function sheetsBatchGet(ranges){
-  const ssid = localStorage.getItem(LS.SSID);
+  const ssid = getActiveSheetId();
   const qs = ranges.map(r => 'ranges=' + encodeURIComponent(r)).join('&');
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchGet?${qs}`;
   const r = await authFetch(url);
@@ -1703,7 +1908,7 @@ function updateScriptUrl(){
 }
 
 async function probarScript(){
-  const url = localStorage.getItem(LS.SCRIPTURL);
+  const url = getActiveScriptUrl();
   if(!url){ toast('Primero guarda la URL del script', 'err'); return; }
 
   loading(true, 'Probando', 'Contactando Apps Script...');
@@ -1733,7 +1938,7 @@ async function probarScript(){
 // Comparte el Sheet con un usuario como Editor (vía Apps Script)
 // Retorna null si el script no está configurado, o el resultado del script
 async function compartirSheetConUsuario(email){
-  const url = localStorage.getItem(LS.SCRIPTURL);
+  const url = getActiveScriptUrl();
   if(!url) return null;  // Sin script, no se hace — no bloquea el flujo de invitación
   try {
     const res = await fetch(url, {
@@ -1751,7 +1956,7 @@ async function compartirSheetConUsuario(email){
 
 // Revoca el acceso al Sheet de un usuario (vía Apps Script)
 async function revocarAccesoSheet(email){
-  const url = localStorage.getItem(LS.SCRIPTURL);
+  const url = getActiveScriptUrl();
   if(!url) return null;
   try {
     const res = await fetch(url, {
@@ -1767,14 +1972,393 @@ async function revocarAccesoSheet(email){
   }
 }
 
+// ============================================================
+// SELECTOR DE EMPRESA
+// ============================================================
+
+// Renderiza la lista de empresas conocidas
+function renderCompanyList(){
+  const container = document.getElementById('company-list');
+  if(!container) return;
+
+  const companies = getCompanies();
+  const current = getCurrentCompany();
+
+  if(companies.length === 0){
+    container.innerHTML = `
+      <div style="padding:24px;text-align:center;color:var(--text2);font-size:14px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--r)">
+        No hay empresas registradas aún.<br>
+        <span style="font-size:12px">Crea la primera haciendo clic en "Nueva empresa" abajo.</span>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = companies.map(c => {
+    const isActive = current && current.nombre === c.nombre;
+    const hasScript = !!c.scriptUrl;
+    return `
+      <div class="card" style="padding:14px;cursor:pointer;${isActive ? 'border-color:var(--amber)' : ''}" onclick="selectCompany('${c.nombre.replace(/'/g, "\\'")}')">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:40px;height:40px;background:rgba(245,158,11,0.12);border:1px solid var(--amber);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.5"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21V12h6v9"/></svg>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:15px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nombre}</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">
+              ${isActive ? '<span style="color:var(--amber)">● Activa · </span>' : ''}
+              ${hasScript ? 'Apps Script configurado' : '<span style="color:var(--red)">Sin Apps Script</span>'}
+            </div>
+          </div>
+          <div style="color:var(--text2)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Selecciona una empresa y entra al sistema
+async function selectCompany(nombre){
+  setCurrentCompany(nombre);
+  toast(`Empresa activa: ${nombre}`, 'ok');
+
+  // Cargar masters de la empresa nueva
+  try {
+    await loadMasters();
+  } catch(e){
+    console.warn('[selectCompany] Error cargando masters:', e);
+  }
+
+  show('pg-home');
+}
+
+// Maneja click en chip de empresa en el home
+function handleCompanyChipClick(){
+  // Solo SUPER_ADMIN puede cambiar de empresa desde el chip
+  if(!isSuperAdmin()){
+    return;
+  }
+  show('pg-select-company');
+}
+
+// Refresca el chip de empresa en el home
+function refreshCompanyChip(){
+  const chip = document.getElementById('company-chip');
+  if(!chip) return;
+
+  const current = getCurrentCompany();
+  const superAdmin = isSuperAdmin();
+
+  // USUARIO regular: no ve el chip (ya sabe su única empresa)
+  if(!superAdmin){
+    chip.style.display = 'none';
+    return;
+  }
+
+  if(!current){
+    chip.style.display = 'none';
+    return;
+  }
+
+  chip.style.display = 'flex';
+  const nameEl = document.getElementById('company-chip-name');
+  if(nameEl) nameEl.textContent = current.nombre;
+}
+
+// "Salir" para volver a login - solo si SUPER_ADMIN quiere cambiar de Google account
+function exitToLogin(){
+  if(!confirm('¿Salir del sistema? Tendrás que volver a iniciar sesión.')) return;
+  // Limpiar tokens pero no destruir las empresas registradas
+  localStorage.removeItem(LS.TOKEN);
+  location.reload();
+}
+
+// ============================================================
+// CREAR EMPRESA (wizard)
+// ============================================================
+
+let newCompanyContext = null; // holds {nombre, folderId, sheetId} while wizard runs
+
+async function crearEmpresa(){
+  const nombre = document.getElementById('newcomp-nombre').value.trim();
+  if(!nombre){ toast('Teclea el nombre de la empresa', 'err'); return; }
+  if(nombre.length < 2){ toast('Nombre demasiado corto', 'err'); return; }
+
+  // Verificar duplicado
+  const existing = getCompanies();
+  if(existing.find(c => c.nombre.toLowerCase() === nombre.toLowerCase())){
+    toast('Ya existe una empresa con ese nombre', 'err');
+    return;
+  }
+
+  const btn = document.getElementById('btn-crear-empresa');
+  btn.disabled = true;
+  const progressEl = document.getElementById('newcomp-progress');
+  progressEl.style.display = 'block';
+  progressEl.innerHTML = '⏳ Iniciando...';
+
+  try {
+    const token = getToken();
+
+    // 1. Crear carpeta raíz "Caja Chica Master" si no existe
+    progressEl.innerHTML = '⏳ Verificando carpeta maestra...';
+    const rootId = await ensureFolder(ROOT_MASTER, null);
+
+    // 2. Crear carpeta de la empresa dentro de Master
+    progressEl.innerHTML = '⏳ Creando carpeta de la empresa...';
+    const empresaFolderId = await ensureFolder(nombre, rootId);
+
+    // 3. Crear subcarpeta "Base de datos"
+    progressEl.innerHTML = '⏳ Creando subcarpeta "Base de datos"...';
+    const bdFolderId = await ensureFolder('Base de datos', empresaFolderId);
+
+    // 4. Crear subcarpeta "Proyectos"
+    progressEl.innerHTML = '⏳ Creando subcarpeta "Proyectos"...';
+    await ensureFolder('Proyectos', empresaFolderId);
+
+    // 5. Crear Sheet dentro de "Base de datos"
+    progressEl.innerHTML = '⏳ Creando Sheet...';
+    const sheetName = `CajaChica_${nombre}`;
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name: sheetName,
+        mimeType: 'application/vnd.google-apps.spreadsheet',
+        parents: [bdFolderId]
+      })
+    });
+    if(!createRes.ok) throw new Error('Error creando Sheet: ' + createRes.status);
+    const sheetData = await createRes.json();
+    const sheetId = sheetData.id;
+
+    // 6. Inicializar estructura del Sheet (hojas + headers + fórmulas)
+    progressEl.innerHTML = '⏳ Inicializando estructura del Sheet...';
+    await initializeSheetStructure(sheetId);
+
+    // Guardar contexto para el siguiente paso (asociación de script)
+    newCompanyContext = {
+      nombre: nombre,
+      folderId: empresaFolderId,
+      sheetId: sheetId,
+      bdFolderId: bdFolderId
+    };
+
+    // Pre-registrar empresa (sin scriptUrl todavía)
+    upsertCompany({
+      nombre: nombre,
+      sheetId: sheetId,
+      scriptUrl: '',
+      folderId: empresaFolderId,
+      createdAt: new Date().toISOString()
+    });
+
+    progressEl.innerHTML = '✓ Estructura creada. Continúa con el paso final abajo.';
+    btn.style.display = 'none';
+    document.getElementById('newcomp-script-card').style.display = 'block';
+    document.getElementById('newcomp-script-card').scrollIntoView({behavior:'smooth'});
+    toast('Estructura de empresa creada', 'ok');
+
+  } catch(e){
+    progressEl.innerHTML = `✗ Error: ${e.message}`;
+    btn.disabled = false;
+    toast('Error: ' + e.message, 'err');
+    console.error('[crearEmpresa]', e);
+  }
+}
+
+// Inicializa todas las hojas + headers + fórmulas en un Sheet recién creado
+async function initializeSheetStructure(sheetId){
+  const token = getToken();
+
+  // Definición de hojas con sus headers
+  const sheets = [
+    {
+      name: 'REGISTRO',
+      headers: ['ID','PROYECTO','NO_REPORTE','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF','VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO','APROBADO','OBSERVACIONES','URL_FACTURA','USUARIO','OCR_STATUS','OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO','ELIMINADO'],
+      formulas: {
+        // VALIDACION_NCF (columna I, index 8)
+        I: '=ARRAYFORMULA(IF(ROW(H:H)=1,"VALIDACION_NCF",IF(H:H="","",IF(REGEXMATCH(UPPER(H:H),"^((B0[1-9]|B1[1-6])\\d{8}|(E3[1-4]|E4[1-7])\\d{10})$"),"VALIDO","INVALIDO"))))',
+        // DUPLICADO (columna J, index 9)
+        J: '=ARRAYFORMULA(IF(ROW(H:H)=1,"DUPLICADO",IF(H:H="","",IF(COUNTIF(H:H,H:H)>1,"SI","NO"))))',
+        // MONTO_APROBADO (columna W, index 22)
+        W: '=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF(AND(N:N="SI",X:X<>"SI"),M:M,0)))'
+      }
+    },
+    {name: 'PROYECTOS', headers: ['CODIGO','NOMBRE','CLIENTE','UBICACION','FECHA_INICIO','ESTADO','USUARIOS_ASIGNADOS']},
+    {name: 'SUPLIDORES', headers: ['RNC','NOMBRE','CATEGORIA','CONTACTO','TELEFONO']},
+    {name: 'CATEGORIAS', headers: ['CODIGO','NOMBRE','DESCRIPCION']},
+    {name: 'USUARIOS', headers: ['EMAIL','NOMBRE','ROL','PROYECTOS_ASIGNADOS']},
+    {name: 'INGRESOS', headers: ['ID','PROYECTO','FECHA','MONTO','DESCRIPCION','USUARIO']},
+    {name: 'LOG_OCR', headers: ['FECHA','HORA','ID_FACTURA','STATUS','CONFIDENCE','MENSAJE']},
+    {name: 'DASHBOARD', headers: ['OBRA','PRESUPUESTO','INGRESOS','GASTOS','BALANCE','% EJECUTADO']}
+  ];
+
+  // 1. Obtener info del sheet para saber el ID de la hoja default "Sheet1"
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`, {
+    headers: {'Authorization': 'Bearer ' + token}
+  });
+  if(!metaRes.ok) throw new Error('No se pudo leer metadata del Sheet');
+  const meta = await metaRes.json();
+  const defaultSheetId = meta.sheets[0].properties.sheetId;
+
+  // 2. Crear las hojas (todas excepto que se renombra la primera)
+  const requests = [];
+  // Renombrar la primera a REGISTRO
+  requests.push({
+    updateSheetProperties: {
+      properties: {sheetId: defaultSheetId, title: sheets[0].name},
+      fields: 'title'
+    }
+  });
+  // Crear las demás
+  sheets.slice(1).forEach(s => {
+    requests.push({
+      addSheet: {properties: {title: s.name}}
+    });
+  });
+
+  const batchRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({requests})
+  });
+  if(!batchRes.ok) throw new Error('Error creando hojas: ' + await batchRes.text());
+
+  // 3. Escribir headers en cada hoja
+  const data = [];
+  sheets.forEach(s => {
+    data.push({
+      range: `${s.name}!A1`,
+      values: [s.headers]
+    });
+  });
+
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({valueInputOption: 'USER_ENTERED', data})
+  });
+
+  // 4. Escribir fórmulas ARRAYFORMULA en REGISTRO
+  if(sheets[0].formulas){
+    const formData = [];
+    Object.entries(sheets[0].formulas).forEach(([col, formula]) => {
+      formData.push({
+        range: `REGISTRO!${col}1`,
+        values: [[formula]]
+      });
+    });
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: formData})
+    });
+  }
+
+  // 5. Semillar categorías estándar
+  const categorias = [
+    ['MAT', 'Materiales', 'Materiales de construcción'],
+    ['MOB', 'Mano de Obra', 'Pagos a personal y contratistas'],
+    ['COM', 'Combustible', 'Gasolina, diesel, tickets'],
+    ['TRA', 'Transporte', 'Fletes y transporte'],
+    ['HER', 'Herramientas', 'Herramientas y equipo menor'],
+    ['OTR', 'Otros', 'Gastos varios']
+  ];
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/CATEGORIAS!A2:append?valueInputOption=USER_ENTERED`, {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({values: categorias})
+  });
+
+  // 6. Agregar al SUPER_ADMIN como ADMIN automáticamente (solo en este primer setup)
+  const adminEmail = localStorage.getItem(LS.EMAIL);
+  if(adminEmail){
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/USUARIOS!A2:append?valueInputOption=USER_ENTERED`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [[adminEmail, 'Super Admin', 'ADMIN', '']]})
+    });
+  }
+}
+
+// Abrir el sheet de la empresa recién creada en nueva pestaña
+function abrirSheetNuevaEmpresa(){
+  if(!newCompanyContext){ toast('No hay empresa en creación', 'err'); return; }
+  window.open(`https://docs.google.com/spreadsheets/d/${newCompanyContext.sheetId}/edit`, '_blank');
+}
+
+// Finaliza la creación: guarda script URL y activa la empresa
+async function finalizarEmpresa(){
+  if(!newCompanyContext){ toast('Sesión de creación expirada', 'err'); return; }
+  const url = document.getElementById('newcomp-scripturl').value.trim();
+  if(!url){ toast('Pega la URL del Apps Script', 'err'); return; }
+  if(!url.startsWith('https://script.google.com/')){ toast('URL inválida', 'err'); return; }
+
+  // Actualizar empresa con la URL
+  upsertCompany({
+    nombre: newCompanyContext.nombre,
+    sheetId: newCompanyContext.sheetId,
+    scriptUrl: url,
+    folderId: newCompanyContext.folderId,
+    createdAt: new Date().toISOString()
+  });
+
+  setCurrentCompany(newCompanyContext.nombre);
+  newCompanyContext = null;
+  document.getElementById('newcomp-nombre').value = '';
+  document.getElementById('newcomp-scripturl').value = '';
+
+  await loadMasters();
+  toast(`Empresa activada: ${newCompanyContext?.nombre || ''}`, 'ok');
+  show('pg-home');
+}
+
+// Omitir configuración de script (puede hacerlo después)
+function saltarScriptYActivar(){
+  if(!newCompanyContext){ toast('Sesión expirada', 'err'); return; }
+  if(!confirm('Puedes configurar el Apps Script después desde el selector de empresa. La consolidación y PDFs no funcionarán hasta entonces.\n\n¿Continuar?')) return;
+
+  setCurrentCompany(newCompanyContext.nombre);
+  const nombre = newCompanyContext.nombre;
+  newCompanyContext = null;
+  document.getElementById('newcomp-nombre').value = '';
+
+  loadMasters().catch(e => console.warn(e));
+  toast(`Empresa activada: ${nombre}`, 'ok');
+  show('pg-home');
+}
+
 function checkSetupReady(){
-  const ok = getToken() && localStorage.getItem(LS.GEMINI) && localStorage.getItem(LS.SSID);
+  // Setup "ready" para SUPER_ADMIN: solo necesita token y Gemini key
+  // (no necesita Sheet ID porque el sistema multi-empresa maneja eso desde selector)
+  // Setup "ready" para usuario regular: necesita todo incluyendo sheet via link de invitación
+  const ok = getToken() && localStorage.getItem(LS.GEMINI);
   document.getElementById('btn-finish-setup').disabled = !ok;
 }
 
 function finishSetup(){
-  show('pg-home');
-  loadMasters();
+  // Rutear según perfil:
+  // - SUPER_ADMIN sin empresa activa → selector de empresa
+  // - SUPER_ADMIN con empresa activa → home (con esa empresa)
+  // - Usuario regular con empresa asignada (via invite) → home
+  // - Usuario regular sin empresa → mostrar mensaje
+  const current = getCurrentCompany();
+  if(isSuperAdmin()){
+    if(current){
+      show('pg-home');
+      loadMasters();
+    } else {
+      show('pg-select-company');
+    }
+  } else {
+    if(current){
+      show('pg-home');
+      loadMasters();
+    } else {
+      toast('Necesitas un link de invitación válido para entrar', 'err');
+    }
+  }
 }
 
 // ============================================================
@@ -2451,7 +3035,7 @@ async function syncAll(){
       if(startRowReg > 0 && regRowsEliminado.length > 0){
         const xRange = `REGISTRO!X${startRowReg}`;
         const token = getToken();
-        const ssid = localStorage.getItem(LS.SSID);
+        const ssid = getActiveSheetId();
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(xRange)}?valueInputOption=USER_ENTERED`, {
           method: 'PUT',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
@@ -2535,15 +3119,49 @@ async function ensureFolder(name, parentId){
   return createData.id;
 }
 
+// Helpers jerárquicos para estructura multi-empresa
+// Estructura: /Caja Chica Master/[Empresa]/Proyectos/[Obra]/{Fotos|Reportes|Papelera}/
+
+// Raíz del sistema multi-empresa
+async function getMasterFolderId(){
+  return await ensureFolder(ROOT_MASTER, null);
+}
+
+// Carpeta de la empresa activa
+async function getCompanyFolderId(){
+  const company = getCurrentCompany();
+  if(!company) throw new Error('No hay empresa activa');
+  const master = await getMasterFolderId();
+  return await ensureFolder(company.nombre, master);
+}
+
+// Carpeta "Proyectos" de la empresa activa
+async function getProyectosFolderId(){
+  const empresa = await getCompanyFolderId();
+  return await ensureFolder('Proyectos', empresa);
+}
+
+// Carpeta de un proyecto específico dentro de "Proyectos"
+// Usa SOLO el nombre del proyecto (no el código)
+async function getObraFolderId(codObra){
+  const proj = masters.projects.find(p => p.cod === codObra);
+  if(!proj) throw new Error('Proyecto no encontrado: ' + codObra);
+  const proyectosId = await getProyectosFolderId();
+  return await ensureFolder(proj.nombre, proyectosId);
+}
+
+// Carpeta de un tipo específico (Fotos, Reportes, Papelera) dentro de una obra
+async function getSubfolderObra(codObra, subfolder){
+  const obraId = await getObraFolderId(codObra);
+  return await ensureFolder(subfolder, obraId);
+}
+
 async function uploadImage(entry){
   const token = getToken();
   if(!token) throw new Error('Sesión expirada');
 
-  // Estructura de carpetas: /Caja Chica Obras/{COD - Nombre del proyecto}/
-  const rootId = await ensureFolder(ROOT_FOLDER, null);
-  const proj = masters.projects.find(p => p.cod === entry.proyecto);
-  const projFolderName = proj ? `${entry.proyecto} - ${proj.nombre}` : entry.proyecto;
-  const projFolderId = await ensureFolder(projFolderName, rootId);
+  // Estructura nueva: /Caja Chica Master/[Empresa]/Proyectos/[Obra]/Fotos/
+  const projFolderId = await getSubfolderObra(entry.proyecto, 'Fotos');
 
   // Convertir base64 a blob
   const binary = atob(entry.image_base64);
@@ -2636,7 +3254,7 @@ async function sharePhotoWithAdmins(fileId){
 // UTILIDADES
 // ============================================================
 function openSheet(){
-  const id = localStorage.getItem(LS.SSID);
+  const id = getActiveSheetId();
   if(id) window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`, '_blank');
 }
 
@@ -2661,7 +3279,7 @@ async function repairFormulas(){
 
   const token = getToken();
   if(!token){ toast('Sesión expirada', 'err'); return; }
-  const ssid = localStorage.getItem(LS.SSID);
+  const ssid = getActiveSheetId();
   if(!ssid){ toast('Sin base de datos', 'err'); return; }
 
   loading(true, 'Migrando', 'Leyendo estructura...');
@@ -2901,7 +3519,7 @@ async function generarReporte(){
     // Se dispara en paralelo — Apps Script lo genera en el servidor.
     // Mientras tanto el usuario ya ve el reporte en pantalla.
     // Solo se genera si hay al menos 1 factura y el script está configurado.
-    if(filtrados.length > 0 && localStorage.getItem(LS.SCRIPTURL)){
+    if(filtrados.length > 0 && getActiveScriptUrl()){
       generarPDFFotos({
         proyecto, desde, hasta, numero,
         nombreObra, codObra,
@@ -2918,7 +3536,7 @@ async function generarReporte(){
 // Dispara al Apps Script la generación del PDF soporte con fotos.
 // Se ejecuta en background. Actualiza la UI cuando termina.
 async function generarPDFFotos(params){
-  const url = localStorage.getItem(LS.SCRIPTURL);
+  const url = getActiveScriptUrl();
   if(!url) return;
 
   // Mostrar un banner en la sección del reporte avisando que está generando
@@ -3115,7 +3733,7 @@ async function createProject(){
   try {
     const email = localStorage.getItem(LS.EMAIL);
     const token = getToken();
-    const ssid = localStorage.getItem(LS.SSID);
+    const ssid = getActiveSheetId();
 
     // 1) Agregar fila al Sheet PROYECTOS (incluye todos los usuarios asignados)
     const todosAsignados = [email, ...usuariosAsignados];
@@ -3157,12 +3775,14 @@ async function createProject(){
       }
     }
 
-    // 3) Crear carpetas en Drive (del admin)
+    // 3) Crear carpetas en Drive con estructura multi-empresa
+    // /Caja Chica Master/[Empresa]/Proyectos/[Nombre Obra]/{Fotos, Reportes, Papelera}
     loading(true, 'Creando obra', 'Creando carpetas en Drive...');
-    const rootId = await ensureFolder(ROOT_FOLDER, null);
-    const projFolderName = `${cod} - ${nombre}`;
-    const projFolderId = await ensureFolder(projFolderName, rootId);
-    await ensureFolder('Papelera', projFolderId);
+    const proyectosId = await getProyectosFolderId();
+    const obraFolderId = await ensureFolder(nombre, proyectosId);
+    await ensureFolder('Fotos', obraFolderId);
+    await ensureFolder('Reportes', obraFolderId);
+    await ensureFolder('Papelera', obraFolderId);
 
     // 4) Refrescar masters y seleccionar la nueva obra
     await loadMasters();
@@ -3630,7 +4250,7 @@ async function saveEdit(){
     add('OBSERVACIONES', nuevo.observaciones);
 
     const token = getToken();
-    const ssid = localStorage.getItem(LS.SSID);
+    const ssid = getActiveSheetId();
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchUpdate`, {
       method: 'POST',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
@@ -3690,10 +4310,8 @@ async function renameOrMoveFacturaFile(url, opts){
     const fm = await fileMeta.json();
     const currentParents = (fm.parents || []).join(',');
 
-    const rootId = await ensureFolder(ROOT_FOLDER, null);
-    const projNuevo = masters.projects.find(p => p.cod === opts.proyectoNuevo);
-    const folderNameNuevo = projNuevo ? `${opts.proyectoNuevo} - ${projNuevo.nombre}` : opts.proyectoNuevo;
-    const newFolderId = await ensureFolder(folderNameNuevo, rootId);
+    // Nueva estructura: mover a /Empresa/Proyectos/[Obra]/Fotos/
+    const newFolderId = await getSubfolderObra(opts.proyectoNuevo, 'Fotos');
 
     addParents = newFolderId;
     removeParents = currentParents;
@@ -3726,7 +4344,7 @@ async function eliminarFactura(idx){
   loading(true, 'Eliminando', 'Marcando en Sheet...');
   try {
     const token = getToken();
-    const ssid = localStorage.getItem(LS.SSID);
+    const ssid = getActiveSheetId();
 
     // 1) Marcar ELIMINADO=SI
     if(H.ELIMINADO === undefined) throw new Error('Falta columna ELIMINADO. Corre "Reparar fórmulas".');
@@ -3736,18 +4354,15 @@ async function eliminarFactura(idx){
       body: JSON.stringify({values: [['SI']]})
     });
 
-    // 2) Mover foto a Papelera del proyecto
+    // 2) Mover foto a Papelera del proyecto (estructura nueva)
     const url = r[H.URL_FACTURA];
     if(url){
       loading(true, 'Eliminando', 'Moviendo foto a Papelera...');
       const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if(m){
         const fileId = m[1];
-        const rootId = await ensureFolder(ROOT_FOLDER, null);
-        const proj = masters.projects.find(p => p.cod === r[H.PROYECTO]);
-        const projFolder = proj ? `${r[H.PROYECTO]} - ${proj.nombre}` : r[H.PROYECTO];
-        const projId = await ensureFolder(projFolder, rootId);
-        const papeleraId = await ensureFolder('Papelera', projId);
+        // Nueva estructura: /Empresa/Proyectos/[Obra]/Papelera/
+        const papeleraId = await getSubfolderObra(r[H.PROYECTO], 'Papelera');
 
         // Remover de padres actuales, agregar a Papelera
         const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
@@ -3786,7 +4401,7 @@ async function restaurarFactura(idx){
   loading(true, 'Restaurando', 'Actualizando Sheet...');
   try {
     const token = getToken();
-    const ssid = localStorage.getItem(LS.SSID);
+    const ssid = getActiveSheetId();
 
     // 1) ELIMINADO=NO
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!${col(H.ELIMINADO)}${f.sheetRow}?valueInputOption=USER_ENTERED`, {
@@ -3795,17 +4410,15 @@ async function restaurarFactura(idx){
       body: JSON.stringify({values: [['NO']]})
     });
 
-    // 2) Mover foto de Papelera de vuelta a carpeta del proyecto
+    // 2) Mover foto de Papelera de vuelta a carpeta Fotos del proyecto
     const url = r[H.URL_FACTURA];
     if(url){
       loading(true, 'Restaurando', 'Moviendo foto...');
       const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if(m){
         const fileId = m[1];
-        const rootId = await ensureFolder(ROOT_FOLDER, null);
-        const proj = masters.projects.find(p => p.cod === r[H.PROYECTO]);
-        const projFolder = proj ? `${r[H.PROYECTO]} - ${proj.nombre}` : r[H.PROYECTO];
-        const projId = await ensureFolder(projFolder, rootId);
+        // Destino: /Empresa/Proyectos/[Obra]/Fotos/
+        const fotosId = await getSubfolderObra(r[H.PROYECTO], 'Fotos');
 
         const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
           headers: {'Authorization': 'Bearer ' + token}
@@ -3813,7 +4426,7 @@ async function restaurarFactura(idx){
         const fm = await fileMeta.json();
         const currentParents = (fm.parents || []).join(',');
 
-        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${projId}&removeParents=${currentParents}`, {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${fotosId}&removeParents=${currentParents}`, {
           method: 'PATCH',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
           body: JSON.stringify({})
@@ -3842,7 +4455,7 @@ async function eliminarFacturaPermanente(idx){
   loading(true, 'Eliminando permanentemente', 'Borrando foto y fila...');
   try {
     const token = getToken();
-    const ssid = localStorage.getItem(LS.SSID);
+    const ssid = getActiveSheetId();
 
     // 1) Borrar foto de Drive (si existe)
     const url = r[H.URL_FACTURA];
@@ -3910,7 +4523,6 @@ async function syncDriveFilesWithSheet(){
 
     const rows = raw.slice(1);
     const token = getToken();
-    const rootId = await ensureFolder(ROOT_FOLDER, null);
 
     let updated = 0, skipped = 0, errors = 0;
     for(let i = 0; i < rows.length; i++){
@@ -3926,11 +4538,12 @@ async function syncDriveFilesWithSheet(){
 
       const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
       const projCod = r[H.PROYECTO];
-      const proj = masters.projects.find(p => p.cod === projCod);
-      const projFolderName = proj ? `${projCod} - ${proj.nombre}` : projCod;
 
+      // Nombre con el formato nuevo: "fecha _ suplidor _ id.jpg"
       const safeSup = (r[H.SUPLIDOR] || 'sin-suplidor').replace(/[^a-zA-Z0-9 -]/g, '').substring(0, 40);
-      const expectedName = `${r[H.FECHA_FACTURA] || today()} ${safeSup} ${r[H.ID]}.jpg`;
+      const fechaRaw = r[H.FECHA_FACTURA] || today();
+      const fechaDot = fechaRaw.replace(/-/g, '.');
+      const expectedName = `${fechaDot} _ ${safeSup} _ ${r[H.ID]}.jpg`;
 
       try {
         // Obtener metadata actual del archivo
@@ -3941,11 +4554,10 @@ async function syncDriveFilesWithSheet(){
         const meta = await metaRes.json();
         const currentParents = (meta.parents || []);
 
-        // Carpeta esperada
-        const projId = await ensureFolder(projFolderName, rootId);
+        // Carpeta esperada (nueva estructura: Fotos o Papelera dentro de la obra)
         const expectedFolderId = eliminado
-          ? await ensureFolder('Papelera', projId)
-          : projId;
+          ? await getSubfolderObra(projCod, 'Papelera')
+          : await getSubfolderObra(projCod, 'Fotos');
 
         const nameNeedsChange = meta.name !== expectedName;
         const folderNeedsChange = !currentParents.includes(expectedFolderId);
@@ -4047,7 +4659,7 @@ async function eliminarUsuario(idx){
   loading(true, 'Eliminando', 'Actualizando USUARIOS...');
   try {
     const token = getToken();
-    const ssid = localStorage.getItem(LS.SSID);
+    const ssid = getActiveSheetId();
 
     // Obtener sheetId de USUARIOS para poder borrar la fila
     const ssRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`, {
@@ -4171,7 +4783,7 @@ async function guardarInvitacion(){
   loading(true, 'Guardando', 'Actualizando USUARIOS...');
   try {
     const token = getToken();
-    const ssid = localStorage.getItem(LS.SSID);
+    const ssid = getActiveSheetId();
     const proyectosStr = obras.join(',');
 
     if(editingUserIdx !== null){
@@ -4210,9 +4822,13 @@ async function guardarInvitacion(){
     }
 
     // Generar link de invitación (se muestra tanto al invitar como al editar)
+    // Incluye nombre de empresa + URL del script para configuración completa del usuario
+    const currentCompany = getCurrentCompany();
     const payload = {
       k: localStorage.getItem(LS.GEMINI),
-      s: ssid
+      s: ssid,
+      n: currentCompany ? currentCompany.nombre : 'Empresa',  // nombre empresa
+      u: currentCompany ? (currentCompany.scriptUrl || '') : ''  // URL Apps Script
     };
     const encoded = btoa(JSON.stringify(payload));
     const baseUrl = window.location.origin + window.location.pathname;
@@ -4301,7 +4917,7 @@ async function contarFacturasSinConsolidar(){
 // El admin debe configurar una vez la URL del Web App desde Settings → Gestión de usuarios.
 // La URL se guarda en localStorage (LS.SCRIPTURL) como parte de su instalación.
 async function consolidarFacturas(){
-  const scriptUrl = localStorage.getItem(LS.SCRIPTURL);
+  const scriptUrl = getActiveScriptUrl();
   if(!scriptUrl){
     showModal(`<h3>Apps Script no configurado</h3>
       <div style="margin:10px 0;font-size:13px;line-height:1.5">
@@ -4372,13 +4988,23 @@ function processInviteHash(){
     const payload = JSON.parse(atob(decodeURIComponent(match[1])));
     // Aplicar configuración recibida
     if(payload.k) localStorage.setItem(LS.GEMINI, payload.k);
-    if(payload.s) localStorage.setItem(LS.SSID, payload.s);
+    // NUEVO: multi-empresa — crear/actualizar la empresa desde el link
+    if(payload.s){
+      const companyName = payload.n || 'Empresa';
+      upsertCompany({
+        nombre: companyName,
+        sheetId: payload.s,
+        scriptUrl: payload.u || '',
+        createdAt: new Date().toISOString()
+      });
+      setCurrentCompany(companyName);
+      // Mantener compat con código legacy durante transición
+      localStorage.setItem(LS.SSID, payload.s);
+      if(payload.u) localStorage.setItem(LS.SCRIPTURL, payload.u);
+    }
     // Invalidar caches para que el usuario invitado lea datos frescos del Sheet
-    // (previene el caso de abrir un link nuevo pero leer cache viejo donde no estaba)
     localStorage.removeItem(LS.MASTERS);
     localStorage.removeItem(LS.BALCACHE);
-    // Si viene otro Client ID, se ignora — el que usa la app viene hardcodeado
-    // Limpiar hash del URL para no exponer secretos en historial
     history.replaceState(null, '', window.location.pathname + window.location.search);
     return true;
   } catch(e){
@@ -4390,6 +5016,9 @@ function processInviteHash(){
 (async () => {
   loading(true, 'Iniciando', 'Cargando...');
 
+  // Migración transparente del sistema viejo (1 Sheet) al nuevo (multi-empresa)
+  migrateSingleToMultiCompany();
+
   // Aplicar configuración de invitación si aplica (antes del primer check)
   const fromInvite = processInviteHash();
 
@@ -4400,19 +5029,19 @@ function processInviteHash(){
   });
 
   let hasToken = getToken();
-  const hasSSID = localStorage.getItem(LS.SSID);
+  const hasCompany = !!getCurrentCompany();
   const hasGemini = localStorage.getItem(LS.GEMINI);
   const hasEmail = localStorage.getItem(LS.EMAIL);
 
   // Si no hay token VÁLIDO pero sí hay email previo → intentar renovar silenciosamente
-  // Esto cubre el caso de "la sesión expiró mientras la app estaba cerrada"
-  if(!hasToken && hasEmail && hasSSID && hasGemini){
+  if(!hasToken && hasEmail && hasGemini){
     loading(true, 'Iniciando', 'Renovando sesión...');
     const refreshed = await silentRefresh();
     if(refreshed) hasToken = refreshed;
   }
 
-  if(!hasToken || !hasSSID || !hasGemini){
+  // Sin token o sin Gemini: ir a setup inicial
+  if(!hasToken || !hasGemini){
     loading(false);
     show('pg-setup');
     if(fromInvite){
@@ -4422,11 +5051,28 @@ function processInviteHash(){
     }
     if(hasToken) document.getElementById('gauth-status').innerHTML = '✓ Conectado: ' + localStorage.getItem(LS.EMAIL);
     if(hasGemini) document.getElementById('gemini-status').innerHTML = '<span style="color:var(--green)">✓ Clave configurada</span>';
-    if(hasSSID) document.getElementById('ssid-status').innerHTML = '<span style="color:var(--green)">✓ Base configurada</span>';
+    const ssidStatus = document.getElementById('ssid-status');
+    if(ssidStatus && hasCompany) ssidStatus.innerHTML = '<span style="color:var(--green)">✓ Empresa configurada</span>';
     checkSetupReady();
     return;
   }
 
+  // Tiene token + Gemini pero no tiene empresa activa
+  if(!hasCompany){
+    loading(false);
+    if(isSuperAdmin()){
+      // SUPER_ADMIN sin empresa → ir al selector
+      show('pg-select-company');
+      toast('Selecciona o crea una empresa para empezar', 'ok');
+    } else {
+      // Usuario regular sin empresa → necesita link de invitación
+      show('pg-setup');
+      toast('Necesitas un link de invitación válido. Contacta al admin.', 'err');
+    }
+    return;
+  }
+
+  // Todo listo: entrar al home con la empresa activa
   await loadMasters();
   loading(false);
   show('pg-home');
@@ -4435,7 +5081,7 @@ function processInviteHash(){
 
 // Refrescar al volver al foreground
 document.addEventListener('visibilitychange', async () => {
-  if(!document.hidden && localStorage.getItem(LS.SSID) && localStorage.getItem(LS.EMAIL)){
+  if(!document.hidden && getActiveSheetId() && localStorage.getItem(LS.EMAIL)){
     // Si el token expiró mientras la app estaba en background, renovarlo silenciosamente
     if(!getToken()){
       await silentRefresh();
