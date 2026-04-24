@@ -3486,24 +3486,40 @@ function invalidateRevisarCache(){
 
 async function refreshHome(){
   const proj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+
+  // Reset visual al inicio: garantiza que el home refleje SIEMPRE el estado actual
+  // (proyecto/empresa) y no datos residuales de un contexto anterior.
+  // Sin esto, cambiar de empresa o proyecto deja el balance/pendientes pegados.
+  const balanceEl = document.getElementById('balance-amt');
+  balanceEl.textContent = 'RD$ --';
+  balanceEl.className = 'balance-amt';
+  document.getElementById('balance-status').textContent = 'Toca para actualizar';
+  document.getElementById('s-pending').textContent = '0';
+  document.getElementById('s-total').textContent = fmt(0);
+  document.getElementById('home-recent').style.display = 'none';
+  document.getElementById('home-list').innerHTML = '';
+
   if(proj){
     document.getElementById('proj-name').textContent = proj.nombre;
     document.getElementById('proj-code').textContent = proj.cod;
-  } else if(masters.projects.length > 0){
-    // Auto-seleccionar la primera si hay solo una
-    if(masters.projects.length === 1){
-      localStorage.setItem(LS.PROJ, JSON.stringify(masters.projects[0]));
-      return refreshHome();
-    }
+  } else if(masters.projects.length === 1){
+    // Auto-seleccionar la única obra
+    localStorage.setItem(LS.PROJ, JSON.stringify(masters.projects[0]));
+    return refreshHome();
+  } else if(masters.projects.length > 1){
     document.getElementById('proj-name').textContent = 'Toca para elegir obra';
     document.getElementById('proj-code').textContent = masters.projects.length + ' obras disponibles';
+  } else {
+    // Empresa sin obras todavía
+    document.getElementById('proj-name').textContent = 'Sin obras — crea una';
+    document.getElementById('proj-code').textContent = '0 obras';
   }
 
   document.getElementById('user-email').textContent = localStorage.getItem(LS.EMAIL) || '—';
 
-  // Stats pendientes locales
+  // Stats pendientes locales (solo del proyecto activo; si no hay proj, contar 0)
   const pending = await dbGetAll('pending');
-  const myPending = proj ? pending.filter(p => p.proyecto === proj.cod) : pending;
+  const myPending = proj ? pending.filter(p => p.proyecto === proj.cod) : [];
   const netoPendiente = myPending.reduce((s, p) => s + (p.tipo_registro === 'ABONO' ? +p.monto : -Math.abs(+p.monto)), 0);
   document.getElementById('s-pending').textContent = myPending.length;
   document.getElementById('s-total').textContent = fmt(netoPendiente);
