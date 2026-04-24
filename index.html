@@ -371,8 +371,13 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       Nueva empresa
     </button>
 
+    <button class="btn" onclick="recargarEmpresas()" style="margin-top:8px;font-size:13px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+      Recargar desde Drive
+    </button>
+
     <div style="margin-top:20px;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text2);line-height:1.5">
-      Cada empresa tiene su propio Sheet y estructura de carpetas aislada. Los usuarios invitados solo ven la empresa a la que fueron invitados.
+      Tus empresas se sincronizan automáticamente entre dispositivos vía Google Drive. Al iniciar sesión en cualquier dispositivo con tu cuenta, verás las mismas empresas.
     </div>
   </div>
 </div>
@@ -1320,6 +1325,23 @@ function setCurrentCompany(nombre){
   localStorage.removeItem(LS.BALCACHE);
   localStorage.removeItem(LS.FOLDERS);
   localStorage.removeItem(LS.PROJ);
+
+  // CRÍTICO: resetear la variable global masters en memoria.
+  // Si no se resetea, la UI puede mostrar data de la empresa anterior mientras
+  // loadMasters() termina de ejecutar (race condition visible al usuario).
+  if(typeof masters !== 'undefined'){
+    masters.projects = [];
+    masters.suppliers = [];
+    masters.categories = [];
+    masters.users = [];
+    masters.myRole = 'USUARIO';
+  }
+
+  // Resetear también UI que muestra el proyecto activo
+  const projName = document.getElementById('proj-name');
+  if(projName) projName.textContent = 'Cargando...';
+  const projCode = document.getElementById('proj-code');
+  if(projCode) projCode.textContent = '';
 }
 
 // Elimina una empresa de la lista (no borra datos en Drive)
@@ -1623,6 +1645,36 @@ function initGoogleAuth(){
         localStorage.setItem(LS.EMAIL, info.email);
         document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
         document.getElementById('gauth-status').style.color = 'var(--green)';
+
+        // Si es SUPER_ADMIN, intentar sync desde Drive (trae empresas + Gemini key automáticamente)
+        if(isSuperAdmin()){
+          document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
+          try {
+            const synced = await syncFromAdminIndex();
+            if(synced && synced.length > 0){
+              document.getElementById('gauth-status').textContent = `✓ Conectado: ${info.email} · ${synced.length} empresa(s) sincronizadas`;
+              // Actualizar UI indicando que ya tiene Gemini y empresa
+              const geminiStatus = document.getElementById('gemini-status');
+              if(geminiStatus && localStorage.getItem(LS.GEMINI)){
+                geminiStatus.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada desde Drive</span>';
+              }
+              const ssidStatus = document.getElementById('ssid-status');
+              if(ssidStatus){
+                ssidStatus.innerHTML = `<span style="color:var(--green)">✓ ${synced.length} empresa(s) disponibles</span>`;
+              }
+              // Activar la primera
+              if(!getCurrentCompany()){
+                setCurrentCompany(synced[0].nombre);
+              }
+            } else {
+              document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
+            }
+          } catch(e){
+            console.warn('[login] Sync falló:', e.message);
+            document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
+          }
+        }
+
         checkSetupReady();
       } catch(e) { toast('No se pudo obtener email', 'err'); }
     }
@@ -1877,25 +1929,43 @@ async function useExistingSheet(){
   }
 }
 
-function saveGeminiKey(){
+async function saveGeminiKey(){
   const k = document.getElementById('inp-gemini-key').value.trim();
   if(!k.startsWith('AIza')){ toast('Clave inválida', 'err'); return; }
   localStorage.setItem(LS.GEMINI, k);
   document.getElementById('gemini-status').innerHTML = '<span style="color:var(--green)">✓ Clave guardada</span>';
+  // Si es SUPER_ADMIN, sincronizar al Admin Index en Drive
+  if(isSuperAdmin()){
+    try {
+      await saveGeminiKeyToIndex(k);
+      document.getElementById('gemini-status').innerHTML = '<span style="color:var(--green)">✓ Clave guardada y sincronizada</span>';
+    } catch(e){ console.warn('Sync Gemini falló:', e); }
+  }
   checkSetupReady();
 }
 
-function updateGeminiKey(){
+async function updateGeminiKey(){
   const k = document.getElementById('set-gemini').value.trim();
   if(!k.startsWith('AIza')){ toast('Clave inválida', 'err'); return; }
   localStorage.setItem(LS.GEMINI, k);
+  if(isSuperAdmin()){
+    try { await saveGeminiKeyToIndex(k); } catch(e){ console.warn(e); }
+  }
   toast('Clave actualizada', 'ok');
 }
 
-function updateScriptUrl(){
+async function updateScriptUrl(){
   const u = document.getElementById('set-scripturl').value.trim();
+  const current = getCurrentCompany();
+  if(!current){ toast('No hay empresa activa', 'err'); return; }
+
   if(!u){
-    localStorage.removeItem(LS.SCRIPTURL);
+    // Limpiar URL de la empresa activa
+    current.scriptUrl = '';
+    upsertCompany(current);
+    if(isSuperAdmin()){
+      try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
+    }
     toast('URL eliminada', 'ok');
     return;
   }
@@ -1903,8 +1973,13 @@ function updateScriptUrl(){
     toast('URL inválida. Debe comenzar con https://script.google.com/', 'err');
     return;
   }
-  localStorage.setItem(LS.SCRIPTURL, u);
-  toast('URL guardada', 'ok');
+  // Guardar la URL en la empresa activa
+  current.scriptUrl = u;
+  upsertCompany(current);
+  if(isSuperAdmin()){
+    try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
+  }
+  toast('URL guardada y sincronizada', 'ok');
 }
 
 async function probarScript(){
@@ -1977,9 +2052,16 @@ async function revocarAccesoSheet(email){
 // ============================================================
 
 // Renderiza la lista de empresas conocidas
-function renderCompanyList(){
+async function renderCompanyList(){
   const container = document.getElementById('company-list');
   if(!container) return;
+
+  // Si es SUPER_ADMIN, sincronizar desde Drive cada vez que se abre el selector.
+  // Esto permite ver empresas creadas en otros dispositivos.
+  if(isSuperAdmin()){
+    container.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px">Sincronizando desde Drive...</div>`;
+    try { await syncFromAdminIndex(); } catch(e){ console.warn(e); }
+  }
 
   const companies = getCompanies();
   const current = getCurrentCompany();
@@ -1996,9 +2078,10 @@ function renderCompanyList(){
   container.innerHTML = companies.map(c => {
     const isActive = current && current.nombre === c.nombre;
     const hasScript = !!c.scriptUrl;
+    const nombreEsc = c.nombre.replace(/'/g, "\\'");
     return `
-      <div class="card" style="padding:14px;cursor:pointer;${isActive ? 'border-color:var(--amber)' : ''}" onclick="selectCompany('${c.nombre.replace(/'/g, "\\'")}')">
-        <div style="display:flex;align-items:center;gap:12px">
+      <div class="card" style="padding:14px;${isActive ? 'border-color:var(--amber)' : ''}">
+        <div style="display:flex;align-items:center;gap:12px;cursor:pointer" onclick="selectCompany('${nombreEsc}')">
           <div style="width:40px;height:40px;background:rgba(245,158,11,0.12);border:1px solid var(--amber);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.5"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21V12h6v9"/></svg>
           </div>
@@ -2012,6 +2095,16 @@ function renderCompanyList(){
           <div style="color:var(--text2)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>
           </div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+          <button class="btn" onclick="editarEmpresa('${nombreEsc}')" style="flex:1;padding:8px;font-size:11px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-right:4px;vertical-align:middle"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Editar
+          </button>
+          <button class="btn btn-red" onclick="confirmarEliminarEmpresa('${nombreEsc}')" style="flex:1;padding:8px;font-size:11px;${isActive ? 'opacity:0.4;pointer-events:none' : ''}" ${isActive ? 'title="Cambia a otra empresa primero"' : ''}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-right:4px;vertical-align:middle"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+            Eliminar
+          </button>
         </div>
       </div>`;
   }).join('');
@@ -2030,6 +2123,212 @@ async function selectCompany(nombre){
   }
 
   show('pg-home');
+}
+
+// ============================================================
+// EDITAR EMPRESA — renombrar
+// ============================================================
+
+// Abre modal para editar nombre de la empresa
+function editarEmpresa(nombreActual){
+  if(!isSuperAdmin()){ toast('Solo SUPER_ADMIN puede editar empresas', 'err'); return; }
+
+  const companies = getCompanies();
+  const empresa = companies.find(c => c.nombre === nombreActual);
+  if(!empresa){ toast('Empresa no encontrada', 'err'); return; }
+
+  showModal(`
+    <h3>Editar empresa</h3>
+    <div style="font-size:12px;color:var(--text2);margin:8px 0 12px;line-height:1.5">
+      Al cambiar el nombre, se renombrarán la carpeta y el Sheet en Drive.
+      Los datos dentro se mantienen intactos.
+    </div>
+    <div class="field">
+      <div class="lbl">Nombre actual</div>
+      <div style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:14px;color:var(--text2)">${empresa.nombre}</div>
+    </div>
+    <div class="field" style="margin-top:10px">
+      <div class="lbl">Nuevo nombre</div>
+      <input type="text" id="edit-emp-nombre" value="${empresa.nombre}" autocapitalize="words">
+    </div>
+
+    <div style="margin-top:12px;padding:10px 12px;background:rgba(59,130,246,0.08);border:1px solid var(--blue);border-radius:6px;font-size:11px;color:#93C5FD;line-height:1.5">
+      <strong style="color:var(--blue)">Nota sobre reportes históricos</strong><br>
+      Los PDFs de reportes ya generados <strong>mantendrán el nombre anterior</strong> ("${empresa.nombre}") como registro histórico contable.
+      Los reportes nuevos usarán el nombre actualizado.
+    </div>
+
+    <div class="grid2" style="margin-top:12px;gap:8px">
+      <button class="btn btn-amber" onclick="guardarEdicionEmpresa('${nombreActual.replace(/'/g, "\\'")}')">Guardar cambios</button>
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+async function guardarEdicionEmpresa(nombreAnterior){
+  const nuevoNombre = document.getElementById('edit-emp-nombre').value.trim();
+  if(!nuevoNombre){ toast('Teclea un nombre', 'err'); return; }
+  if(nuevoNombre === nombreAnterior){ closeModal(); return; }
+
+  // Verificar que no exista otro con ese nombre
+  const existing = getCompanies();
+  if(existing.find(c => c.nombre.toLowerCase() === nuevoNombre.toLowerCase() && c.nombre !== nombreAnterior)){
+    toast('Ya existe una empresa con ese nombre', 'err');
+    return;
+  }
+
+  const empresa = existing.find(c => c.nombre === nombreAnterior);
+  if(!empresa){ toast('Empresa no encontrada', 'err'); return; }
+
+  closeModal();
+  loading(true, 'Actualizando', 'Renombrando en Drive...');
+
+  try {
+    const token = getToken();
+
+    // 1. Renombrar la carpeta de la empresa
+    if(empresa.folderId){
+      await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.folderId}`, {
+        method: 'PATCH',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({name: nuevoNombre})
+      });
+    }
+
+    // 2. Renombrar el Sheet (CajaChica_[Nombre])
+    const nuevoSheetName = `CajaChica_${nuevoNombre}`;
+    await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.sheetId}`, {
+      method: 'PATCH',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({name: nuevoSheetName})
+    });
+
+    // 3. Actualizar empresa local (localStorage)
+    // Eliminar la vieja + agregar la nueva con sheetId igual
+    removeCompany(nombreAnterior);
+    upsertCompany({...empresa, nombre: nuevoNombre});
+
+    // 4. Si era la empresa activa, activar la nueva
+    if(localStorage.getItem(LS.CURRENT_COMPANY) === nombreAnterior){
+      localStorage.setItem(LS.CURRENT_COMPANY, nuevoNombre);
+    }
+
+    // 5. Actualizar Admin Index (remover viejo + agregar nuevo)
+    await removeCompanyFromIndex(nombreAnterior);
+    await addCompanyToIndex({...empresa, nombre: nuevoNombre});
+
+    // 6. Invalidar caches de carpetas (el ID de la carpeta sigue siendo el mismo,
+    // pero el nombre cambió y el cache de ensureFolder usa el nombre como clave)
+    localStorage.removeItem(LS.FOLDERS);
+
+    loading(false);
+    toast(`Empresa renombrada a "${nuevoNombre}"`, 'ok');
+    await renderCompanyList();
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error('[guardarEdicionEmpresa]', e);
+  }
+}
+
+// ============================================================
+// ELIMINAR EMPRESA — soft delete (mueve carpeta a Papelera de Drive)
+// ============================================================
+
+// Muestra modal con confirmación tipo B (escribir nombre exacto)
+function confirmarEliminarEmpresa(nombre){
+  if(!isSuperAdmin()){ toast('Solo SUPER_ADMIN puede eliminar empresas', 'err'); return; }
+
+  // Verificar que no sea la empresa activa
+  const current = getCurrentCompany();
+  if(current && current.nombre === nombre){
+    toast('No puedes eliminar la empresa activa. Cambia a otra primero.', 'err');
+    return;
+  }
+
+  const empresa = getCompanies().find(c => c.nombre === nombre);
+  if(!empresa){ toast('Empresa no encontrada', 'err'); return; }
+
+  const nombreEsc = nombre.replace(/'/g, "\\'");
+
+  showModal(`
+    <h3 style="color:var(--red)">Eliminar empresa</h3>
+    <div style="font-size:13px;color:var(--text);margin:10px 0 14px;line-height:1.6">
+      Estás a punto de eliminar <strong>"${nombre}"</strong>.
+    </div>
+    <div style="background:rgba(239,68,68,0.08);border:1px solid var(--red);border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="font-size:12px;color:#FCA5A5;line-height:1.6">
+        • La carpeta completa se moverá a la <strong>Papelera de Google Drive</strong><br>
+        • Tienes <strong>30 días</strong> para recuperarla desde Drive antes de borrado permanente<br>
+        • La empresa se removerá del sistema en todos los dispositivos<br>
+        • Los usuarios invitados perderán acceso
+      </div>
+    </div>
+    <div class="field">
+      <div class="lbl" style="color:var(--red)">Para confirmar, escribe el nombre exacto de la empresa:</div>
+      <input type="text" id="del-emp-confirm" placeholder="${nombre}" autocomplete="off" oninput="actualizarBotonEliminar('${nombreEsc}')">
+    </div>
+    <div class="grid2" style="margin-top:12px;gap:8px">
+      <button class="btn btn-red" id="btn-confirm-delete" disabled onclick="eliminarEmpresaConfirmada('${nombreEsc}')" style="opacity:0.4;pointer-events:none">Eliminar permanentemente</button>
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+// Habilita/deshabilita el botón de eliminar según lo que el usuario escriba
+function actualizarBotonEliminar(nombreEsperado){
+  const input = document.getElementById('del-emp-confirm');
+  const btn = document.getElementById('btn-confirm-delete');
+  if(!input || !btn) return;
+  const valor = input.value.trim();
+  const coincide = valor === nombreEsperado;
+  btn.disabled = !coincide;
+  btn.style.opacity = coincide ? '1' : '0.4';
+  btn.style.pointerEvents = coincide ? 'auto' : 'none';
+}
+
+async function eliminarEmpresaConfirmada(nombre){
+  const empresa = getCompanies().find(c => c.nombre === nombre);
+  if(!empresa){ toast('Empresa no encontrada', 'err'); closeModal(); return; }
+
+  closeModal();
+  loading(true, 'Eliminando', 'Moviendo carpeta a Papelera de Drive...');
+
+  try {
+    const token = getToken();
+
+    // 1. Mover carpeta de la empresa a Papelera de Drive
+    if(empresa.folderId){
+      await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.folderId}`, {
+        method: 'PATCH',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({trashed: true})
+      });
+    }
+
+    // 2. Remover del Admin Index (Drive)
+    await removeCompanyFromIndex(nombre);
+
+    // 3. Remover de localStorage
+    removeCompany(nombre);
+
+    // 4. Limpiar caches relacionados
+    localStorage.removeItem(LS.FOLDERS);
+
+    loading(false);
+    toast(`Empresa "${nombre}" eliminada`, 'ok');
+    await renderCompanyList();
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error('[eliminarEmpresa]', e);
+  }
+}
+
+// Botón "Recargar desde Drive" en el selector
+async function recargarEmpresas(){
+  toast('Recargando desde Drive...', 'ok');
+  await renderCompanyList();
 }
 
 // Maneja click en chip de empresa en el home
@@ -2071,6 +2370,303 @@ function exitToLogin(){
   // Limpiar tokens pero no destruir las empresas registradas
   localStorage.removeItem(LS.TOKEN);
   location.reload();
+}
+
+// ============================================================
+// ADMIN INDEX — Sincronización automática entre dispositivos
+// ============================================================
+// El SUPER_ADMIN tiene un Sheet privado llamado "_CC_Admin_Index"
+// ubicado en /Caja Chica Master/. Este Sheet contiene:
+//   - Hoja "EMPRESAS": lista de todas las empresas (nombre, sheetId, scriptUrl, folderId)
+//   - Hoja "CONFIG": configuración global (Gemini key)
+//
+// Al login en cualquier dispositivo, se lee este Sheet automáticamente
+// y se sincroniza con localStorage. Al crear/editar una empresa, se actualiza.
+// Resultado: el SUPER_ADMIN puede usar N dispositivos sin configuración manual.
+
+const ADMIN_INDEX_NAME = '_CC_Admin_Index';
+const LS_ADMIN_INDEX_ID = 'cc_admin_index_id'; // cache del ID del Sheet
+
+// Busca el Sheet _CC_Admin_Index dentro de /Caja Chica Master/.
+// Si no existe, lo crea con la estructura correcta.
+// Retorna el ID del Sheet.
+async function ensureAdminIndex(){
+  // Cache para evitar búsqueda cada vez
+  const cached = localStorage.getItem(LS_ADMIN_INDEX_ID);
+  if(cached){
+    // Verificar rápidamente que sigue existiendo
+    try {
+      const chk = await fetch(`https://www.googleapis.com/drive/v3/files/${cached}?fields=id,trashed`, {
+        headers: {'Authorization': 'Bearer ' + getToken()}
+      });
+      if(chk.ok){
+        const d = await chk.json();
+        if(!d.trashed) return cached;
+      }
+    } catch {}
+    localStorage.removeItem(LS_ADMIN_INDEX_ID);
+  }
+
+  const token = getToken();
+  if(!token) throw new Error('Sin sesión');
+
+  // Buscar dentro de "Caja Chica Master"
+  const masterId = await ensureFolder(ROOT_MASTER, null);
+
+  // Buscar Sheet existente con ese nombre dentro de Master
+  const q = `name='${ADMIN_INDEX_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and '${masterId}' in parents and trashed=false`;
+  const searchUrl = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&fields=files(id,name)';
+  const searchRes = await fetch(searchUrl, {headers: {'Authorization': 'Bearer ' + token}});
+  if(searchRes.ok){
+    const d = await searchRes.json();
+    if(d.files && d.files.length > 0){
+      localStorage.setItem(LS_ADMIN_INDEX_ID, d.files[0].id);
+      return d.files[0].id;
+    }
+  }
+
+  // No existe → crearlo
+  console.log('[adminIndex] No existe, creando...');
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      name: ADMIN_INDEX_NAME,
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+      parents: [masterId]
+    })
+  });
+  if(!createRes.ok) throw new Error('No se pudo crear Admin Index');
+  const created = await createRes.json();
+  const sheetId = created.id;
+
+  // Inicializar estructura del índice (EMPRESAS + CONFIG)
+  // Primero rename Sheet1 → EMPRESAS y agregar CONFIG
+  const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`, {
+    headers: {'Authorization': 'Bearer ' + token}
+  });
+  const meta = await metaRes.json();
+  const firstSheetId = meta.sheets[0].properties.sheetId;
+
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      requests: [
+        {updateSheetProperties: {properties: {sheetId: firstSheetId, title: 'EMPRESAS'}, fields: 'title'}},
+        {addSheet: {properties: {title: 'CONFIG'}}}
+      ]
+    })
+  });
+
+  // Headers
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      valueInputOption: 'USER_ENTERED',
+      data: [
+        {range: 'EMPRESAS!A1', values: [['NOMBRE','SHEET_ID','SCRIPT_URL','FOLDER_ID','CREATED_AT']]},
+        {range: 'CONFIG!A1', values: [['KEY','VALUE']]}
+      ]
+    })
+  });
+
+  localStorage.setItem(LS_ADMIN_INDEX_ID, sheetId);
+  return sheetId;
+}
+
+// Lee el Admin Index y sincroniza con localStorage.
+// Se llama al login y al abrir el selector de empresas.
+async function syncFromAdminIndex(){
+  if(!isSuperAdmin()) return;
+  try {
+    const indexId = await ensureAdminIndex();
+    const token = getToken();
+
+    // Leer EMPRESAS y CONFIG en un solo batch
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values:batchGet?ranges=EMPRESAS!A2:E&ranges=CONFIG!A2:B`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(!res.ok) throw new Error('No se pudo leer Admin Index');
+    const data = await res.json();
+
+    // EMPRESAS
+    const empRows = (data.valueRanges[0].values || []);
+    const companies = empRows.filter(r => r[0] && r[1]).map(r => ({
+      nombre: r[0],
+      sheetId: r[1],
+      scriptUrl: r[2] || '',
+      folderId: r[3] || '',
+      createdAt: r[4] || ''
+    }));
+    saveCompanies(companies);
+
+    // CONFIG (Gemini key)
+    const cfgRows = (data.valueRanges[1].values || []);
+    const cfg = {};
+    cfgRows.forEach(r => { if(r[0]) cfg[r[0]] = r[1] || ''; });
+    if(cfg.GEMINI_KEY){
+      localStorage.setItem(LS.GEMINI, cfg.GEMINI_KEY);
+    }
+
+    console.log(`[adminIndex] Sincronizadas ${companies.length} empresa(s) desde Drive`);
+    return companies;
+  } catch(e){
+    console.warn('[syncFromAdminIndex] Error:', e.message);
+    return null;
+  }
+}
+
+// Agrega/actualiza una empresa en el Admin Index
+async function addCompanyToIndex(company){
+  if(!isSuperAdmin()) return;
+  try {
+    const indexId = await ensureAdminIndex();
+    const token = getToken();
+
+    // Leer empresas actuales para ver si ya existe
+    const readRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/EMPRESAS!A2:E`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    const readData = await readRes.json();
+    const rows = readData.values || [];
+    const existingIdx = rows.findIndex(r => r[0] === company.nombre);
+
+    const row = [
+      company.nombre,
+      company.sheetId,
+      company.scriptUrl || '',
+      company.folderId || '',
+      company.createdAt || new Date().toISOString()
+    ];
+
+    if(existingIdx >= 0){
+      // Update en su posición (2-indexed porque saltamos header)
+      const rowNum = existingIdx + 2;
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/EMPRESAS!A${rowNum}:E${rowNum}?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [row]})
+        }
+      );
+    } else {
+      // Append
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/EMPRESAS!A2:append?valueInputOption=USER_ENTERED`,
+        {
+          method: 'POST',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [row]})
+        }
+      );
+    }
+    console.log('[adminIndex] Empresa sincronizada:', company.nombre);
+  } catch(e){
+    console.warn('[addCompanyToIndex] Error:', e.message);
+    // No bloqueamos el flujo — la empresa igual se guarda localmente
+  }
+}
+
+// Remueve una empresa del Admin Index por nombre
+async function removeCompanyFromIndex(nombre){
+  if(!isSuperAdmin()) return;
+  try {
+    const indexId = await ensureAdminIndex();
+    const token = getToken();
+
+    // Leer empresas actuales
+    const readRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/EMPRESAS!A2:E`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    const readData = await readRes.json();
+    const rows = readData.values || [];
+    const existingIdx = rows.findIndex(r => r[0] === nombre);
+    if(existingIdx < 0){
+      console.log('[adminIndex] Empresa no estaba en índice:', nombre);
+      return;
+    }
+
+    // Obtener sheetId de la hoja EMPRESAS para hacer deleteDimension
+    const metaRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}?fields=sheets.properties`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    const meta = await metaRes.json();
+    const empresasSheet = meta.sheets.find(s => s.properties.title === 'EMPRESAS');
+    if(!empresasSheet) throw new Error('Hoja EMPRESAS no encontrada');
+
+    // Borrar la fila (existingIdx + 1 porque hay header en fila 1; startIndex es 0-indexed)
+    const rowIdx = existingIdx + 1; // 1-indexed para la posición real (header=0, primera data=1)
+
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${indexId}:batchUpdate`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        requests: [{
+          deleteDimension: {
+            range: {
+              sheetId: empresasSheet.properties.sheetId,
+              dimension: 'ROWS',
+              startIndex: rowIdx,
+              endIndex: rowIdx + 1
+            }
+          }
+        }]
+      })
+    });
+
+    console.log('[adminIndex] Empresa removida del índice:', nombre);
+  } catch(e){
+    console.warn('[removeCompanyFromIndex] Error:', e.message);
+  }
+}
+
+// Guarda la Gemini key en el Admin Index (para sincronizar a otros dispositivos)
+async function saveGeminiKeyToIndex(key){
+  if(!isSuperAdmin()) return;
+  try {
+    const indexId = await ensureAdminIndex();
+    const token = getToken();
+
+    // Leer CONFIG actual
+    const readRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/CONFIG!A2:B`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    const readData = await readRes.json();
+    const rows = readData.values || [];
+    const existingIdx = rows.findIndex(r => r[0] === 'GEMINI_KEY');
+
+    if(existingIdx >= 0){
+      const rowNum = existingIdx + 2;
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/CONFIG!A${rowNum}:B${rowNum}?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [['GEMINI_KEY', key]]})
+        }
+      );
+    } else {
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/CONFIG!A2:append?valueInputOption=USER_ENTERED`,
+        {
+          method: 'POST',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [['GEMINI_KEY', key]]})
+        }
+      );
+    }
+    console.log('[adminIndex] Gemini key sincronizada');
+  } catch(e){
+    console.warn('[saveGeminiKeyToIndex] Error:', e.message);
+  }
 }
 
 // ============================================================
@@ -2145,13 +2741,16 @@ async function crearEmpresa(){
     };
 
     // Pre-registrar empresa (sin scriptUrl todavía)
-    upsertCompany({
+    const empresaData = {
       nombre: nombre,
       sheetId: sheetId,
       scriptUrl: '',
       folderId: empresaFolderId,
       createdAt: new Date().toISOString()
-    });
+    };
+    upsertCompany(empresaData);
+    // Sincronizar al Admin Index (otros dispositivos lo verán automáticamente)
+    await addCompanyToIndex(empresaData);
 
     progressEl.innerHTML = '✓ Estructura creada. Continúa con el paso final abajo.';
     btn.style.display = 'none';
@@ -2185,9 +2784,9 @@ async function initializeSheetStructure(sheetId){
         W: '=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF(AND(N:N="SI",X:X<>"SI"),M:M,0)))'
       }
     },
-    {name: 'PROYECTOS', headers: ['CODIGO','NOMBRE','CLIENTE','UBICACION','FECHA_INICIO','ESTADO','USUARIOS_ASIGNADOS']},
+    {name: 'PROYECTOS', headers: ['CODIGO','NOMBRE','UBICACION','FONDO','ESTADO','USUARIOS_ASIGNADOS']},
     {name: 'SUPLIDORES', headers: ['RNC','NOMBRE','CATEGORIA','CONTACTO','TELEFONO']},
-    {name: 'CATEGORIAS', headers: ['CODIGO','NOMBRE','DESCRIPCION']},
+    {name: 'CATEGORIAS', headers: ['CODIGO','NOMBRE','CUENTA']},
     {name: 'USUARIOS', headers: ['EMAIL','NOMBRE','ROL','PROYECTOS_ASIGNADOS']},
     {name: 'INGRESOS', headers: ['ID','PROYECTO','FECHA','MONTO','DESCRIPCION','USUARIO']},
     {name: 'LOG_OCR', headers: ['FECHA','HORA','ID_FACTURA','STATUS','CONFIDENCE','MENSAJE']},
@@ -2258,12 +2857,12 @@ async function initializeSheetStructure(sheetId){
 
   // 5. Semillar categorías estándar
   const categorias = [
-    ['MAT', 'Materiales', 'Materiales de construcción'],
-    ['MOB', 'Mano de Obra', 'Pagos a personal y contratistas'],
-    ['COM', 'Combustible', 'Gasolina, diesel, tickets'],
-    ['TRA', 'Transporte', 'Fletes y transporte'],
-    ['HER', 'Herramientas', 'Herramientas y equipo menor'],
-    ['OTR', 'Otros', 'Gastos varios']
+    ['MAT', 'Materiales', ''],
+    ['MOB', 'Mano de Obra', ''],
+    ['COM', 'Combustible', ''],
+    ['TRA', 'Transporte', ''],
+    ['HER', 'Herramientas', ''],
+    ['OTR', 'Otros', '']
   ];
   await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/CATEGORIAS!A2:append?valueInputOption=USER_ENTERED`, {
     method: 'POST',
@@ -2295,22 +2894,25 @@ async function finalizarEmpresa(){
   if(!url){ toast('Pega la URL del Apps Script', 'err'); return; }
   if(!url.startsWith('https://script.google.com/')){ toast('URL inválida', 'err'); return; }
 
-  // Actualizar empresa con la URL
-  upsertCompany({
-    nombre: newCompanyContext.nombre,
+  const nombreGuardar = newCompanyContext.nombre;
+  const empresaData = {
+    nombre: nombreGuardar,
     sheetId: newCompanyContext.sheetId,
     scriptUrl: url,
     folderId: newCompanyContext.folderId,
     createdAt: new Date().toISOString()
-  });
+  };
+  upsertCompany(empresaData);
+  // Sincronizar al Admin Index (la URL del script se persiste para otros dispositivos)
+  await addCompanyToIndex(empresaData);
 
-  setCurrentCompany(newCompanyContext.nombre);
+  setCurrentCompany(nombreGuardar);
   newCompanyContext = null;
   document.getElementById('newcomp-nombre').value = '';
   document.getElementById('newcomp-scripturl').value = '';
 
   await loadMasters();
-  toast(`Empresa activada: ${newCompanyContext?.nombre || ''}`, 'ok');
+  toast(`Empresa activada: ${nombreGuardar}`, 'ok');
   show('pg-home');
 }
 
@@ -5019,7 +5621,7 @@ function processInviteHash(){
   // Migración transparente del sistema viejo (1 Sheet) al nuevo (multi-empresa)
   migrateSingleToMultiCompany();
 
-  // Aplicar configuración de invitación si aplica (antes del primer check)
+  // Aplicar configuración de invitación si aplica
   const fromInvite = processInviteHash();
 
   // Esperar carga de librería Google
@@ -5029,8 +5631,8 @@ function processInviteHash(){
   });
 
   let hasToken = getToken();
-  const hasCompany = !!getCurrentCompany();
-  const hasGemini = localStorage.getItem(LS.GEMINI);
+  let hasCompany = !!getCurrentCompany();
+  let hasGemini = localStorage.getItem(LS.GEMINI);
   const hasEmail = localStorage.getItem(LS.EMAIL);
 
   // Si no hay token VÁLIDO pero sí hay email previo → intentar renovar silenciosamente
@@ -5038,6 +5640,29 @@ function processInviteHash(){
     loading(true, 'Iniciando', 'Renovando sesión...');
     const refreshed = await silentRefresh();
     if(refreshed) hasToken = refreshed;
+  }
+
+  // NUEVO: Si SUPER_ADMIN tiene token válido pero no tiene empresas ni Gemini,
+  // intentar sincronizar desde Admin Index en Drive (primera vez en este dispositivo).
+  // Esto evita pedirle que pegue Gemini key y configure empresas manualmente
+  // en cada dispositivo — todo viene automático del Drive.
+  if(hasToken && isSuperAdmin() && (!hasCompany || !hasGemini)){
+    loading(true, 'Iniciando', 'Buscando configuración en Drive...');
+    try {
+      const synced = await syncFromAdminIndex();
+      // Refrescar flags después del sync
+      hasCompany = !!getCurrentCompany();
+      hasGemini = !!localStorage.getItem(LS.GEMINI);
+      if(synced && synced.length > 0){
+        // Activar primera empresa si no hay una activa
+        if(!getCurrentCompany() && synced[0]){
+          setCurrentCompany(synced[0].nombre);
+          hasCompany = true;
+        }
+      }
+    } catch(e){
+      console.warn('[init] Sync desde Admin Index falló:', e.message);
+    }
   }
 
   // Sin token o sin Gemini: ir a setup inicial
