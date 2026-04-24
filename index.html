@@ -3061,13 +3061,13 @@ async function initializeSheetStructure(sheetId){
         W: '=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF(AND(N:N="SI",X:X<>"SI"),M:M,0)))'
       }
     },
-    {name: 'PROYECTOS', headers: ['CODIGO','NOMBRE','UBICACION','FONDO','ESTADO','USUARIOS_ASIGNADOS']},
-    {name: 'SUPLIDORES', headers: ['RNC','NOMBRE','CATEGORIA','CONTACTO','TELEFONO']},
-    {name: 'CATEGORIAS', headers: ['CODIGO','NOMBRE','CUENTA']},
+    {name: 'PROYECTOS', headers: ['COD_PROYECTO','NOMBRE','UBICACION','FONDO_INICIAL','ESTADO','USUARIOS_ASIGNADOS']},
+    {name: 'SUPLIDORES', headers: ['RNC','NOMBRE','CATEGORIA_DEFAULT','ACTIVO']},
+    {name: 'CATEGORIAS', headers: ['CODIGO','NOMBRE','CUENTA_CONTABLE']},
     {name: 'USUARIOS', headers: ['EMAIL','NOMBRE','ROL','PROYECTOS_ASIGNADOS']},
-    {name: 'INGRESOS', headers: ['ID','PROYECTO','FECHA','MONTO','DESCRIPCION','USUARIO']},
-    {name: 'LOG_OCR', headers: ['FECHA','HORA','ID_FACTURA','STATUS','CONFIDENCE','MENSAJE']},
-    {name: 'DASHBOARD', headers: ['OBRA','PRESUPUESTO','INGRESOS','GASTOS','BALANCE','% EJECUTADO']}
+    {name: 'INGRESOS', headers: ['ID','FECHA','PROYECTO','TIPO','MONTO','REFERENCIA']},
+    {name: 'LOG_OCR', headers: ['TIMESTAMP','ID_REGISTRO','CONFIDENCE','CAMPOS','ERROR','USUARIO']},
+    {name: 'DASHBOARD', headers: ['PROYECTO','BALANCE','# FACTURAS']}
   ];
 
   // 1. Obtener info del sheet para saber el ID de la hoja default "Sheet1"
@@ -3132,14 +3132,26 @@ async function initializeSheetStructure(sheetId){
     });
   }
 
-  // 5. Semillar categorías estándar
+  // 5. Escribir fórmulas ARRAYFORMULA en DASHBOARD (PROYECTO, BALANCE, # FACTURAS)
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/DASHBOARD!A2:C2?valueInputOption=USER_ENTERED`, {
+    method: 'PUT',
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({values: [[
+      '=ARRAYFORMULA(IF(ROW(PROYECTOS!A2:A)=1,,IF(PROYECTOS!A2:A="",,PROYECTOS!A2:A)))',
+      '=ARRAYFORMULA(IF(A2:A="",,IFERROR(SUMIF(INGRESOS!C:C,A2:A,INGRESOS!E:E),0)-IFERROR(SUMIF(REGISTRO!B:B,A2:A,REGISTRO!W:W),0)+IFERROR(VLOOKUP(A2:A,PROYECTOS!A:D,4,FALSE),0)))',
+      '=ARRAYFORMULA(IF(A2:A="",,COUNTIF(REGISTRO!B:B,A2:A)))'
+    ]]})
+  });
+
+  // 6. Semillar categorías estándar con cuentas contables (schema canónico docs/02-data-model.md)
   const categorias = [
-    ['MAT', 'Materiales', ''],
-    ['MOB', 'Mano de Obra', ''],
-    ['COM', 'Combustible', ''],
-    ['TRA', 'Transporte', ''],
-    ['HER', 'Herramientas', ''],
-    ['OTR', 'Otros', '']
+    ['MAT', 'Materiales', '5101'],
+    ['MOB', 'Mano de Obra', '5102'],
+    ['TRA', 'Transporte', '5103'],
+    ['EQU', 'Equipos/Herramientas', '5104'],
+    ['COM', 'Combustible', '5105'],
+    ['SER', 'Servicios', '5106'],
+    ['OTR', 'Otros', '5199']
   ];
   await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/CATEGORIAS!A2:append?valueInputOption=USER_ENTERED`, {
     method: 'POST',
@@ -3147,7 +3159,7 @@ async function initializeSheetStructure(sheetId){
     body: JSON.stringify({values: categorias})
   });
 
-  // 6. Agregar al SUPER_ADMIN como ADMIN automáticamente (solo en este primer setup)
+  // 7. Agregar al SUPER_ADMIN como ADMIN automáticamente (solo en este primer setup)
   const adminEmail = localStorage.getItem(LS.EMAIL);
   if(adminEmail){
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/USUARIOS!A2:append?valueInputOption=USER_ENTERED`, {
