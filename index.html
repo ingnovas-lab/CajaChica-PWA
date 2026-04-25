@@ -251,7 +251,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="ibtn" onclick="show('pg-settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </div>
-      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0066</div>
+      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0067</div>
     </div>
   </div>
   <div class="body">
@@ -1015,7 +1015,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
         </div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text3)">v.0066</span></div>
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text3)">v.0067</span></div>
           <div style="font-size:11px;color:var(--text2);margin-top:1px">Trae la última versión sin perder sesión</div>
         </div>
       </div>
@@ -1384,7 +1384,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version">v.0066</span><br>
+      Control de Caja Chica · <span id="help-version">v.0067</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1400,7 +1400,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0066';
+const APP_VERSION = '0067';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3457,7 +3457,7 @@ function applyRoleUI(){
 }
 
 // ============================================================
-// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0066
+// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0061
 // Modal con add/edit. Los registros guardan el COD (MAT, MOB...) — renombrar
 // nombre es non-destructivo; solo cambia lo que se muestra. Agregar es append a
 // CATEGORIAS sheet con COD auto-generado a partir de los primeros 3 caracteres
@@ -4269,7 +4269,7 @@ async function syncAll(){
       'NO', '', ''
     ]);
     const regRowsEliminado = gastos.map(e => ['NO']);
-    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0066+)
+    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0061+)
     const ingRows = abonos.map(e => [
       e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia, e.url_comprobante || ''
     ]);
@@ -4671,7 +4671,7 @@ async function repairFormulas(){
       ]]})
     });
 
-    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0066+) — agrega header si falta para que abonos
+    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0061+) — agrega header si falta para que abonos
     // con foto puedan persistir el link al cheque/comprobante.
     loading(true, 'Migrando', 'Verificando URL_COMPROBANTE en INGRESOS...');
     const ingHeaders = await sheetsGet('INGRESOS!A1:G1');
@@ -4787,7 +4787,10 @@ async function generarReporte(){
     const registros = regAll.slice(1);
     const ingresos = ingAll.slice(1);
 
-    // Filtrar registros aprobados del periodo
+    // Filtrar registros aprobados del periodo, excluyendo eliminados.
+    // (Hasta v.0066 no se filtraba ELIMINADO — bug que causaba que el reporte
+    // incluyera facturas borradas y el script de PDF las rechazara después,
+    // produciendo "No hay facturas en el rango".)
     const filtrados = registros.filter(r => {
       if(!r[regH.ID] && !r[0]) return false;
       const projMatch = !proyecto || r[regH.PROYECTO] === proyecto;
@@ -4796,7 +4799,8 @@ async function generarReporte(){
       const repNum = regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '';
       const numMatch = !numero || repNum.toLowerCase().includes(numero.toLowerCase());
       const aprobMatch = r[regH.APROBADO] === 'SI';
-      return projMatch && fechaMatch && numMatch && aprobMatch;
+      const noEliminado = regH.ELIMINADO === undefined || r[regH.ELIMINADO] !== 'SI';
+      return projMatch && fechaMatch && numMatch && aprobMatch && noEliminado;
     });
 
     // Ingresos del periodo
@@ -4862,8 +4866,11 @@ async function generarReporte(){
     // Se dispara en paralelo — Apps Script lo genera en el servidor.
     // Mientras tanto el usuario ya ve el reporte en pantalla.
     // Solo se genera si hay al menos 1 factura y el script está configurado.
+    // Enviamos los IDs ya filtrados — el script no re-filtra (evita mismatches).
     if(filtrados.length > 0 && getActiveScriptUrl()){
+      const ids = filtrados.map(r => r[regH.ID]).filter(Boolean);
       generarPDFFotos({
+        ids,
         proyecto, desde, hasta, numero,
         nombreObra, codObra,
         totalFacturas: filtrados.length
@@ -4900,7 +4907,8 @@ async function generarPDFFotos(params){
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
       body: JSON.stringify({
         action: 'generarPDFFotos',
-        proyecto: params.proyecto || '',
+        ids: params.ids || null,           // v.0067+: lista pre-filtrada del PWA. Si está, el script la usa directo.
+        proyecto: params.proyecto || '',   // legacy: el script cae a estos filtros si ids no viene (compat con scripts viejos)
         desde: params.desde,
         hasta: params.hasta,
         numero: params.numero || '',
@@ -5891,7 +5899,7 @@ async function eliminarFacturaPermanente(idx){
 }
 
 // ============================================================
-// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0066)
+// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0061)
 // El flujo elimina el estado "PENDIENTE" porque no se usaba en la práctica.
 // Los registros históricos con APROBADO=PENDIENTE pasan a REVISAR para que
 // aparezcan en "Por revisar" del home y el usuario decida SI/NO.
