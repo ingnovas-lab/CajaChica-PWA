@@ -251,7 +251,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="ibtn" onclick="show('pg-settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </div>
-      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0063</div>
+      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0064</div>
     </div>
   </div>
   <div class="body">
@@ -951,42 +951,81 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div><div class="topbar-title">Configuración</div></div>
   </div>
   <div class="body">
-    <div class="card">
-      <h3>Cuenta Google</h3>
-      <div style="font-size:13px;color:var(--text2)" id="set-email">—</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px">Rol: <span id="set-rol" style="color:var(--text);font-weight:500">—</span></div>
-      <button class="btn" onclick="logoutGoogle()" style="margin-top:10px">Cerrar sesión</button>
-    </div>
-
-    <div class="card">
-      <h3>Base de datos</h3>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Spreadsheet ID</div>
-      <div id="set-ssid" style="font-family:var(--mono);font-size:11px;color:var(--text);word-break:break-all"></div>
-      <button class="btn" onclick="openSheet()" style="margin-top:10px">Abrir en Sheets</button>
-      <button class="btn btn-blue" onclick="refreshData()" style="margin-top:8px">Actualizar datos desde Sheet</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si cambiaste nombres de obras, suplidores o categorías en el Sheet, toca para traer los cambios.</div>
-    </div>
-
-    <div class="card">
-      <h3>Gemini API</h3>
-      <div class="field">
-        <input type="password" id="set-gemini" placeholder="AIzaSy...">
+    <!-- Cuenta Google: row compacto con "Salir" como link discreto -->
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px">
+      <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       </div>
-      <button class="btn btn-amber" onclick="updateGeminiKey()" style="margin-top:10px">Actualizar clave</button>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Cuenta · <span id="set-rol" style="color:var(--text);font-weight:500">—</span></div>
+        <div id="set-email" style="font-size:13px;font-weight:500;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</div>
+      </div>
+      <button onclick="logoutGoogle()" style="background:transparent;border:none;color:var(--red);font-size:12px;font-weight:500;cursor:pointer;padding:0;flex-shrink:0">Salir</button>
     </div>
 
-    <div class="card" data-admin-only>
-      <h3>Gestión de usuarios</h3>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Invita, edita permisos o elimina usuarios del sistema.</div>
-      <button class="btn btn-green" onclick="show('pg-users')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-        Gestionar usuarios
-      </button>
+    <!-- Base de datos: row compacto con 2 acciones inline -->
+    <div style="padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0018 0V5"/><path d="M3 12a9 3 0 0018 0"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Base de datos</div>
+          <div id="set-ssid" style="font-family:var(--mono);font-size:10px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</div>
+        </div>
+      </div>
+      <div class="grid2">
+        <button class="btn" onclick="openSheet()" style="padding:8px;font-size:12px">Abrir Sheet</button>
+        <button class="btn btn-blue" onclick="refreshData()" style="padding:8px;font-size:12px">↻ Refrescar</button>
+      </div>
     </div>
 
+    <!-- Gemini API: row con tap para abrir modal de cambio -->
+    <div onclick="openGeminiUpdater()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
+      <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Gemini API</div>
+        <div id="set-gemini-status" style="font-size:13px;font-weight:500;margin-top:1px">—</div>
+      </div>
+      <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+
+    <!-- Gestión de usuarios: row tap-to-detail (admin only).
+         Wrapper div tiene data-admin-only para que applyRoleUI controle visibilidad
+         sin pisar el display:flex del row interno. -->
+    <div data-admin-only>
+      <div onclick="show('pg-users')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Usuarios</div>
+          <div id="set-users-count" style="font-size:13px;font-weight:500;margin-top:1px">—</div>
+        </div>
+        <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    </div>
+
+    <!-- App: row con icono + descripción + botón inline (movido arriba de Consolidar) -->
+    <div style="padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text3)">v.0064</span></div>
+          <div style="font-size:11px;color:var(--text2);margin-top:1px">Trae la última versión sin perder sesión</div>
+        </div>
+      </div>
+      <button class="btn btn-blue" onclick="forceAppUpdate()" style="padding:8px;font-size:12px">↻ Forzar actualización</button>
+    </div>
+
+    <!-- Consolidar facturas: queda detallada (config one-time + acción) -->
     <div class="card" data-admin-only>
       <h3>Consolidar facturas</h3>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Las fotos subidas por otros usuarios viven en sus Drives. El Apps Script las copia a tu Drive automáticamente todos los días a las 10 PM, y puedes ejecutarlo manualmente aquí.</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Las fotos subidas por otros usuarios viven en sus Drives. El Apps Script las copia a tu Drive automáticamente todos los días a las 10 PM, y puedes ejecutarlo manualmente aquí.<br><strong style="color:var(--amber)">Nota:</strong> consolida todos los proyectos de la <strong style="color:var(--text)">empresa activa</strong>. Para otra empresa, cámbiala primero.</div>
 
       <div class="field">
         <div class="lbl">URL del Apps Script Web App</div>
@@ -1002,12 +1041,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         Consolidar facturas ahora
       </button>
       <div id="consolidar-status" style="font-size:11px;color:var(--text2);margin-top:8px"></div>
-    </div>
-
-    <div class="card">
-      <h3>App</h3>
-      <button class="btn btn-blue" onclick="forceAppUpdate()">Forzar actualización</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Limpia el caché de la PWA y recarga la última versión publicada. Tu sesión, claves y datos locales se mantienen intactos.</div>
     </div>
 
     <div class="card" data-admin-only>
@@ -1033,8 +1066,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </button>
     </div>
 
-    <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
-      Control de Caja Chica · <span id="settings-version">v.0063</span>
+    <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:14px">
+      Control de Caja Chica
     </div>
   </div>
 </div>
@@ -1294,10 +1327,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div style="margin-bottom:12px;color:var(--text2)">Corrígelos tú mismo antes de guardar. Si pasa seguido, mejora la luz y toma la foto de nuevo.</div>
 
         <div style="font-weight:600;margin-bottom:4px">No veo una obra que debería tener</div>
-        <div style="margin-bottom:12px;color:var(--text2)">Toca el icono de refrescar ↻ sobre el balance de la obra (eso recarga proyectos desde el Sheet). Si aún no aparece, llama al Ing. Joel para que te asigne la obra.</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Configuración → Base de datos → <strong style="color:var(--text)">↻ Refrescar</strong>. Eso vuelve a leer obras, suplidores y categorías desde el Sheet. Si aún no aparece, llama al Ing. Joel para que te asigne la obra.</div>
 
         <div style="font-weight:600;margin-bottom:4px">El balance no está actualizado</div>
-        <div style="margin-bottom:12px;color:var(--text2)">Toca el icono ↻ sobre el balance para forzar recálculo desde el Sheet.</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Toca el icono ↻ sobre el card de balance en el home para forzar recálculo desde el Sheet.</div>
 
         <div style="font-weight:600;margin-bottom:4px">La app está lenta o muestra una versión vieja</div>
         <div style="margin-bottom:12px;color:var(--text2)">Configuración → App → "Forzar actualización". Limpia caché y trae la última versión publicada sin perder tu sesión ni datos locales.</div>
@@ -1335,7 +1368,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px">
-      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0063</span><br>
+      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0064</span><br>
       Ing. Joel Novas
     </div>
   </div>
@@ -1351,7 +1384,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0063';
+const APP_VERSION = '0064';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1508,12 +1541,29 @@ function show(id){
   if(id==='pg-proj-select') renderProjects();
   if(id==='pg-select-company') renderCompanyList();
   if(id==='pg-settings'){
-    document.getElementById('set-email').textContent = localStorage.getItem(LS.EMAIL) || '—';
+    document.getElementById('set-email').textContent = localStorage.getItem(LS.NAME) || localStorage.getItem(LS.EMAIL) || '—';
     const activeSheetId = getActiveSheetId();
-    document.getElementById('set-ssid').textContent = activeSheetId || '—';
+    // Mostrar solo los últimos 8 caracteres del Sheet ID — el ID completo es ruido visual.
+    // El admin puede copiar el ID completo desde el Sheet abierto si lo necesita.
+    const ssidEl = document.getElementById('set-ssid');
+    if(ssidEl) ssidEl.textContent = activeSheetId ? '…' + activeSheetId.slice(-12) : '—';
     document.getElementById('set-rol').textContent = masters.myRole || 'USUARIO';
     const scriptInput = document.getElementById('set-scripturl');
     if(scriptInput) scriptInput.value = getActiveScriptUrl() || '';
+    // Estado Gemini (Configurada / No configurada)
+    const gStatus = document.getElementById('set-gemini-status');
+    if(gStatus){
+      const hasGemini = !!localStorage.getItem(LS.GEMINI);
+      gStatus.innerHTML = hasGemini
+        ? '<span style="color:var(--green)">● Configurada</span> <span style="color:var(--text3);font-weight:400;font-size:11px">· tap para cambiar</span>'
+        : '<span style="color:var(--red)">○ No configurada</span> <span style="color:var(--text3);font-weight:400;font-size:11px">· tap para agregar</span>';
+    }
+    // Conteo de usuarios
+    const ucount = document.getElementById('set-users-count');
+    if(ucount){
+      const n = (masters.users || []).length;
+      ucount.textContent = n === 0 ? 'Ninguno' : (n + ' usuario' + (n === 1 ? '' : 's') + ' registrado' + (n === 1 ? '' : 's'));
+    }
     checkConsolidarStatus();
   }
   // pg-abono se inicializa vía newAbono() o editarPending() — no auto-reset acá
@@ -1970,7 +2020,10 @@ async function saveGeminiKey(){
 }
 
 async function updateGeminiKey(){
-  const k = document.getElementById('set-gemini').value.trim();
+  // Lee de #set-gemini-modal (modal abierto desde el row compacto en Configuración).
+  // Mantiene fallback a #set-gemini por si quedó algún call-site viejo.
+  const inp = document.getElementById('set-gemini-modal') || document.getElementById('set-gemini');
+  const k = (inp && inp.value || '').trim();
   if(!k.startsWith('AIza')){ toast('Clave inválida', 'err'); return; }
   localStorage.setItem(LS.GEMINI, k);
   if(isSuperAdmin()){
@@ -1979,6 +2032,28 @@ async function updateGeminiKey(){
   } else {
     toast('Clave actualizada', 'ok');
   }
+  closeModal();
+  // Refrescar el row de status si estamos en Configuración
+  const gs = document.getElementById('set-gemini-status');
+  if(gs) gs.innerHTML = '<span style="color:var(--green)">● Configurada</span> <span style="color:var(--text3);font-weight:400;font-size:11px">· tap para cambiar</span>';
+}
+
+// Modal para cambiar la clave Gemini desde el row compacto de Configuración.
+function openGeminiUpdater(){
+  const current = localStorage.getItem(LS.GEMINI) || '';
+  const masked = current ? current.slice(0, 6) + '••••••••' : '(sin configurar)';
+  showModal(`
+    <div style="font-size:15px;font-weight:600;margin-bottom:6px">Gemini API Key</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">Clave actual: <code style="font-family:var(--mono);font-size:11px;color:${current ? 'var(--green)' : 'var(--red)'}">${masked}</code></div>
+    <div class="field">
+      <div class="lbl">Nueva clave</div>
+      <input type="password" id="set-gemini-modal" placeholder="AIzaSy..." style="font-family:var(--mono);font-size:13px">
+    </div>
+    <div style="font-size:11px;color:var(--text2);margin:8px 0 14px;line-height:1.4">Obtén una en <strong style="color:var(--text)">aistudio.google.com</strong> → Get API Key → Create API Key.</div>
+    <button class="btn btn-amber" onclick="updateGeminiKey()" style="padding:11px">Actualizar clave</button>
+    <button class="btn" onclick="closeModal()" style="margin-top:8px">Cancelar</button>
+  `);
+  setTimeout(() => { const i = document.getElementById('set-gemini-modal'); if(i) i.focus(); }, 100);
 }
 
 async function updateScriptUrl(){
@@ -3353,7 +3428,7 @@ function applyRoleUI(){
 }
 
 // ============================================================
-// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0063
+// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0064
 // Modal con add/edit. Los registros guardan el COD (MAT, MOB...) — renombrar
 // nombre es non-destructivo; solo cambia lo que se muestra. Agregar es append a
 // CATEGORIAS sheet con COD auto-generado a partir de los primeros 3 caracteres
@@ -4165,7 +4240,7 @@ async function syncAll(){
       'NO', '', ''
     ]);
     const regRowsEliminado = gastos.map(e => ['NO']);
-    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0063+)
+    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0064+)
     const ingRows = abonos.map(e => [
       e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia, e.url_comprobante || ''
     ]);
@@ -4529,7 +4604,7 @@ async function repairFormulas(){
       ]]})
     });
 
-    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0063+) — agrega header si falta para que abonos
+    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0064+) — agrega header si falta para que abonos
     // con foto puedan persistir el link al cheque/comprobante.
     loading(true, 'Migrando', 'Verificando URL_COMPROBANTE en INGRESOS...');
     const ingHeaders = await sheetsGet('INGRESOS!A1:G1');
@@ -5726,7 +5801,7 @@ async function eliminarFacturaPermanente(idx){
 }
 
 // ============================================================
-// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0063)
+// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0064)
 // El flujo elimina el estado "PENDIENTE" porque no se usaba en la práctica.
 // Los registros históricos con APROBADO=PENDIENTE pasan a REVISAR para que
 // aparezcan en "Por revisar" del home y el usuario decida SI/NO.
