@@ -3831,11 +3831,24 @@ async function syncAll(){
     for(const e of all) await dbDel('pending', e.id);
     for(const e of gastos) if(e.image_base64) await dbDel('images', e.id);
 
+    // Invalidar el caché del balance del proyecto activo. Sin esto, refreshHome
+    // muestra el caché viejo + netoPendiente=0 = balance SIN la factura recién
+    // sincronizada, dando la sensación de que no descontó.
+    const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+    if(currentProj){
+      const balCache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
+      delete balCache[currentProj.cod];
+      localStorage.setItem(LS.BALCACHE, JSON.stringify(balCache));
+    }
+
     toast(`${all.length} registro(s) sincronizados`, 'ok');
     invalidateRevisarCache();
     renderHistory();
-    refreshHome();
-    setTimeout(() => refreshBalance(true), 1000);
+    refreshHome();  // verá caché vacío y mostrará "Calculando..." + auto-refresh
+
+    // Reintento por si las fórmulas ARRAYFORMULA del Sheet aún no recalcularon
+    // tras el append (puede tomar 1-2s en propagar).
+    setTimeout(() => refreshBalance(true), 2000);
   } catch(e){
     toast('Error: ' + e.message, 'err');
   } finally {
