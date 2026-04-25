@@ -3394,7 +3394,9 @@ async function refreshHome(){
   refreshBadgeRevisar();
   checkConsolidarStatus();
 
-  // Balance cacheado
+  // Balance cacheado. Si no hay cache para el proj actual, disparar refresh
+  // automático sin bloquear el render — así al cambiar de empresa o proyecto,
+  // el balance se calcula solo en lugar de quedarse en "RD$ --".
   const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
   if(proj && cache[proj.cod]){
     const v = cache[proj.cod].value + netoPendiente;
@@ -3403,6 +3405,11 @@ async function refreshHome(){
     el.className = 'balance-amt ' + (v >= 0 ? 'pos' : 'neg');
     const age = Math.floor((Date.now() - cache[proj.cod].at) / 60000);
     document.getElementById('balance-status').textContent = age === 0 ? 'Recién actualizado' : `Hace ${age} min`;
+  } else if(proj && !window._refreshingBalance){
+    // Guard contra loops: refreshBalance llama refreshHome, que podría volver acá.
+    document.getElementById('balance-status').textContent = 'Calculando...';
+    window._refreshingBalance = true;
+    refreshBalance(true).finally(() => { window._refreshingBalance = false; });
   }
 
   // Recientes (pendientes locales) — card entera clickeable para editar
@@ -3452,6 +3459,10 @@ async function refreshBalance(forceRemote){
     refreshHome();
   } catch(e){
     toast('Error: ' + e.message, 'err');
+    // Dejar evidencia visible en el balance — el toast es efímero y el usuario
+    // podría no verlo. Así sabe que tocó algo y puede reintentar.
+    const statusEl = document.getElementById('balance-status');
+    if(statusEl) statusEl.textContent = 'Error al actualizar — toca para reintentar';
   } finally {
     btn.classList.remove('spin');
   }
@@ -3479,8 +3490,9 @@ function renderProjects(){
 
 function selectProject(p){
   localStorage.setItem(LS.PROJ, JSON.stringify(p));
+  // refreshHome se dispara desde show('pg-home') y, si no hay cache para este
+  // proj, dispara solo el refreshBalance. Evita race con loadMasters paralelo.
   show('pg-home');
-  refreshBalance(true);
 }
 
 // ============================================================
