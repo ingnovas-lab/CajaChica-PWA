@@ -251,7 +251,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="ibtn" onclick="show('pg-settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </div>
-      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0062</div>
+      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0063</div>
     </div>
   </div>
   <div class="body">
@@ -1005,12 +1005,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div class="card">
-      <h3>Ayuda</h3>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Guía rápida de uso de la app. Si tienes dudas, llama al Ing. Joel Novas al <a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a>.</div>
-      <button class="btn btn-blue" onclick="show('pg-help')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        Ver guía de uso
-      </button>
+      <h3>App</h3>
+      <button class="btn btn-blue" onclick="forceAppUpdate()">Forzar actualización</button>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Limpia el caché de la PWA y recarga la última versión publicada. Tu sesión, claves y datos locales se mantienen intactos.</div>
     </div>
 
     <div class="card" data-admin-only>
@@ -1019,19 +1016,25 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO, URL_COMPROBANTE) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
       <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="margin-top:10px">Sincronizar archivos con Sheet</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
-      <button class="btn btn-amber" onclick="migratePendienteToRevisar()" style="margin-top:10px">Migrar APROBADO=PENDIENTE → REVISAR</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">v.0061 eliminó la opción "PENDIENTE" del flujo. Esto convierte registros históricos PENDIENTE a REVISAR para que aparezcan en "Por revisar".</div>
       <button class="btn btn-red" onclick="resetApp()" style="margin-top:10px">Borrar todo y empezar de cero</button>
+      <div style="font-size:11px;color:#fca5a5;margin-top:6px;line-height:1.4;opacity:.85">⚠️ Borra TODA la configuración local de este dispositivo: token de Google, clave de Gemini, empresa activa, proyectos cacheados, balances cacheados, e IndexedDB (registros pendientes sin sincronizar). NO toca tus datos en Google Drive ni en los Sheets — esos quedan intactos. Útil si quieres empezar limpio o si la app se rompió.</div>
     </div>
 
     <div class="card">
-      <h3>App</h3>
-      <button class="btn btn-blue" onclick="forceAppUpdate()">Forzar actualización</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Limpia el caché de la PWA y recarga la última versión publicada. Tu sesión, claves y datos locales se mantienen intactos.</div>
+      <h3>Ayuda</h3>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6">
+        Guía rápida de uso de la app. Si tienes dudas, contacta al <strong style="color:var(--text)">Ing. Joel Novas</strong>:<br>
+        📞 <a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a><br>
+        ✉️ <a href="mailto:ingnovas@gmail.com" style="color:var(--amber);text-decoration:none;font-weight:600">ingnovas@gmail.com</a>
+      </div>
+      <button class="btn btn-blue" onclick="show('pg-help')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Ver guía de uso
+      </button>
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
-      Control de Caja Chica · <span id="settings-version">v.0062</span>
+      Control de Caja Chica · <span id="settings-version">v.0063</span>
     </div>
   </div>
 </div>
@@ -1053,42 +1056,67 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div class="card" style="margin-bottom:14px">
       <h3 style="margin-bottom:10px">Contenido</h3>
       <div style="display:flex;flex-direction:column;gap:4px;font-size:13px">
-        <a href="#h-seleccionar" style="color:var(--blue);text-decoration:none;padding:6px 0">1. Seleccionar obra</a>
-        <a href="#h-capturar" style="color:var(--blue);text-decoration:none;padding:6px 0">2. Capturar factura con NCF</a>
-        <a href="#h-informal" style="color:var(--blue);text-decoration:none;padding:6px 0">3. Facturas sin NCF</a>
-        <a href="#h-revisar" style="color:var(--blue);text-decoration:none;padding:6px 0">4. Mis facturas</a>
-        <a href="#h-editar" style="color:var(--blue);text-decoration:none;padding:6px 0">5. Editar una factura</a>
-        <a href="#h-eliminar" style="color:var(--blue);text-decoration:none;padding:6px 0">6. Eliminar una factura</a>
-        <a href="#h-sincronizar" style="color:var(--blue);text-decoration:none;padding:6px 0">7. Sincronizar al final del día</a>
-        <a href="#h-offline" style="color:var(--blue);text-decoration:none;padding:6px 0">8. Trabajar sin internet</a>
-        <a href="#h-problemas" style="color:var(--blue);text-decoration:none;padding:6px 0">9. Problemas comunes</a>
-        <a href="#h-reglas" style="color:var(--blue);text-decoration:none;padding:6px 0">10. Las 5 reglas de oro</a>
+        <a href="#h-empresa" style="color:var(--blue);text-decoration:none;padding:6px 0">1. Seleccionar empresa</a>
+        <a href="#h-seleccionar" style="color:var(--blue);text-decoration:none;padding:6px 0">2. Seleccionar obra</a>
+        <a href="#h-capturar" style="color:var(--blue);text-decoration:none;padding:6px 0">3. Capturar factura con NCF</a>
+        <a href="#h-informal" style="color:var(--blue);text-decoration:none;padding:6px 0">4. Facturas sin NCF</a>
+        <a href="#h-ingreso" style="color:var(--blue);text-decoration:none;padding:6px 0">5. Registrar ingreso (abono)</a>
+        <a href="#h-revisar" style="color:var(--blue);text-decoration:none;padding:6px 0">6. Mis facturas</a>
+        <a href="#h-editar" style="color:var(--blue);text-decoration:none;padding:6px 0">7. Editar registros</a>
+        <a href="#h-eliminar" style="color:var(--blue);text-decoration:none;padding:6px 0">8. Eliminar registros</a>
+        <a href="#h-reporte" style="color:var(--blue);text-decoration:none;padding:6px 0">9. Generar reporte de balance</a>
+        <a href="#h-sincronizar" style="color:var(--blue);text-decoration:none;padding:6px 0">10. Sincronizar al final del día</a>
+        <a href="#h-offline" style="color:var(--blue);text-decoration:none;padding:6px 0">11. Trabajar sin internet</a>
+        <a href="#h-problemas" style="color:var(--blue);text-decoration:none;padding:6px 0">12. Problemas comunes</a>
+        <a href="#h-reglas" style="color:var(--blue);text-decoration:none;padding:6px 0">13. Las 5 reglas de oro</a>
       </div>
     </div>
 
     <!-- Contacto destacado -->
     <div style="background:rgba(245,158,11,0.12);border:1px solid var(--amber);border-radius:var(--r);padding:14px;margin-bottom:14px">
       <div style="font-size:13px;font-weight:600;color:var(--amber);margin-bottom:6px">¿Necesitas ayuda?</div>
-      <div style="font-size:13px;color:var(--text);line-height:1.5">Llama al <strong>Ing. Joel Novas</strong> al <a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a>. No te guardes las dudas.</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.5">
+        Contacta al <strong>Ing. Joel Novas</strong>:<br>
+        📞 <a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a><br>
+        ✉️ <a href="mailto:ingnovas@gmail.com" style="color:var(--amber);text-decoration:none;font-weight:600">ingnovas@gmail.com</a><br>
+        <span style="font-size:12px;color:var(--text2)">No te guardes las dudas.</span>
+      </div>
     </div>
 
-    <!-- Sección 1 -->
-    <div class="card" style="margin-bottom:14px" id="h-seleccionar">
-      <h3 style="color:var(--amber);margin-bottom:10px">1. Seleccionar una obra</h3>
+    <!-- Sección 1 (NUEVA): Multi-empresa -->
+    <div class="card" style="margin-bottom:14px" id="h-empresa">
+      <h3 style="color:var(--amber);margin-bottom:10px">1. Seleccionar empresa</h3>
       <div style="font-size:13px;line-height:1.6">
-        La app trabaja con una obra a la vez. Antes de capturar cualquier factura, selecciona en cuál estás trabajando.
+        La app puede manejar varias empresas. Cada empresa tiene su propio set de obras, suplidores, categorías y balance.
         <ol style="margin:10px 0 0 20px;padding:0">
-          <li style="margin-bottom:6px">En la pantalla principal, arriba, toca donde dice "Seleccionar obra".</li>
-          <li style="margin-bottom:6px">Aparece la lista de tus obras asignadas.</li>
-          <li style="margin-bottom:6px">Toca la obra que quieres usar.</li>
-          <li>El balance de la obra aparece abajo.</li>
+          <li style="margin-bottom:6px">En el home, arriba ves un chip "Empresa activa" con el nombre. Tócalo para cambiar.</li>
+          <li style="margin-bottom:6px">Aparece la lista de empresas a las que tienes acceso.</li>
+          <li>Toca la empresa con la que quieres trabajar.</li>
         </ol>
+        <div style="background:rgba(59,130,246,0.08);border-left:3px solid var(--blue);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          Si solo trabajas con una empresa, no necesitas tocar nada — la app se abre directo en ella.
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--text2)"><strong>Crear empresa nueva</strong> (solo SUPER_ADMIN): desde la pantalla de seleccionar empresa → "Nueva empresa".</div>
       </div>
     </div>
 
     <!-- Sección 2 -->
+    <div class="card" style="margin-bottom:14px" id="h-seleccionar">
+      <h3 style="color:var(--amber);margin-bottom:10px">2. Seleccionar una obra</h3>
+      <div style="font-size:13px;line-height:1.6">
+        La app trabaja con una obra a la vez. Antes de capturar cualquier factura, selecciona en cuál estás trabajando.
+        <ol style="margin:10px 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">En la pantalla principal, toca el chip "Proyecto activo".</li>
+          <li style="margin-bottom:6px">Aparece la lista de tus obras asignadas. Cada card muestra el código y los usuarios con acceso.</li>
+          <li style="margin-bottom:6px">Toca la obra que quieres usar.</li>
+          <li>El balance de la obra aparece abajo en el home.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Sección 3 -->
     <div class="card" style="margin-bottom:14px" id="h-capturar">
-      <h3 style="color:var(--amber);margin-bottom:10px">2. Capturar una factura con NCF</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">3. Capturar una factura con NCF</h3>
       <div style="font-size:13px;line-height:1.6">
         El flujo principal de la app.
         <ol style="margin:10px 0 0 20px;padding:0">
@@ -1108,9 +1136,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 3 -->
+    <!-- Sección 4 -->
     <div class="card" style="margin-bottom:14px" id="h-informal">
-      <h3 style="color:var(--amber);margin-bottom:10px">3. Facturas sin NCF (tiquetes, informales)</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">4. Facturas sin NCF (tiquetes, informales)</h3>
       <div style="font-size:13px;line-height:1.6">
         Tiquetes de gasolinera, recibos hechos a mano o facturas sin NCF. La app también las acepta.
         <ol style="margin:10px 0 0 20px;padding:0">
@@ -1123,35 +1151,60 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 4 -->
+    <!-- Sección 5 (NUEVA): Registrar ingreso / abono -->
+    <div class="card" style="margin-bottom:14px" id="h-ingreso">
+      <h3 style="color:var(--amber);margin-bottom:10px">5. Registrar ingreso (abono)</h3>
+      <div style="font-size:13px;line-height:1.6">
+        Los abonos <strong>aumentan</strong> el balance disponible de la obra. Sirven para registrar dinero que entra al fondo de caja chica.
+        <ol style="margin:10px 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">Verifica la obra correcta.</li>
+          <li style="margin-bottom:6px">Toca "+ Registrar ingreso" en el home.</li>
+          <li style="margin-bottom:6px">Elige el <strong>Tipo</strong>:
+            <ul style="margin:4px 0 4px 20px;padding:0">
+              <li><strong>Fondo inicial</strong>: el primer dinero que se asigna a la obra.</li>
+              <li><strong>Reposición</strong>: dinero adicional que se inyecta cuando se agota el fondo.</li>
+              <li><strong>Devolución</strong>: dinero que sobró y se reintegra.</li>
+            </ul>
+          </li>
+          <li style="margin-bottom:6px">Llena fecha, monto y referencia (cheque #, transferencia, etc.).</li>
+          <li style="margin-bottom:6px"><strong>Comprobante (opcional pero recomendado):</strong> toca "Tomar foto" o "De galería" para adjuntar el cheque, depósito o comprobante de transferencia. La foto se guarda en Drive en una carpeta separada (Comprobantes/) para auditorías.</li>
+          <li>Toca "Guardar abono".</li>
+        </ol>
+        <div style="background:rgba(34,197,94,0.08);border-left:3px solid var(--green);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          El abono queda en pendientes hasta que sincronices. Lo verás en "Por sincronizar" del home.
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección 6 -->
     <div class="card" style="margin-bottom:14px" id="h-revisar">
-      <h3 style="color:var(--amber);margin-bottom:10px">4. Revisar mis facturas</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">6. Mis facturas</h3>
       <div style="font-size:13px;line-height:1.6">
         <ol style="margin:0 0 0 20px;padding:0">
-          <li style="margin-bottom:6px">Toca "Mis facturas" en la pantalla principal.</li>
+          <li style="margin-bottom:6px">Toca "Mis facturas — editar / eliminar" en la pantalla principal.</li>
           <li style="margin-bottom:6px">Arriba puedes filtrar por Obra, Estado, o buscar por suplidor / NCF.</li>
           <li>Los filtros se aplican automáticamente.</li>
         </ol>
         <div style="margin-top:12px"><strong>Estados:</strong></div>
         <ul style="margin:6px 0 0 20px;padding:0">
-          <li style="margin-bottom:4px"><strong>Activas:</strong> facturas procesadas</li>
-          <li style="margin-bottom:4px"><strong>Por revisar:</strong> sin NCF, pendiente de validar</li>
+          <li style="margin-bottom:4px"><strong>Activas:</strong> facturas aprobadas (APROBADO=SI)</li>
+          <li style="margin-bottom:4px"><strong>Por revisar:</strong> facturas sin NCF o que requieren validación del admin (APROBADO=REVISAR). Solo el admin las cambia a SI / NO.</li>
           <li style="margin-bottom:4px"><strong>Papelera:</strong> eliminadas (recuperables)</li>
           <li><strong>Todas:</strong> todas juntas</li>
         </ul>
       </div>
     </div>
 
-    <!-- Sección 5 -->
+    <!-- Sección 7 -->
     <div class="card" style="margin-bottom:14px" id="h-editar">
-      <h3 style="color:var(--amber);margin-bottom:10px">5. Editar una factura</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">7. Editar registros (factura o ingreso)</h3>
       <div style="font-size:13px;line-height:1.6">
-        <div style="font-weight:600;margin-bottom:6px">Pendiente (no sincronizada):</div>
+        <div style="font-weight:600;margin-bottom:6px">Pendiente (no sincronizado):</div>
         <ol style="margin:0 0 0 20px;padding:0">
-          <li style="margin-bottom:6px">En la pantalla principal, toca cualquier factura de "Últimos registros".</li>
-          <li style="margin-bottom:6px">Te abre el editor con aviso "(sin sincronizar)".</li>
-          <li style="margin-bottom:6px">Modifica lo que necesites.</li>
-          <li style="margin-bottom:6px">Puedes cambiar la foto con los botones "Cambiar foto" / "De galería".</li>
+          <li style="margin-bottom:6px">En el home, toca cualquier registro de "Últimos registros" — se abre el editor.</li>
+          <li style="margin-bottom:6px">O ve a "Por sincronizar" → toca "Editar" en la fila.</li>
+          <li style="margin-bottom:6px">Funciona igual para facturas (gastos) y para ingresos (abonos) — la app abre el editor correcto según el tipo.</li>
+          <li style="margin-bottom:6px">Modifica lo que necesites. Puedes cambiar la foto con los botones "Cambiar foto" / "De galería".</li>
           <li>Toca "Guardar cambios".</li>
         </ol>
         <div style="font-weight:600;margin-top:14px;margin-bottom:6px">Ya sincronizada:</div>
@@ -1163,20 +1216,39 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 6 -->
+    <!-- Sección 8 -->
     <div class="card" style="margin-bottom:14px" id="h-eliminar">
-      <h3 style="color:var(--amber);margin-bottom:10px">6. Eliminar una factura</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">8. Eliminar registros</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;margin-bottom:6px">Pendiente:</div>
-        <div style="margin-bottom:12px">Ve a "Registros pendientes" (toca "Por sincronizar" en el home) → toca "Eliminar". Se borra del celular.</div>
+        <div style="margin-bottom:12px">Ve a "Registros pendientes" (toca "Por sincronizar" en el home) → toca "Eliminar" en la fila. Se borra del celular.</div>
         <div style="font-weight:600;margin-bottom:6px">Sincronizada:</div>
         <div>Ve a "Mis facturas" → toca "Eliminar". Pasa a la Papelera de esa obra (recuperable desde el filtro Papelera → Restaurar).</div>
       </div>
     </div>
 
-    <!-- Sección 7 -->
+    <!-- Sección 9 (NUEVA): Generar reporte de balance -->
+    <div class="card" style="margin-bottom:14px" id="h-reporte">
+      <h3 style="color:var(--amber);margin-bottom:10px">9. Generar reporte de balance</h3>
+      <div style="font-size:13px;line-height:1.6">
+        Reporte consolidado de gastos y abonos para una obra y rango de fechas. Útil para soportar pagos al contador o para liquidar caja chica.
+        <ol style="margin:10px 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">En el home, toca el botón morado "Generar reporte de balance".</li>
+          <li style="margin-bottom:6px">Filtra por obra, rango de fechas y opcionalmente por número de reporte.</li>
+          <li style="margin-bottom:6px">La app calcula y muestra: balance del periodo, lista de gastos detallados, totales por categoría y por obra.</li>
+          <li style="margin-bottom:6px">Opciones para exportar:
+            <ul style="margin:4px 0 4px 20px;padding:0">
+              <li><strong>Imprimir / PDF:</strong> botón de imprimir genera versión limpia para PDF.</li>
+              <li><strong>PDF de soporte con fotos:</strong> incluye una página por factura con su imagen — pensado para auditorías.</li>
+            </ul>
+          </li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Sección 10 -->
     <div class="card" style="margin-bottom:14px" id="h-sincronizar">
-      <h3 style="color:var(--amber);margin-bottom:10px">7. Sincronizar al final del día</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">10. Sincronizar al final del día</h3>
       <div style="font-size:13px;line-height:1.6">
         Todas las facturas que capturas quedan primero en tu celular. Al final del día, con buena señal, las subes al sistema.
         <ol style="margin:10px 0 0 20px;padding:0">
@@ -1192,28 +1264,28 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 8 -->
+    <!-- Sección 11 -->
     <div class="card" style="margin-bottom:14px" id="h-offline">
-      <h3 style="color:var(--amber);margin-bottom:10px">8. Trabajar sin internet</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">11. Trabajar sin internet</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;color:var(--green);margin-bottom:6px">SÍ funciona sin internet:</div>
         <ul style="margin:0 0 14px 20px;padding:0">
-          <li style="margin-bottom:4px">Tomar fotos de facturas</li>
-          <li style="margin-bottom:4px">Ver facturas pendientes</li>
+          <li style="margin-bottom:4px">Tomar fotos de facturas y comprobantes de ingreso</li>
+          <li style="margin-bottom:4px">Ver registros pendientes</li>
           <li>Editar o eliminar pendientes</li>
         </ul>
         <div style="font-weight:600;color:var(--red);margin-bottom:6px">NO funciona sin internet:</div>
         <ul style="margin:0 0 0 20px;padding:0">
           <li style="margin-bottom:4px">Lectura automática de factura (OCR). La foto se guarda pero escribes los datos manualmente.</li>
-          <li style="margin-bottom:4px">Ver facturas ya sincronizadas</li>
+          <li style="margin-bottom:4px">Ver registros ya sincronizados</li>
           <li>Sincronizar (hay que esperar señal)</li>
         </ul>
       </div>
     </div>
 
-    <!-- Sección 9 -->
+    <!-- Sección 12 -->
     <div class="card" style="margin-bottom:14px" id="h-problemas">
-      <h3 style="color:var(--amber);margin-bottom:10px">9. Problemas comunes</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">12. Problemas comunes</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;margin-bottom:4px">La app me pide iniciar sesión otra vez</div>
         <div style="margin-bottom:12px;color:var(--text2)">Normal por seguridad. Toca "Conectar con Google" y selecciona tu correo. No pierdes nada.</div>
@@ -1222,19 +1294,22 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div style="margin-bottom:12px;color:var(--text2)">Corrígelos tú mismo antes de guardar. Si pasa seguido, mejora la luz y toma la foto de nuevo.</div>
 
         <div style="font-weight:600;margin-bottom:4px">No veo una obra que debería tener</div>
-        <div style="margin-bottom:12px;color:var(--text2)">Settings → "Actualizar datos desde Sheet". Si aún no aparece, llama al Ing. Joel.</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Toca el icono de refrescar ↻ sobre el balance de la obra (eso recarga proyectos desde el Sheet). Si aún no aparece, llama al Ing. Joel para que te asigne la obra.</div>
 
-        <div style="font-weight:600;margin-bottom:4px">La app está lenta</div>
-        <div style="margin-bottom:12px;color:var(--text2)">Cierra completamente y vuelve a abrirla. Cierra otras apps abiertas.</div>
+        <div style="font-weight:600;margin-bottom:4px">El balance no está actualizado</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Toca el icono ↻ sobre el balance para forzar recálculo desde el Sheet.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">La app está lenta o muestra una versión vieja</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Configuración → App → "Forzar actualización". Limpia caché y trae la última versión publicada sin perder tu sesión ni datos locales.</div>
 
         <div style="font-weight:600;margin-bottom:4px">Me dice "Sesión expirada"</div>
         <div style="color:var(--text2)">Toca "Conectar con Google" cuando te lo pida.</div>
       </div>
     </div>
 
-    <!-- Sección 10 -->
+    <!-- Sección 13 -->
     <div class="card" style="margin-bottom:14px;border:1.5px solid var(--amber)" id="h-reglas">
-      <h3 style="color:var(--amber);margin-bottom:12px">10. Las 5 reglas de oro</h3>
+      <h3 style="color:var(--amber);margin-bottom:12px">13. Las 5 reglas de oro</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="padding:8px 0;border-bottom:1px solid var(--border)">
           <div style="font-weight:600">1. Siempre revisa los datos antes de guardar</div>
@@ -1260,7 +1335,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px">
-      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0062</span><br>
+      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0063</span><br>
       Ing. Joel Novas
     </div>
   </div>
@@ -1276,7 +1351,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0062';
+const APP_VERSION = '0063';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3278,7 +3353,7 @@ function applyRoleUI(){
 }
 
 // ============================================================
-// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0062
+// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0063
 // Modal con add/edit. Los registros guardan el COD (MAT, MOB...) — renombrar
 // nombre es non-destructivo; solo cambia lo que se muestra. Agregar es append a
 // CATEGORIAS sheet con COD auto-generado a partir de los primeros 3 caracteres
@@ -3662,18 +3737,36 @@ function renderProjects(){
     box.innerHTML = '<div class="alert alert-amber">No tienes obras asignadas. Pide al admin que te agregue a USUARIOS en la hoja.</div>';
     return;
   }
-  box.innerHTML = masters.projects.map(p => `
+  box.innerHTML = masters.projects.map(p => {
+    // Lista de usuarios con acceso a esta obra:
+    // - ADMIN ven todos los proyectos automáticamente
+    // - USUARIO solo ven obras en su columna PROYECTOS_ASIGNADOS
+    // Excluimos al SUPER_ADMIN del listado (su acceso es transversal a empresas).
+    const assigned = (masters.users || []).filter(u => {
+      if((u.email || '').toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) return false;
+      if(u.rol === 'ADMIN') return true;
+      return (u.proyectos || []).includes(p.cod);
+    });
+    const usersHtml = assigned.length === 0
+      ? `<div style="font-size:11px;color:var(--text3);font-style:italic">Sin usuarios asignados</div>`
+      : `<div style="display:flex;flex-wrap:wrap;gap:6px">${assigned.map(u => `
+          <span style="display:inline-flex;align-items:center;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--text)">${escapeHtml(u.nombre || u.email)}${u.rol === 'ADMIN' ? ' <span style="font-size:9px;color:var(--text2);font-family:var(--mono);text-transform:uppercase">ADMIN</span>' : ''}</span>`).join('')}</div>`;
+    return `
     <div class="card" style="cursor:pointer" onclick='selectProject(${JSON.stringify(p).replace(/'/g, "&#39;")})'>
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div style="flex:1;min-width:0">
-          <div style="font-size:14px;font-weight:600">${p.nombre}</div>
+          <div style="font-size:14px;font-weight:600">${escapeHtml(p.nombre)}</div>
           <div style="font-size:11px;color:var(--text2);font-family:var(--mono);margin-top:3px">${p.cod}</div>
-          <div style="font-size:11px;color:var(--text2);margin-top:3px">${p.ubicacion || ''}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:3px">${escapeHtml(p.ubicacion || '')}</div>
         </div>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
       </div>
-    </div>
-  `).join('');
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;font-weight:500;margin-bottom:6px">Usuarios asignados (${assigned.length})</div>
+        ${usersHtml}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function selectProject(p){
@@ -4072,7 +4165,7 @@ async function syncAll(){
       'NO', '', ''
     ]);
     const regRowsEliminado = gastos.map(e => ['NO']);
-    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0062+)
+    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0063+)
     const ingRows = abonos.map(e => [
       e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia, e.url_comprobante || ''
     ]);
@@ -4436,7 +4529,7 @@ async function repairFormulas(){
       ]]})
     });
 
-    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0062+) — agrega header si falta para que abonos
+    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0063+) — agrega header si falta para que abonos
     // con foto puedan persistir el link al cheque/comprobante.
     loading(true, 'Migrando', 'Verificando URL_COMPROBANTE en INGRESOS...');
     const ingHeaders = await sheetsGet('INGRESOS!A1:G1');
@@ -5633,7 +5726,7 @@ async function eliminarFacturaPermanente(idx){
 }
 
 // ============================================================
-// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0062)
+// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0063)
 // El flujo elimina el estado "PENDIENTE" porque no se usaba en la práctica.
 // Los registros históricos con APROBADO=PENDIENTE pasan a REVISAR para que
 // aparezcan en "Por revisar" del home y el usuario decida SI/NO.
