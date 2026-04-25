@@ -250,7 +250,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="ibtn" onclick="show('pg-settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </div>
-      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0057</div>
+      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0059</div>
     </div>
   </div>
   <div class="body">
@@ -995,7 +995,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
-      Control de Caja Chica · <span id="settings-version">v.0057</span>
+      Control de Caja Chica · <span id="settings-version">v.0059</span>
     </div>
   </div>
 </div>
@@ -1224,7 +1224,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px">
-      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0057</span><br>
+      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0059</span><br>
       Ing. Joel Novas
     </div>
   </div>
@@ -1240,7 +1240,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0057';
+const APP_VERSION = '0059';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5846,6 +5846,31 @@ function processInviteHash(){
   }
 }
 
+// ============================================================
+// CLICK DELEGATION ROBUSTA PARA BOTONES
+// ============================================================
+// Algunos navegadores (notablemente iOS Safari y Chrome desktop bajo ciertas
+// condiciones) tienen quirks donde un tap sobre el TEXTO de un <button class="btn">
+// no dispara el inline onclick — solo dispara cuando el tap cae sobre espacio
+// vacío del botón. user-select:none + pointer-events:none en hijos no siempre lo
+// resuelve. Solución: convertir el inline onclick="..." en un addEventListener
+// real al cargar (y para nodos dinámicos vía MutationObserver). El click event
+// se entrega al .btn ancestor por bubbling natural, lo que SÍ funciona consistente.
+function rewireClickable(root){
+  if(!root || !root.querySelectorAll) return;
+  root.querySelectorAll('.btn[onclick],.ibtn[onclick]').forEach(el => {
+    if(el.dataset.rewired === '1') return;
+    el.dataset.rewired = '1';
+    const code = el.getAttribute('onclick');
+    el.removeAttribute('onclick');
+    el.addEventListener('click', function(ev){
+      if(this.disabled) return;
+      try { new Function('event', code).call(this, ev); }
+      catch(err){ console.error('[btn-click]', err); }
+    });
+  });
+}
+
 (async () => {
   loading(true, 'Iniciando', 'Cargando...');
 
@@ -5853,6 +5878,14 @@ function processInviteHash(){
   document.querySelectorAll('#home-version,#settings-version,#help-version').forEach(el => {
     el.textContent = APP_VERSION_LABEL;
   });
+
+  // Re-conectar onclicks de botones estáticos y observar adiciones dinámicas
+  rewireClickable(document);
+  new MutationObserver(muts => {
+    muts.forEach(m => m.addedNodes.forEach(n => {
+      if(n.nodeType === 1) rewireClickable(n);
+    }));
+  }).observe(document.body, {childList:true, subtree:true});
 
   // Aplicar configuración de invitación si aplica
   const fromInvite = processInviteHash();
