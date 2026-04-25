@@ -251,7 +251,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="ibtn" onclick="show('pg-settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </div>
-      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0060</div>
+      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0061</div>
     </div>
   </div>
   <div class="body">
@@ -334,7 +334,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <button class="btn btn-green" onclick="show('pg-abono')" style="padding:14px">+ Registrar ingreso</button>
+    <button class="btn btn-green" onclick="newAbono()" style="padding:14px">+ Registrar ingreso</button>
 
     <button class="btn" onclick="show('pg-facturas')" style="position:relative">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M3 9h18"/></svg>
@@ -606,7 +606,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <input type="text" id="ed-rnc" style="font-family:var(--mono)">
       </div>
       <div class="field">
-        <div class="lbl">Categoría</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="lbl" style="margin-bottom:0">Categoría</div>
+          <span data-admin-only onclick="manageCategorias()" style="font-size:11px;color:var(--amber);cursor:pointer;display:none">✏️ Gestionar</span>
+        </div>
         <select id="ed-cat"></select>
       </div>
     </div>
@@ -635,7 +638,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div class="lbl">Aprobado</div>
         <select id="ed-aprobado">
           <option value="SI">SI</option>
-          <option value="PENDIENTE">PENDIENTE</option>
           <option value="REVISAR">REVISAR</option>
         </select>
       </div>
@@ -744,7 +746,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div id="cfm-warn" class="alert alert-amber" style="display:none"></div>
 
     <div class="field">
-      <div class="lbl">Categoría</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div class="lbl" style="margin-bottom:0">Categoría</div>
+        <span data-admin-only onclick="manageCategorias()" style="font-size:11px;color:var(--amber);cursor:pointer;display:none">✏️ Gestionar</span>
+      </div>
       <select id="f-cat"></select>
     </div>
 
@@ -811,12 +816,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 <!-- ========== PAGE: ABONO ========== -->
 <div class="page" id="pg-abono">
   <div class="topbar">
-    <div class="ibtn" onclick="show('pg-home')">
+    <div class="ibtn" onclick="exitAbono()">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
     </div>
     <div>
-      <div class="topbar-title">Registrar ingreso</div>
-      <div class="topbar-sub">Ingreso al fondo de obra</div>
+      <div class="topbar-title" id="ab-title">Registrar ingreso</div>
+      <div class="topbar-sub" id="ab-sub">Ingreso al fondo de obra</div>
     </div>
   </div>
   <div class="body">
@@ -841,8 +846,37 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="lbl">Referencia (cheque/transferencia)</div>
       <input type="text" id="ab-ref" placeholder="Opcional">
     </div>
+
+    <!-- Comprobante del abono (foto del cheque, depósito, transferencia) -->
+    <div class="field">
+      <div class="lbl">Comprobante (cheque, depósito, transferencia)</div>
+      <input type="file" id="ab-inp-cam" accept="image/*" capture="environment" style="display:none" onchange="onAbonoFile(this)">
+      <input type="file" id="ab-inp-gal" accept="image/*" style="display:none" onchange="onAbonoFile(this)">
+      <div id="ab-photo-preview" style="display:none;margin-bottom:10px">
+        <img id="ab-photo-img" alt="" style="width:100%;max-height:240px;object-fit:contain;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2)">
+        <button class="btn btn-red" style="margin-top:8px;padding:8px;font-size:12px" onclick="abonoRemovePhoto()">Quitar foto</button>
+      </div>
+      <div class="photo-row" id="ab-photo-row">
+        <div class="photo-card primary" onclick="document.getElementById('ab-inp-cam').click()">
+          <div class="photo-card-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.5"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </div>
+          <div class="photo-card-label">Tomar foto</div>
+          <div class="photo-card-sub">Cheque o recibo</div>
+        </div>
+        <div class="photo-card" onclick="document.getElementById('ab-inp-gal').click()">
+          <div class="photo-card-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          </div>
+          <div class="photo-card-label">De galería</div>
+          <div class="photo-card-sub">Subir imagen</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px">Opcional. Útil para soporte de auditoría.</div>
+    </div>
+
     <div id="ab-err" class="alert alert-red" style="display:none"></div>
-    <button class="btn btn-green" onclick="saveAbono()" style="padding:15px;font-size:15px">Guardar abono</button>
+    <button class="btn btn-green" id="btn-save-abono" onclick="saveAbono()" style="padding:15px;font-size:15px">Guardar abono</button>
   </div>
 </div>
 
@@ -982,9 +1016,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div class="card" data-admin-only>
       <h3>Mantenimiento</h3>
       <button class="btn btn-amber" onclick="repairFormulas()">Reparar fórmulas del Dashboard</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO, URL_COMPROBANTE) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
       <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="margin-top:10px">Sincronizar archivos con Sheet</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
+      <button class="btn btn-amber" onclick="migratePendienteToRevisar()" style="margin-top:10px">Migrar APROBADO=PENDIENTE → REVISAR</button>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">v.0061 elimina la opción "PENDIENTE" del flujo. Esto convierte registros históricos PENDIENTE a REVISAR para que aparezcan en "Por revisar".</div>
       <button class="btn btn-red" onclick="resetApp()" style="margin-top:10px">Borrar todo y empezar de cero</button>
     </div>
 
@@ -995,7 +1031,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
-      Control de Caja Chica · <span id="settings-version">v.0060</span>
+      Control de Caja Chica · <span id="settings-version">v.0061</span>
     </div>
   </div>
 </div>
@@ -1224,7 +1260,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px">
-      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0060</span><br>
+      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0061</span><br>
       Ing. Joel Novas
     </div>
   </div>
@@ -1240,7 +1276,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0060';
+const APP_VERSION = '0061';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1405,7 +1441,7 @@ function show(id){
     if(scriptInput) scriptInput.value = getActiveScriptUrl() || '';
     checkConsolidarStatus();
   }
-  if(id==='pg-abono') document.getElementById('ab-fecha').value = today();
+  // pg-abono se inicializa vía newAbono() o editarPending() — no auto-reset acá
   if(id==='pg-reportes') initReportes();
   if(id==='pg-new-proj') initNewProj();
   if(id==='pg-new-company') initNewCompany();
@@ -2943,7 +2979,7 @@ async function initializeSheetStructure(sheetId){
     {name: 'SUPLIDORES', headers: ['RNC','NOMBRE','CATEGORIA_DEFAULT','ACTIVO']},
     {name: 'CATEGORIAS', headers: ['CODIGO','NOMBRE','CUENTA_CONTABLE']},
     {name: 'USUARIOS', headers: ['EMAIL','NOMBRE','ROL','PROYECTOS_ASIGNADOS']},
-    {name: 'INGRESOS', headers: ['ID','FECHA','PROYECTO','TIPO','MONTO','REFERENCIA']},
+    {name: 'INGRESOS', headers: ['ID','FECHA','PROYECTO','TIPO','MONTO','REFERENCIA','URL_COMPROBANTE']},
     {name: 'LOG_OCR', headers: ['TIMESTAMP','ID_REGISTRO','CONFIDENCE','CAMPOS','ERROR','USUARIO']},
     {name: 'DASHBOARD', headers: ['PROYECTO','BALANCE','# FACTURAS']}
   ];
@@ -3239,6 +3275,145 @@ function applyRoleUI(){
   document.querySelectorAll('[data-admin-only]').forEach(el => {
     el.style.display = admin ? '' : 'none';
   });
+}
+
+// ============================================================
+// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0061
+// Modal con add/edit. Los registros guardan el COD (MAT, MOB...) — renombrar
+// nombre es non-destructivo; solo cambia lo que se muestra. Agregar es append a
+// CATEGORIAS sheet con COD auto-generado a partir de los primeros 3 caracteres
+// del nombre (con sufijo numérico si hay conflicto).
+// ============================================================
+function manageCategorias(){
+  if(!isAdmin()){ toast('Solo ADMIN', 'err'); return; }
+  const rows = (masters.categories || []).map(c => `
+    <div class="cat-row" data-cod="${c.cod}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--border);margin-bottom:8px">
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text2);background:var(--bg2);padding:3px 7px;border-radius:4px;flex-shrink:0">${c.cod}</span>
+      <input class="cat-input" data-original="${escapeHtml(c.nombre)}" value="${escapeHtml(c.nombre)}" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;padding:0;font-weight:500;outline:none" oninput="markCatDirty(this)">
+      <button class="cat-save" style="display:none;width:28px;height:28px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:18px" onclick="saveCatRow(this)">✓</button>
+    </div>
+  `).join('');
+
+  showModal(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600">Gestionar categorías</div>
+      <div style="font-size:18px;color:var(--text2);cursor:pointer" onclick="closeModal()">✕</div>
+    </div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:14px">
+      Tap el nombre para editar. El código (MAT, MOB...) se mantiene en los registros existentes — solo cambia el nombre que se muestra.
+    </div>
+    <div id="cat-list">${rows}</div>
+    <div id="cat-add-row" style="display:none;margin-top:8px">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--green)">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--green);background:var(--bg2);padding:3px 7px;border-radius:4px;flex-shrink:0">NUEVO</span>
+        <input id="cat-new-input" placeholder="Nombre de la categoría" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;padding:0;outline:none">
+        <button style="width:28px;height:28px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:18px" onclick="saveCatNew()">✓</button>
+        <button style="width:28px;height:28px;background:transparent;border:none;color:var(--red);cursor:pointer;font-size:14px" onclick="cancelCatNew()">✕</button>
+      </div>
+    </div>
+    <div id="cat-add-btn" style="display:flex;align-items:center;gap:8px;background:#052e16;border:1px dashed #166534;border-radius:10px;padding:12px;margin-top:8px;color:var(--green);font-size:13px;cursor:pointer;font-weight:500;justify-content:center" onclick="showCatAddRow()">+ Agregar nueva categoría</div>
+    <button class="btn" onclick="closeModal()" style="margin-top:14px">Cerrar</button>
+  `);
+}
+
+function markCatDirty(inp){
+  const row = inp.closest('.cat-row');
+  const original = inp.dataset.original;
+  const saveBtn = row.querySelector('.cat-save');
+  saveBtn.style.display = inp.value.trim() !== original ? 'flex' : 'none';
+}
+
+async function saveCatRow(btn){
+  const row = btn.closest('.cat-row');
+  const cod = row.dataset.cod;
+  const inp = row.querySelector('.cat-input');
+  const newName = inp.value.trim();
+  if(!newName){ toast('El nombre no puede quedar vacío', 'err'); return; }
+  if(newName === inp.dataset.original){ btn.style.display = 'none'; return; }
+
+  loading(true, 'Guardando', 'Actualizando categoría...');
+  try {
+    // Buscar fila en CATEGORIAS sheet
+    const all = await sheetsGet('CATEGORIAS!A2:C');
+    const idx = (all || []).findIndex(r => r[0] === cod);
+    if(idx < 0) throw new Error('Categoría no encontrada en hoja');
+    const rowNum = idx + 2;
+    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${getActiveSheetId()}/values/CATEGORIAS!B${rowNum}?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [[newName]]})
+    });
+
+    // Actualizar masters local + selects abiertos
+    const cat = (masters.categories || []).find(c => c.cod === cod);
+    if(cat) cat.nombre = newName;
+    inp.dataset.original = newName;
+    btn.style.display = 'none';
+    refreshCategoriaSelects();
+    loading(false);
+    toast(`"${newName}" guardado`, 'ok');
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error('[saveCatRow]', e);
+  }
+}
+
+function showCatAddRow(){
+  document.getElementById('cat-add-btn').style.display = 'none';
+  document.getElementById('cat-add-row').style.display = 'block';
+  setTimeout(() => document.getElementById('cat-new-input').focus(), 50);
+}
+
+function cancelCatNew(){
+  document.getElementById('cat-new-input').value = '';
+  document.getElementById('cat-add-row').style.display = 'none';
+  document.getElementById('cat-add-btn').style.display = 'flex';
+}
+
+async function saveCatNew(){
+  const inp = document.getElementById('cat-new-input');
+  const nombre = inp.value.trim();
+  if(!nombre){ toast('Escribe un nombre', 'err'); return; }
+
+  // Generar COD único: 3 letras del nombre, append numérico si conflicto
+  const base = nombre.toUpperCase().replace(/[^A-Z]/g, '').substring(0, 3) || 'CAT';
+  const existing = new Set((masters.categories || []).map(c => c.cod));
+  let cod = base;
+  let i = 2;
+  while(existing.has(cod)) cod = base + i++;
+
+  loading(true, 'Guardando', 'Agregando categoría...');
+  try {
+    await sheetsAppend('CATEGORIAS!A2', [[cod, nombre, '']]);
+    masters.categories = [...(masters.categories || []), {cod, nombre, cuenta: ''}];
+    refreshCategoriaSelects();
+    loading(false);
+    toast(`"${nombre}" (${cod}) agregada`, 'ok');
+    closeModal();
+    manageCategorias(); // re-abrir modal para que vea la nueva
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error('[saveCatNew]', e);
+  }
+}
+
+// Re-renderiza los selects de categoría (f-cat en pg-confirm, ed-cat en pg-editar) tras
+// add/rename. Preserva el value seleccionado si la opción aún existe.
+function refreshCategoriaSelects(){
+  ['f-cat','ed-cat'].forEach(id => {
+    const sel = document.getElementById(id);
+    if(!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = (masters.categories || []).map(c => `<option value="${c.cod}">${c.nombre}</option>`).join('');
+    if(prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  });
+}
+
+// Helper para escapar HTML al inyectar nombres en atributos/contenido del modal
+function escapeHtml(s){
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 async function loadMasters(){
@@ -3700,6 +3875,71 @@ async function saveEntry(){
   show('pg-home');
 }
 
+// ===== Estado del formulario de abono =====
+// abonoEditingId: si estamos editando un pending, su id. null = nuevo.
+// abonoCapture: foto capturada/cargada {base64, mime}. null = sin foto.
+let abonoEditingId = null;
+let abonoCapture = null;
+
+// Inicializa pg-abono en modo "nuevo" — limpia campos, fecha hoy, sin foto.
+function newAbono(){
+  abonoEditingId = null;
+  abonoCapture = null;
+  document.getElementById('ab-tipo').value = 'REPOSICION';
+  document.getElementById('ab-fecha').value = today();
+  document.getElementById('ab-monto').value = '';
+  document.getElementById('ab-ref').value = '';
+  document.getElementById('ab-err').style.display = 'none';
+  document.getElementById('ab-title').textContent = 'Registrar ingreso';
+  document.getElementById('ab-sub').textContent = 'Ingreso al fondo de obra';
+  document.getElementById('btn-save-abono').textContent = 'Guardar abono';
+  updateAbonoPhotoPreview();
+  show('pg-abono');
+}
+
+// Salir de pg-abono — limpiar estado para no contaminar la próxima entrada.
+function exitAbono(){
+  abonoEditingId = null;
+  abonoCapture = null;
+  show('pg-home');
+}
+
+// Maneja selección de archivo (camera o gallery) para el comprobante.
+function onAbonoFile(inp){
+  const f = inp.files[0];
+  if(!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    const base64 = e.target.result.split(',')[1];
+    abonoCapture = {base64, mime: f.type};
+    updateAbonoPhotoPreview();
+    toast('Comprobante adjuntado', 'ok');
+  };
+  r.readAsDataURL(f);
+  inp.value = '';
+}
+
+// Refresca el preview de foto en pg-abono según estado de abonoCapture.
+function updateAbonoPhotoPreview(){
+  const wrap = document.getElementById('ab-photo-preview');
+  const img = document.getElementById('ab-photo-img');
+  const row = document.getElementById('ab-photo-row');
+  if(abonoCapture){
+    img.src = `data:${abonoCapture.mime || 'image/jpeg'};base64,${abonoCapture.base64}`;
+    wrap.style.display = 'block';
+    row.style.display = 'none';
+  } else {
+    wrap.style.display = 'none';
+    row.style.display = 'grid';
+  }
+}
+
+function abonoRemovePhoto(){
+  if(!confirm('¿Quitar el comprobante adjunto?')) return;
+  abonoCapture = null;
+  updateAbonoPhotoPreview();
+}
+
 async function saveAbono(){
   const err = document.getElementById('ab-err');
   err.style.display = 'none';
@@ -3709,7 +3949,7 @@ async function saveAbono(){
   if(!monto || monto <= 0){ err.textContent = 'Monto inválido'; err.style.display = 'block'; return; }
 
   const entry = {
-    id: 'I-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,6).toUpperCase(),
+    id: abonoEditingId || ('I-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,6).toUpperCase()),
     tipo_registro: 'ABONO',
     proyecto: proj.cod,
     fecha: document.getElementById('ab-fecha').value,
@@ -3718,8 +3958,16 @@ async function saveAbono(){
     referencia: document.getElementById('ab-ref').value.trim(),
     usuario: localStorage.getItem(LS.EMAIL),
   };
-  await dbAdd('pending', entry);
-  toast('Abono guardado', 'ok');
+  if(abonoCapture){
+    entry.image_base64 = abonoCapture.base64;
+    entry.image_mime = abonoCapture.mime;
+  }
+  await dbAdd('pending', entry);  // .put = upsert (insert o update por id)
+
+  const wasEditing = !!abonoEditingId;
+  abonoEditingId = null;
+  abonoCapture = null;
+  toast(wasEditing ? 'Abono actualizado' : 'Abono guardado', 'ok');
   show('pg-home');
 }
 
@@ -3736,13 +3984,11 @@ async function renderHistory(){
   }
   body.innerHTML = all.map(e => {
     const isAbono = e.tipo_registro === 'ABONO';
-    const canEdit = !isAbono;
     const thumb = e.image_base64
       ? `<img src="data:${e.image_mime || 'image/jpeg'};base64,${e.image_base64}" alt="" onclick="event.stopPropagation();verFoto('${e.id}')" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:block">`
       : `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">${isAbono ? '+' : '−'}</div>`;
-    const clickHandler = canEdit ? `onclick="editarPending('${e.id}')" style="cursor:pointer"` : '';
     return `
-    <div class="card" ${clickHandler}>
+    <div class="card" onclick="editarPending('${e.id}')" style="cursor:pointer">
       <div style="display:flex;gap:12px;align-items:flex-start">
         ${thumb}
         <div style="flex:1;min-width:0">
@@ -3763,7 +4009,10 @@ async function renderHistory(){
           </div>
         </div>
       </div>
-      <button class="btn btn-red" style="margin-top:10px;padding:8px;font-size:12px" onclick="event.stopPropagation();deletePending('${e.id}')">Eliminar</button>
+      <div class="grid2" style="margin-top:10px">
+        <button class="btn btn-amber" style="padding:8px;font-size:12px" onclick="event.stopPropagation();editarPending('${e.id}')">Editar</button>
+        <button class="btn btn-red" style="padding:8px;font-size:12px" onclick="event.stopPropagation();deletePending('${e.id}')">Eliminar</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -3799,10 +4048,15 @@ async function syncAll(){
     const gastos = all.filter(e => e.tipo_registro === 'GASTO');
     const abonos = all.filter(e => e.tipo_registro === 'ABONO');
 
-    // 1) Subir imágenes de gastos a Drive y obtener URLs
+    // 1) Subir imágenes de gastos Y abonos (con comprobante) a Drive y obtener URLs
     for(const e of gastos){
       if(e.image_base64){
         e.url_factura = await uploadImage(e);
+      }
+    }
+    for(const e of abonos){
+      if(e.image_base64){
+        e.url_comprobante = await uploadImage(e);
       }
     }
 
@@ -3818,8 +4072,9 @@ async function syncAll(){
       'NO', '', ''
     ]);
     const regRowsEliminado = gastos.map(e => ['NO']);
+    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0061+)
     const ingRows = abonos.map(e => [
-      e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia
+      e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia, e.url_comprobante || ''
     ]);
 
     // 3) Append masivo — escribir A-V primero (sin tocar W=fórmula), luego X=ELIMINADO
@@ -3972,8 +4227,11 @@ async function uploadImage(entry){
   const token = getToken();
   if(!token) throw new Error('Sesión expirada');
 
-  // Estructura nueva: /Caja Chica Master/[Empresa]/Proyectos/[Obra]/Fotos/
-  const projFolderId = await getSubfolderObra(entry.proyecto, 'Fotos');
+  // Estructura nueva: /Caja Chica Master/[Empresa]/Proyectos/[Obra]/Fotos|Comprobantes/
+  // Abonos van a "Comprobantes" para separar de facturas (Fotos) y simplificar auditorías.
+  const isAbono = entry.tipo_registro === 'ABONO';
+  const subfolder = isAbono ? 'Comprobantes' : 'Fotos';
+  const projFolderId = await getSubfolderObra(entry.proyecto, subfolder);
 
   // Convertir base64 a blob
   const binary = atob(entry.image_base64);
@@ -3981,12 +4239,14 @@ async function uploadImage(entry){
   for(let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
   const blob = new Blob([arr], {type: entry.image_mime || 'image/jpeg'});
 
-  // Nombre legible: fecha _ suplidor _ id  (fecha con puntos para orden visual limpio)
-  // Ej: "2026.03.20 _ BRAVO SA _ R-260423-57B0.jpg"
-  const safeSup = (entry.suplidor || 'sin-suplidor').replace(/[^a-zA-Z0-9 -]/g, '').substring(0, 40);
-  const fechaRaw = entry.fecha_factura || today();
+  // Nombre legible: fecha _ etiqueta _ id  (fecha con puntos para orden visual limpio)
+  // GASTO: "2026.03.20 _ BRAVO SA _ R-260423-57B0.jpg"
+  // ABONO: "2026.04.25 _ ABONO REPOSICION _ I-260425-XYZ.jpg"
+  const labelRaw = isAbono ? `ABONO ${entry.tipo || ''}` : (entry.suplidor || 'sin-suplidor');
+  const safeLabel = labelRaw.replace(/[^a-zA-Z0-9 -]/g, '').trim().substring(0, 40);
+  const fechaRaw = (isAbono ? entry.fecha : entry.fecha_factura) || today();
   const fechaDot = fechaRaw.replace(/-/g, '.'); // 2026-03-20 → 2026.03.20
-  const fileName = `${fechaDot} _ ${safeSup} _ ${entry.id}.jpg`;
+  const fileName = `${fechaDot} _ ${safeLabel} _ ${entry.id}.jpg`;
 
   const metadata = {
     name: fileName,
@@ -4176,6 +4436,19 @@ async function repairFormulas(){
       ]]})
     });
 
+    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0061+) — agrega header si falta para que abonos
+    // con foto puedan persistir el link al cheque/comprobante.
+    loading(true, 'Migrando', 'Verificando URL_COMPROBANTE en INGRESOS...');
+    const ingHeaders = await sheetsGet('INGRESOS!A1:G1');
+    const ingHeaderRow = ingHeaders[0] || [];
+    if(!ingHeaderRow.includes('URL_COMPROBANTE')){
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/INGRESOS!G1?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({values: [['URL_COMPROBANTE']]})
+      });
+    }
+
     loading(false);
     toast('Migración completa', 'ok');
     setTimeout(() => refreshBalance(true), 800);
@@ -4229,7 +4502,7 @@ function initReportes(){
   // Llenar dropdown de obras
   const sel = document.getElementById('rep-proyecto');
   sel.innerHTML = '<option value="">— Todas las obras —</option>' +
-    masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
+    masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
 
   // Preseleccionar obra actual
   const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
@@ -4258,7 +4531,7 @@ async function generarReporte(){
   loading(true, 'Generando reporte', 'Leyendo datos del Sheet...');
   try {
     // Leer REGISTRO completo (incluidos headers) e INGRESOS
-    const [regData, ingData] = await sheetsBatchGet(['REGISTRO!A1:Z', 'INGRESOS!A1:F']);
+    const [regData, ingData] = await sheetsBatchGet(['REGISTRO!A1:Z', 'INGRESOS!A1:G']);
     const regAll = regData.values || [];
     const ingAll = ingData.values || [];
     if(regAll.length === 0) throw new Error('REGISTRO vacío');
@@ -4651,7 +4924,7 @@ function initFacturas(){
   // Llenar dropdown de obras
   const sel = document.getElementById('fac-filtro-obra');
   sel.innerHTML = '<option value="">— Todas las obras —</option>' +
-    masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
+    masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
 
   // Restaurar filtros previos si existen (ej. volviendo de editar una factura)
   if(facturasFiltrosState){
@@ -4853,7 +5126,7 @@ function editarFactura(idx){
 
   // Llenar dropdowns
   const pSel = document.getElementById('ed-proj');
-  pSel.innerHTML = masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
+  pSel.innerHTML = masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
   pSel.value = editContext.original.proyecto;
 
   const cSel = document.getElementById('ed-cat');
@@ -4892,8 +5165,27 @@ function editarFactura(idx){
 async function editarPending(id){
   const entry = await dbGet('pending', id);
   if(!entry){ toast('Registro no encontrado', 'err'); return; }
-  if(entry.tipo_registro === 'ABONO'){ toast('Los ingresos pendientes no se editan aún, elimínalo y crea uno nuevo', 'err'); return; }
 
+  // ABONO: cargar formulario de pg-abono en modo edición y navegar
+  if(entry.tipo_registro === 'ABONO'){
+    abonoEditingId = id;
+    abonoCapture = entry.image_base64
+      ? {base64: entry.image_base64, mime: entry.image_mime || 'image/jpeg'}
+      : null;
+    document.getElementById('ab-tipo').value = entry.tipo || 'REPOSICION';
+    document.getElementById('ab-fecha').value = entry.fecha || today();
+    document.getElementById('ab-monto').value = entry.monto || '';
+    document.getElementById('ab-ref').value = entry.referencia || '';
+    document.getElementById('ab-err').style.display = 'none';
+    document.getElementById('ab-title').innerHTML = 'Editar abono <span style="color:var(--amber);font-weight:500;font-size:13px">(sin sincronizar)</span>';
+    document.getElementById('ab-sub').textContent = 'ID: ' + entry.id;
+    document.getElementById('btn-save-abono').textContent = 'Guardar cambios';
+    updateAbonoPhotoPreview();
+    show('pg-abono');
+    return;
+  }
+
+  // GASTO: editor completo (pg-editar)
   // Decidir dónde volver (del home o del historial)
   const currentPage = document.querySelector('.page.on')?.id || 'pg-home';
   const returnTo = currentPage === 'pg-history' ? 'pg-history' : 'pg-home';
@@ -4925,7 +5217,7 @@ async function editarPending(id){
 
   // Llenar dropdowns
   const pSel = document.getElementById('ed-proj');
-  pSel.innerHTML = masters.projects.map(p => `<option value="${p.cod}">${p.cod} · ${p.nombre}</option>`).join('');
+  pSel.innerHTML = masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
   pSel.value = editContext.original.proyecto;
 
   const cSel = document.getElementById('ed-cat');
@@ -5337,6 +5629,52 @@ async function eliminarFacturaPermanente(idx){
     loading(false);
     toast('Error: ' + e.message, 'err');
     console.error(e);
+  }
+}
+
+// ============================================================
+// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0061)
+// El flujo elimina el estado "PENDIENTE" porque no se usaba en la práctica.
+// Los registros históricos con APROBADO=PENDIENTE pasan a REVISAR para que
+// aparezcan en "Por revisar" del home y el usuario decida SI/NO.
+// ============================================================
+async function migratePendienteToRevisar(){
+  if(!confirm('Esto buscará registros con APROBADO=PENDIENTE en el Sheet y los cambiará a REVISAR. ¿Continuar?')) return;
+  loading(true, 'Migrando', 'Leyendo registros...');
+  try {
+    const ssid = getActiveSheetId();
+    if(!ssid) throw new Error('No hay empresa activa');
+    const rows = await sheetsGet('REGISTRO!A1:Z') || [];
+    if(rows.length < 2){ loading(false); toast('No hay registros', 'ok'); return; }
+    const headers = rows[0];
+    const aprobadoCol = headers.indexOf('APROBADO');
+    if(aprobadoCol < 0) throw new Error('Columna APROBADO no encontrada');
+
+    // Recolectar updates: índice de fila (1-based + 1 por header) → "REVISAR"
+    const updates = [];
+    for(let i = 1; i < rows.length; i++){
+      if((rows[i][aprobadoCol] || '').toUpperCase() === 'PENDIENTE'){
+        const rowNum = i + 1;  // 1-based + sheets row number
+        const colLetter = String.fromCharCode(65 + aprobadoCol);
+        updates.push({range: `REGISTRO!${colLetter}${rowNum}`, values: [['REVISAR']]});
+      }
+    }
+
+    if(updates.length === 0){ loading(false); toast('No hay registros con PENDIENTE', 'ok'); return; }
+
+    loading(true, 'Migrando', `Actualizando ${updates.length} registro(s)...`);
+    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchUpdate`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: updates})
+    });
+    loading(false);
+    toast(`${updates.length} registro(s) migrados a REVISAR`, 'ok');
+    invalidateRevisarCache();
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error('[migratePendienteToRevisar]', e);
   }
 }
 
