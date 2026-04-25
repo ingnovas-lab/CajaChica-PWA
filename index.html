@@ -251,7 +251,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="ibtn" onclick="show('pg-settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </div>
-      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0065</div>
+      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0066</div>
     </div>
   </div>
   <div class="body">
@@ -1015,7 +1015,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
         </div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text3)">v.0065</span></div>
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text3)">v.0066</span></div>
           <div style="font-size:11px;color:var(--text2);margin-top:1px">Trae la última versión sin perder sesión</div>
         </div>
       </div>
@@ -1024,7 +1024,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
     <!-- Consolidar facturas: queda detallada (config one-time + acción) -->
     <div class="card" data-admin-only>
-      <h3>Consolidar facturas</h3>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </div>
+        <h3 style="margin:0">Consolidar facturas</h3>
+      </div>
       <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Las fotos subidas por otros usuarios viven en sus Drives. El Apps Script las copia a tu Drive automáticamente todos los días a las 10 PM, y puedes ejecutarlo manualmente aquí.<br><strong style="color:var(--amber)">Nota:</strong> consolida todos los proyectos de la <strong style="color:var(--text)">empresa activa</strong>. Para otra empresa, cámbiala primero.</div>
 
       <div class="field">
@@ -1044,7 +1049,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div class="card" data-admin-only>
-      <h3>Mantenimiento</h3>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.121 2.121 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+        </div>
+        <h3 style="margin:0">Mantenimiento</h3>
+      </div>
       <button class="btn btn-amber" onclick="repairFormulas()">Reparar fórmulas del Dashboard</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO, URL_COMPROBANTE) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
       <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="margin-top:10px">Sincronizar archivos con Sheet</button>
@@ -1054,15 +1064,19 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div class="card">
-      <h3>Ayuda</h3>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.7">
-        Guía rápida de uso de la app. ¿Dudas? Contacta a:<br>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <h3 style="margin:0">Ayuda · Contacto</h3>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.5">
         👤 <span style="color:var(--amber);font-weight:600">Ing. Joel Novas</span><br>
         📞 <a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a><br>
         ✉️ <a href="mailto:ingnovas@gmail.com" style="color:var(--amber);text-decoration:none;font-weight:600">ingnovas@gmail.com</a>
       </div>
-      <button class="btn btn-blue" onclick="show('pg-help')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <button class="btn btn-blue" onclick="show('pg-help')" style="padding:8px;font-size:12px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         Ver guía de uso
       </button>
     </div>
@@ -1370,7 +1384,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version">v.0065</span><br>
+      Control de Caja Chica · <span id="help-version">v.0066</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1386,7 +1400,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0065';
+const APP_VERSION = '0066';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1543,7 +1557,7 @@ function show(id){
   if(id==='pg-proj-select') renderProjects();
   if(id==='pg-select-company') renderCompanyList();
   if(id==='pg-settings'){
-    document.getElementById('set-email').textContent = localStorage.getItem(LS.NAME) || localStorage.getItem(LS.EMAIL) || '—';
+    document.getElementById('set-email').textContent = getDisplayName();
     const activeSheetId = getActiveSheetId();
     // Mostrar solo los últimos 8 caracteres del Sheet ID — el ID completo es ruido visual.
     // El admin puede copiar el ID completo desde el Sheet abierto si lo necesita.
@@ -3421,6 +3435,19 @@ function isAdmin(){
   return masters.myRole === 'ADMIN';
 }
 
+// Nombre del usuario para mostrar en UI. Prioridad:
+// 1. Hoja USUARIOS — nombre custom que el admin definió. Es la fuente "oficial".
+// 2. info.name de Google (cacheado en LS.NAME) — fallback si masters aún no cargó.
+// 3. Email — última opción.
+function getDisplayName(){
+  const email = (localStorage.getItem(LS.EMAIL) || '').trim().toLowerCase();
+  if(email && masters && Array.isArray(masters.users)){
+    const me = masters.users.find(u => (u.email || '').toLowerCase() === email);
+    if(me && me.nombre) return me.nombre;
+  }
+  return localStorage.getItem(LS.NAME) || email || '—';
+}
+
 // Aplicar visibilidad de elementos restringidos a ADMIN
 function applyRoleUI(){
   const admin = isAdmin();
@@ -3430,7 +3457,7 @@ function applyRoleUI(){
 }
 
 // ============================================================
-// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0065
+// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0066
 // Modal con add/edit. Los registros guardan el COD (MAT, MOB...) — renombrar
 // nombre es non-destructivo; solo cambia lo que se muestra. Agregar es append a
 // CATEGORIAS sheet con COD auto-generado a partir de los primeros 3 caracteres
@@ -3720,7 +3747,7 @@ async function refreshHome(){
     document.getElementById('proj-code').textContent = '0 obras';
   }
 
-  document.getElementById('user-email').textContent = localStorage.getItem(LS.NAME) || localStorage.getItem(LS.EMAIL) || '—';
+  document.getElementById('user-email').textContent = getDisplayName();
 
   // Stats pendientes locales (solo del proyecto activo; si no hay proj, contar 0)
   const pending = await dbGetAll('pending');
@@ -4242,7 +4269,7 @@ async function syncAll(){
       'NO', '', ''
     ]);
     const regRowsEliminado = gastos.map(e => ['NO']);
-    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0065+)
+    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0066+)
     const ingRows = abonos.map(e => [
       e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia, e.url_comprobante || ''
     ]);
@@ -4492,6 +4519,44 @@ async function sharePhotoWithAdmins(fileId){
   }
 }
 
+// Comparte una CARPETA con todos los admins + SUPER_ADMIN. Las carpetas Drive
+// propagan permisos a hijos automáticamente, así que compartir la carpeta de
+// una obra basta para que admins vean Fotos/Comprobantes/Reportes/Papelera.
+// Usado en saveNewProj para que cuando un USUARIO cree una obra, su admin la
+// vea aparecer en "Compartido conmigo" en su Drive sin acción manual.
+async function shareFolderWithAdmins(folderId, role = 'writer'){
+  try {
+    const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
+    const targets = new Set();
+    (masters.users || []).forEach(u => {
+      if((u.rol || '').toUpperCase() === 'ADMIN' && u.email) targets.add(u.email.toLowerCase());
+    });
+    targets.add(SUPER_ADMIN_EMAIL.toLowerCase());
+    targets.delete(myEmail);  // no compartir conmigo mismo
+
+    if(targets.size === 0) return;
+
+    const token = getToken();
+    if(!token) return;
+    for(const email of targets){
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=false&supportsAllDrives=true`, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({role, type: 'user', emailAddress: email})
+        });
+      } catch(e){
+        console.warn(`[shareFolder] No se pudo compartir folder ${folderId} con ${email}:`, e);
+      }
+    }
+  } catch(e){
+    console.warn('[shareFolder] Error general:', e);
+  }
+}
+
 // ============================================================
 // UTILIDADES
 // ============================================================
@@ -4606,7 +4671,7 @@ async function repairFormulas(){
       ]]})
     });
 
-    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0065+) — agrega header si falta para que abonos
+    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0066+) — agrega header si falta para que abonos
     // con foto puedan persistir el link al cheque/comprobante.
     loading(true, 'Migrando', 'Verificando URL_COMPROBANTE en INGRESOS...');
     const ingHeaders = await sheetsGet('INGRESOS!A1:G1');
@@ -4864,8 +4929,23 @@ async function generarPDFFotos(params){
       </button>
     `;
   } catch(e){
-    banner.style.cssText = 'background:rgba(239,68,68,0.12);border:1px solid var(--red);border-radius:var(--r);padding:12px 14px;margin-top:14px;font-size:13px;color:var(--red)';
-    banner.innerHTML = `✗ Error generando PDF de fotos: ${e.message}`;
+    banner.style.cssText = 'background:rgba(239,68,68,0.12);border:1px solid var(--red);border-radius:var(--r);padding:12px 14px;margin-top:14px;font-size:13px;color:var(--red);line-height:1.5';
+    // "Load failed" / TypeError suelen ser timeout o crash del Apps Script con muchas
+    // facturas. Ofrecemos guía accionable en lugar de mostrar el error técnico crudo.
+    const msg = (e.message || '').toString();
+    const probableTimeout = /load failed|failed to fetch|networkerror|timeout/i.test(msg);
+    if(probableTimeout){
+      banner.innerHTML = `
+        <div style="font-weight:600;margin-bottom:4px">✗ El PDF tardó demasiado y se cortó</div>
+        <div style="font-size:12px">Apps Script tiene un límite de 6 minutos. Para reportes con más de ~80 facturas con foto, intenta:</div>
+        <ul style="margin:6px 0 0 18px;padding:0;font-size:12px">
+          <li>Filtrar por un rango de fechas más estrecho.</li>
+          <li>Filtrar por número de reporte específico.</li>
+          <li>Si el problema persiste con pocas facturas, revisa la hoja LOG_CONSOLIDACION del Sheet por errores del script.</li>
+        </ul>`;
+    } else {
+      banner.innerHTML = `✗ Error generando PDF de fotos: ${msg}`;
+    }
     console.error('[generarPDFFotos]', e);
   }
 }
@@ -5054,13 +5134,21 @@ async function createProject(){
     }
 
     // 3) Crear carpetas en Drive con estructura multi-empresa
-    // /Caja Chica Master/[Empresa]/Proyectos/[Nombre Obra]/{Fotos, Reportes, Papelera}
+    // /Caja Chica Master/[Empresa]/Proyectos/[Nombre Obra]/{Fotos, Comprobantes, Reportes, Papelera}
     loading(true, 'Creando obra', 'Creando carpetas en Drive...');
     const proyectosId = await getProyectosFolderId();
     const obraFolderId = await ensureFolder(nombre, proyectosId);
     await ensureFolder('Fotos', obraFolderId);
+    await ensureFolder('Comprobantes', obraFolderId);  // v.0061+ para fotos de cheques/abonos
     await ensureFolder('Reportes', obraFolderId);
     await ensureFolder('Papelera', obraFolderId);
+
+    // 3.5) Compartir la carpeta de la obra con admins/SUPER_ADMIN automáticamente.
+    // Drive propaga permisos a hijos: con compartir el folder de la obra, todas
+    // las subcarpetas (Fotos, Comprobantes, etc.) quedan visibles para el admin
+    // en "Compartido conmigo". Sin esto, el admin nunca ve la estructura nueva.
+    loading(true, 'Creando obra', 'Compartiendo carpetas con admins...');
+    await shareFolderWithAdmins(obraFolderId);
 
     // 4) Refrescar masters y seleccionar la nueva obra
     await loadMasters();
@@ -5803,7 +5891,7 @@ async function eliminarFacturaPermanente(idx){
 }
 
 // ============================================================
-// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0065)
+// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0066)
 // El flujo elimina el estado "PENDIENTE" porque no se usaba en la práctica.
 // Los registros históricos con APROBADO=PENDIENTE pasan a REVISAR para que
 // aparezcan en "Por revisar" del home y el usuario decida SI/NO.
