@@ -251,7 +251,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="ibtn" onclick="show('pg-settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </div>
-      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0061</div>
+      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0062</div>
     </div>
   </div>
   <div class="body">
@@ -1020,7 +1020,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="margin-top:10px">Sincronizar archivos con Sheet</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
       <button class="btn btn-amber" onclick="migratePendienteToRevisar()" style="margin-top:10px">Migrar APROBADO=PENDIENTE → REVISAR</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">v.0061 elimina la opción "PENDIENTE" del flujo. Esto convierte registros históricos PENDIENTE a REVISAR para que aparezcan en "Por revisar".</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">v.0061 eliminó la opción "PENDIENTE" del flujo. Esto convierte registros históricos PENDIENTE a REVISAR para que aparezcan en "Por revisar".</div>
       <button class="btn btn-red" onclick="resetApp()" style="margin-top:10px">Borrar todo y empezar de cero</button>
     </div>
 
@@ -1031,7 +1031,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px">
-      Control de Caja Chica · <span id="settings-version">v.0061</span>
+      Control de Caja Chica · <span id="settings-version">v.0062</span>
     </div>
   </div>
 </div>
@@ -1260,7 +1260,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px">
-      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0061</span><br>
+      Control de Caja Chica — Guía de usuario — <span id="help-version">v.0062</span><br>
       Ing. Joel Novas
     </div>
   </div>
@@ -1276,7 +1276,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0061';
+const APP_VERSION = '0062';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3278,7 +3278,7 @@ function applyRoleUI(){
 }
 
 // ============================================================
-// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0061
+// GESTIÓN DE CATEGORÍAS (ADMIN)  — v.0062
 // Modal con add/edit. Los registros guardan el COD (MAT, MOB...) — renombrar
 // nombre es non-destructivo; solo cambia lo que se muestra. Agregar es append a
 // CATEGORIAS sheet con COD auto-generado a partir de los primeros 3 caracteres
@@ -3606,9 +3606,9 @@ async function refreshHome(){
   if(myPending.length > 0){
     rw.style.display = 'block';
     box.innerHTML = myPending.slice(0, 3).map(p => {
-      // ABONO no se edita por ahora (solo se elimina desde "Ver pendientes")
-      const canEdit = p.tipo_registro === 'GASTO';
-      const clickHandler = canEdit ? `onclick="editarPending('${p.id}')" style="cursor:pointer"` : '';
+      // Tanto GASTO como ABONO son editables — editarPending detecta el tipo y carga
+      // el formulario apropiado (pg-editar para GASTO, pg-abono para ABONO).
+      const clickHandler = `onclick="editarPending('${p.id}')" style="cursor:pointer"`;
       const thumb = p.image_base64
         ? `<img src="data:${p.image_mime || 'image/jpeg'};base64,${p.image_base64}" alt="" onclick="event.stopPropagation();verFoto('${p.id}')" style="width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer;display:block">`
         : `<div class="entry-icon">${p.tipo_registro === 'ABONO' ? '+' : '−'}</div>`;
@@ -4072,7 +4072,7 @@ async function syncAll(){
       'NO', '', ''
     ]);
     const regRowsEliminado = gastos.map(e => ['NO']);
-    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0061+)
+    // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0062+)
     const ingRows = abonos.map(e => [
       e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia, e.url_comprobante || ''
     ]);
@@ -4436,7 +4436,7 @@ async function repairFormulas(){
       ]]})
     });
 
-    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0061+) — agrega header si falta para que abonos
+    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0062+) — agrega header si falta para que abonos
     // con foto puedan persistir el link al cheque/comprobante.
     loading(true, 'Migrando', 'Verificando URL_COMPROBANTE en INGRESOS...');
     const ingHeaders = await sheetsGet('INGRESOS!A1:G1');
@@ -5633,7 +5633,7 @@ async function eliminarFacturaPermanente(idx){
 }
 
 // ============================================================
-// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0061)
+// MIGRACIÓN APROBADO=PENDIENTE → REVISAR  (v.0062)
 // El flujo elimina el estado "PENDIENTE" porque no se usaba en la práctica.
 // Los registros históricos con APROBADO=PENDIENTE pasan a REVISAR para que
 // aparezcan en "Por revisar" del home y el usuario decida SI/NO.
