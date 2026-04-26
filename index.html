@@ -253,7 +253,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="ibtn" onclick="show('pg-settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </div>
-      <div id="home-version" style="font-size:8px;color:var(--text3);font-family:var(--mono);line-height:1">v.0067</div>
+      <div id="home-version" style="font-size:8px;color:var(--text);font-family:var(--mono);line-height:1">v.0067</div>
     </div>
   </div>
   <div class="body">
@@ -920,6 +920,13 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div class="lbl">Obra</div>
         <select id="rep-proyecto"></select>
       </div>
+      <div class="field">
+        <div class="lbl">Tipo de informe</div>
+        <select id="rep-tipo">
+          <option value="ejecutivo">Ejecutivo Corporativo</option>
+          <option value="contabilidad">Contabilidad / Soporte Fiscal</option>
+        </select>
+      </div>
       <div class="grid2">
         <div class="field">
           <div class="lbl">Desde</div>
@@ -1017,7 +1024,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
         </div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text3)">v.0067</span></div>
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text)">v.0067</span></div>
           <div style="font-size:11px;color:var(--text2);margin-top:1px">Trae la última versión sin perder sesión</div>
         </div>
       </div>
@@ -1386,7 +1393,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version">v.0067</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0067</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1402,7 +1409,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0081';
+const APP_VERSION = '0082';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1423,6 +1430,7 @@ const LS = {
   CURRENT_COMPANY: 'cc_current_company', // código de empresa activa
   LAST_REPORTE: 'cc_last_reporte', // último NO_REPORTE usado, para auto-llenar el siguiente registro
   PENDING_USER_CONFIG_SAVE: 'cc_pending_user_config_save', // flag: hay cambios de config pendientes de subir a Drive
+  REPORTE_TIPO: 'cc_reporte_tipo', // 'ejecutivo' | 'contabilidad' — última selección del tipo de informe
 };
 
 // Email del SUPER_ADMIN (pasaporte universal, crea y ve todas las empresas)
@@ -4780,6 +4788,10 @@ function initReportes(){
   document.getElementById('rep-hasta').value = hoy.toISOString().slice(0,10);
   document.getElementById('rep-numero').value = '';
 
+  // Restaurar última selección de tipo de informe
+  const tipoGuardado = localStorage.getItem(LS.REPORTE_TIPO) || 'ejecutivo';
+  document.getElementById('rep-tipo').value = tipoGuardado;
+
   // Ocultar resultado previo
   document.getElementById('rep-resultado').style.display = 'none';
 }
@@ -4789,6 +4801,13 @@ async function generarReporte(){
   const desde = document.getElementById('rep-desde').value;
   const hasta = document.getElementById('rep-hasta').value;
   const numero = document.getElementById('rep-numero').value.trim();
+  const tipoInforme = document.getElementById('rep-tipo').value || 'ejecutivo';
+
+  // Persistir selección y avisar si la plantilla aún no está implementada (v.0083 pendiente)
+  localStorage.setItem(LS.REPORTE_TIPO, tipoInforme);
+  if(tipoInforme === 'contabilidad'){
+    toast('Plantilla "Contabilidad" en desarrollo — generando Ejecutivo Corporativo');
+  }
 
   if(!desde || !hasta){ toast('Selecciona fechas', 'err'); return; }
   if(desde > hasta){ toast('La fecha desde es mayor que hasta', 'err'); return; }
