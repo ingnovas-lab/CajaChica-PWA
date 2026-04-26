@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0079';
+const APP_VERSION = '0080';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5291,7 +5291,7 @@ async function generarPDFFotos(params){
     const token = getToken();
     if(!token) throw new Error('Sesión expirada');
 
-    const {filtrados, regH, desde, hasta, numero, nombreObra} = params;
+    const {filtrados, regH, desde, hasta, numero, nombreObra, codObra} = params;
     if(!filtrados || filtrados.length === 0){ banner.remove(); return; }
 
     // 1. Normalizar filas
@@ -5399,15 +5399,24 @@ async function generarPDFFotos(params){
     }
     const pdfBlob = pdf.output('blob');
 
-    // 7. Subir a Drive — TODOS los PDFs van a /Empresa/Reportes/
-    // Razón: drive.file scope solo permite ver archivos que ESTA PWA creó.
-    // Si las carpetas de obras ya existen (creadas por Apps Script u otro OAuth
-    // client), la PWA no las encuentra y termina duplicándolas. Evitamos ese
-    // problema guardando todo en una única carpeta plana. El filename incluye
-    // la obra para identificación (ej: "Soporte Caja Chica _ Vitalia Capi _ ...pdf").
+    // 7. Subir a Drive — ubicación según el alcance del reporte (v.0080)
+    // - Single project (codObra presente): /Empresa/Proyectos/[Obra]/Reportes/
+    // - Consolidado (codObra vacío): /Empresa/Proyectos/Todas las obras/Reportes/
+    // Riesgo conocido: drive.file scope solo permite ver archivos que ESTA PWA creó.
+    // Si las carpetas de obras fueron creadas externamente (Apps Script u otro OAuth
+    // client), la PWA podría duplicarlas. Para proyectos donde la PWA ya subió fotos,
+    // las carpetas existen y se reusan limpio.
     setStatus('Subiendo a Drive…');
-    const empresaId = await getCompanyFolderId();
-    const reportesId = await ensureFolder('Reportes', empresaId);
+    let reportesId;
+    if(codObra){
+      // /Caja Chica Master/[Empresa]/Proyectos/[Obra]/Reportes/
+      reportesId = await getSubfolderObra(codObra, 'Reportes');
+    } else {
+      // /Caja Chica Master/[Empresa]/Proyectos/Todas las obras/Reportes/
+      const proyectosId = await getProyectosFolderId();
+      const todasLasObrasId = await ensureFolder('Todas las obras', proyectosId);
+      reportesId = await ensureFolder('Reportes', todasLasObrasId);
+    }
 
     const fechaGenDot = new Date().toISOString().slice(0,10).replace(/-/g, '.');
     const desdeDot = (desde || '').replace(/-/g, '.');
