@@ -1425,7 +1425,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0092';
+const APP_VERSION = '0093';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1831,6 +1831,8 @@ function initGoogleAuth(){
         access_token: resp.access_token,
         expires_at: Date.now() + (resp.expires_in - 60) * 1000
       }));
+      // Check de versión silencioso (v.0093) — relogin es buen momento para detectar update.
+      _checkForUpdate();
       // Obtener email del usuario
       try {
         const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -2267,6 +2269,8 @@ async function selectCompany(nombre){
   }
 
   show('pg-home');
+  // Check de versión silencioso (v.0093) — recarga si hay update.
+  _checkForUpdate();
 }
 
 // ============================================================
@@ -4057,6 +4061,8 @@ function selectProject(p){
   delete cache[p.cod];
   localStorage.setItem(LS.BALCACHE, JSON.stringify(cache));
   show('pg-home');
+  // Check de versión silencioso (v.0093) — recarga si hay update.
+  _checkForUpdate();
 }
 
 // ============================================================
@@ -4895,6 +4901,30 @@ function resetApp(){
 // Limpia caché del Service Worker y recarga la página con la última versión.
 // NO toca localStorage ni IndexedDB — la sesión, claves y pendientes se mantienen.
 // Es la salida segura cuando una versión vieja del HTML quedó cacheada en el celular.
+// Check de versión liviano (v.0093). Hace 1 fetch a ./index.html con cache no-store,
+// extrae APP_VERSION del response y lo compara con la versión en memoria.
+// Si difiere, hace location.reload() (sin borrar caches ni desregistrar SW —
+// el SW network-first ya tiene el HTML nuevo, así que el reload es rápido).
+// Pensado para llamarse en triggers de navegación (login, cambio empresa/proyecto)
+// sin bloquear el flujo. Falla silenciosa si no hay red.
+async function _checkForUpdate(){
+  try {
+    const r = await fetch('./index.html?v=' + Date.now(), {cache:'no-store'});
+    if(!r.ok) return false;
+    const text = await r.text();
+    const m = text.match(/const\s+APP_VERSION\s*=\s*'(\d+)'/);
+    if(!m) return false;
+    const remote = m[1];
+    if(remote === APP_VERSION) return false;
+    console.log('[checkForUpdate] versión nueva detectada:', APP_VERSION, '→', remote, '— recargando');
+    // Pequeño delay para que el toast/UI termine antes del reload
+    setTimeout(() => location.reload(), 200);
+    return true;
+  } catch(e){
+    return false;
+  }
+}
+
 async function forceAppUpdate(){
   if(!confirm('Limpiar caché y recargar para aplicar la última versión publicada?')) return;
   try {
