@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0070';
+const APP_VERSION = '0071';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5355,20 +5355,15 @@ async function generarPDFFotos(params){
     }
     const pdfBlob = pdf.output('blob');
 
-    // 7. Subir a Drive
-    // - Si hay obra específica (codObra): /Empresa/Proyectos/<obra>/Reportes/
-    //   Reusa carpetas que la PWA ya creó al subir fotos (visibles con drive.file scope).
-    // - Si es consolidado (sin codObra): /Empresa/Reportes/
-    //   Evita crear "Todas las obras" duplicado: la carpeta existente la creó Apps Script
-    //   y la PWA no la ve (drive.file scope solo ve files que ELLA creó).
+    // 7. Subir a Drive — TODOS los PDFs van a /Empresa/Reportes/
+    // Razón: drive.file scope solo permite ver archivos que ESTA PWA creó.
+    // Si las carpetas de obras ya existen (creadas por Apps Script u otro OAuth
+    // client), la PWA no las encuentra y termina duplicándolas. Evitamos ese
+    // problema guardando todo en una única carpeta plana. El filename incluye
+    // la obra para identificación (ej: "Soporte Caja Chica _ Vitalia Capi _ ...pdf").
     setStatus('Subiendo a Drive…');
-    let reportesId;
-    if (codObra) {
-      reportesId = await getSubfolderObra(codObra, 'Reportes');
-    } else {
-      const empresaId = await getCompanyFolderId();
-      reportesId = await ensureFolder('Reportes', empresaId);
-    }
+    const empresaId = await getCompanyFolderId();
+    const reportesId = await ensureFolder('Reportes', empresaId);
 
     const fechaGenDot = new Date().toISOString().slice(0,10).replace(/-/g, '.');
     const desdeDot = (desde || '').replace(/-/g, '.');
