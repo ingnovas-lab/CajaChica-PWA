@@ -1400,7 +1400,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0067';
+const APP_VERSION = '0068';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3392,36 +3392,64 @@ async function geminiOCR(imageBase64){
 Si no ves un campo, déjalo vacío o 0.`;
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=' + key;
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      contents: [{parts: [
-        {text: prompt},
-        {inline_data: {mime_type: 'image/jpeg', data: compressed}}
-      ]}],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: schema,
-        temperature: 0
-      }
-    })
+  const body = JSON.stringify({
+    contents: [{parts: [
+      {text: prompt},
+      {inline_data: {mime_type: 'image/jpeg', data: compressed}}
+    ]}],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+      temperature: 0
+    }
   });
 
-  // Capturar error detallado de Google (mucho más útil que "HTTP 429" genérico)
-  if(!r.ok){
-    let detail = '';
-    try {
-      const errBody = await r.json();
-      detail = errBody.error?.message || JSON.stringify(errBody).substring(0, 300);
-    } catch { detail = 'HTTP ' + r.status; }
-    console.error('Gemini error completo:', detail);
-    throw new Error('Gemini (' + r.status + '): ' + detail.substring(0, 250));
+  // Reintento automático: cuando Gemini responde 429 (rate limit por minuto) o 503
+  // (overloaded), el body trae un campo `retryDelay` (ej: "23s") indicando cuánto
+  // esperar. Hacemos UN reintento silencioso si el delay es razonable (<60s); así
+  // el usuario no ve el error en picos transitorios. Si el delay es mayor (cuota
+  // diaria, billing problem) fallamos inmediato — no tiene sentido hacerlo esperar.
+  const MAX_ATTEMPTS = 2;
+  const MAX_WAIT_MS = 60000;
+  let lastErrDetail = '';
+  let lastErrStatus = 0;
+
+  for(let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++){
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body
+    });
+
+    if(r.ok){
+      const d = await r.json();
+      if(!d.candidates || !d.candidates[0]) throw new Error('Gemini no devolvió resultado');
+      return JSON.parse(d.candidates[0].content.parts[0].text);
+    }
+
+    let errBody = null;
+    try { errBody = await r.json(); } catch { /* sin body JSON */ }
+    lastErrStatus = r.status;
+    lastErrDetail = errBody?.error?.message || ('HTTP ' + r.status);
+
+    const isRetryable = (r.status === 429 || r.status === 503);
+    if(!isRetryable || attempt === MAX_ATTEMPTS) break;
+
+    // Extraer retryDelay del RetryInfo de Google. Formato: "23s" o "0.5s".
+    let waitMs = 5000;
+    const details = errBody?.error?.details || [];
+    const retryInfo = details.find(d => (d['@type'] || '').includes('RetryInfo'));
+    if(retryInfo?.retryDelay){
+      const m = retryInfo.retryDelay.match(/^([\d.]+)s$/);
+      if(m) waitMs = Math.round(parseFloat(m[1]) * 1000);
+    }
+    if(waitMs > MAX_WAIT_MS) break;
+    console.warn('Gemini ' + r.status + ' — reintentando en ' + Math.round(waitMs/1000) + 's...');
+    await new Promise(res => setTimeout(res, waitMs));
   }
 
-  const d = await r.json();
-  if(!d.candidates || !d.candidates[0]) throw new Error('Gemini no devolvió resultado');
-  return JSON.parse(d.candidates[0].content.parts[0].text);
+  console.error('Gemini error completo:', lastErrDetail);
+  throw new Error('Gemini (' + lastErrStatus + '): ' + lastErrDetail.substring(0, 250));
 }
 
 // ============================================================
