@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0071';
+const APP_VERSION = '0072';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5244,7 +5244,27 @@ async function generarPDFFotos(params){
     <div class="progress" style="flex:1;color:var(--blue)">Preparando datos del reporte…</div>
   `;
   container.appendChild(banner);
-  const setStatus = (msg) => { const p = banner.querySelector('.progress'); if(p) p.textContent = msg; };
+
+  // Overlay full-screen que cubre la pantalla mientras se genera el PDF.
+  // Razón: el contenedor de render TIENE que estar visible para que el browser
+  // lo pinte (opacity:0.01 / left:-99999px no son suficientes en algunos browsers).
+  // Lo ponemos visible con z-index 9999 y el overlay encima con z-index 99999.
+  // Resultado: html2canvas captura el reporte renderizado real, el usuario solo
+  // ve el overlay con "Generando PDF…".
+  const overlay = document.createElement('div');
+  overlay.id = 'pdf-gen-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.96);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px';
+  overlay.innerHTML = `
+    <div class="spinner" style="width:44px;height:44px;border:3px solid rgba(255,255,255,0.2);border-top-color:#d97706;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+    <div id="pdf-gen-msg" style="font-size:15px;font-weight:600">Preparando datos del reporte…</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.7);max-width:300px;line-height:1.5">No cierres esta pestaña. El proceso puede tardar 30–90 s según la cantidad de facturas.</div>
+  `;
+  document.body.appendChild(overlay);
+
+  const setStatus = (msg) => {
+    const p = banner.querySelector('.progress'); if(p) p.textContent = msg;
+    const o = document.getElementById('pdf-gen-msg'); if(o) o.textContent = msg;
+  };
 
   let renderRoot = null;
   try {
@@ -5331,15 +5351,23 @@ async function generarPDFFotos(params){
       document.head.appendChild(style);
     }
 
-    // 5. Renderizar HTML en container invisible pero LAYOUT-VISIBLE
-    // (left:-99999px hace que algunos browsers salten el layout/paint y html2canvas
-    //  capture canvases vacíos. opacity:0.01 + z-index:-1 mantiene el layout).
+    // 5. Renderizar HTML VISIBLE pero TAPADO por el overlay full-screen.
+    // El browser TIENE que pintarlo de verdad para que html2canvas lo capture
+    // (opacity:0 / left:-99999px / visibility:hidden hacen que algunos browsers
+    // — especialmente mobile Safari — salten el paint y devuelvan canvases vacíos).
+    // El overlay (z-index:99999) tapa visualmente al renderRoot (z-index:9999).
     setStatus('Construyendo reporte…');
     renderRoot = document.createElement('div');
-    renderRoot.style.cssText = 'position:fixed;left:0;top:0;width:8.5in;background:#fff;opacity:0.01;z-index:-1;pointer-events:none';
+    renderRoot.style.cssText = 'position:fixed;left:0;top:0;width:8.5in;background:#fff;z-index:9999;overflow:visible';
     renderRoot.innerHTML = _buildPDFReportHTML(reportData);
     document.body.appendChild(renderRoot);
-    await new Promise(r => setTimeout(r, 100)); // que el browser pinte
+
+    // Esperar a que fonts + imágenes (data URIs) estén realmente decodificadas
+    try { await document.fonts.ready; } catch(e) {}
+    const allImgs = Array.from(renderRoot.querySelectorAll('img'));
+    await Promise.all(allImgs.map(img => img.complete ? Promise.resolve() :
+      new Promise(res => { img.onload = img.onerror = res; })));
+    await new Promise(r => setTimeout(r, 250)); // margen extra para layout final
 
     // 6. Capturar página por página y armar el PDF
     const pages = renderRoot.querySelectorAll('.page');
@@ -5400,6 +5428,7 @@ async function generarPDFFotos(params){
 
     const driveUrl = `https://drive.google.com/file/d/${upData.id}/view`;
     document.body.removeChild(renderRoot); renderRoot = null;
+    overlay.remove();
 
     // 8. Banner de éxito
     banner.style.cssText = 'background:rgba(34,197,94,0.12);border:1px solid var(--green);border-radius:var(--r);padding:14px;margin-top:14px;cursor:pointer;text-align:center';
@@ -5413,6 +5442,7 @@ async function generarPDFFotos(params){
     `;
   } catch(e){
     if(renderRoot && renderRoot.parentNode) renderRoot.parentNode.removeChild(renderRoot);
+    if(overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
     banner.style.cssText = 'background:rgba(239,68,68,0.12);border:1px solid var(--red);border-radius:var(--r);padding:12px 14px;margin-top:14px;font-size:13px;color:var(--red);line-height:1.5';
     banner.innerHTML = `✗ Error generando PDF de fotos: ${e.message || e}`;
     console.error('[generarPDFFotos]', e);
