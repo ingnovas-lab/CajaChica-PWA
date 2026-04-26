@@ -1410,7 +1410,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0089';
+const APP_VERSION = '0090';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5848,7 +5848,7 @@ async function generarPDFFotos(params){
     const token = getToken();
     if(!token) throw new Error('Sesión expirada');
 
-    const {filtrados, regH, desde, hasta, numero, nombreObra} = params;
+    const {filtrados, regH, desde, hasta, numero, nombreObra, codObra} = params;
     const tipoInforme = params.tipoInforme || 'ejecutivo';
     if(!filtrados || filtrados.length === 0){ banner.remove(); return; }
 
@@ -6023,18 +6023,26 @@ async function generarPDFFotos(params){
     }
     const pdfBlob = pdf.output('blob');
 
-    // 7. Subir a Drive — TODOS los PDFs van a /Empresa/Reportes/ (carpeta plana)
-    // Razón: drive.file scope solo permite ver archivos que ESTA PWA creó. Si las
-    // carpetas de obras fueron creadas externamente (Apps Script viejo u otro OAuth
-    // client), la PWA no las encuentra y termina duplicándolas (ej: Vitalia Capi (1)/).
-    // Decisión del usuario (v.0081): mantener scope drive.file por seguridad y
-    // aceptar la carpeta plana. Filename incluye nombre de obra para identificación
-    // (ej: "Soporte Caja Chica _ Vitalia Capi _ ...pdf").
-    // Histórico: v.0080 intentó la jerarquía /Proyectos/[Obra]/Reportes/ pero se
-    // duplicaron carpetas — confirmado en producción con "Vitalia Capi (1)".
+    // 7. Subir a Drive — ubicación según el alcance del reporte (v.0090)
+    // - Single project (codObra presente): /Empresa/Proyectos/[Obra]/Reportes/
+    // - Consolidado (codObra vacío): /Empresa/Proyectos/Todas las obras/Reportes/
+    // Histórico: v.0080 intentó esto y se duplicaron carpetas porque drive.file scope
+    // no veía las carpetas creadas externamente (Apps Script viejo). v.0081 revirtió
+    // a carpeta plana. v.0090 lo restaura porque el usuario saneó manualmente las
+    // carpetas: movió contenido y renombró las "(1)" a sus nombres correctos. La
+    // PWA ahora ve las carpetas de proyectos (las creó originalmente con el ID que
+    // tiene cacheado, solo cambió el display name vía Drive).
     setStatus('Subiendo a Drive…');
-    const empresaId = await getCompanyFolderId();
-    const reportesId = await ensureFolder('Reportes', empresaId);
+    let reportesId;
+    if(codObra){
+      // /Caja Chica Master/[Empresa]/Proyectos/[Obra]/Reportes/
+      reportesId = await getSubfolderObra(codObra, 'Reportes');
+    } else {
+      // /Caja Chica Master/[Empresa]/Proyectos/Todas las obras/Reportes/
+      const proyectosId = await getProyectosFolderId();
+      const todasLasObrasId = await ensureFolder('Todas las obras', proyectosId);
+      reportesId = await ensureFolder('Reportes', todasLasObrasId);
+    }
 
     const fechaGenDot = new Date().toISOString().slice(0,10).replace(/-/g, '.');
     const desdeDot = (desde || '').replace(/-/g, '.');
