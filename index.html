@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0078';
+const APP_VERSION = '0079';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4968,7 +4968,8 @@ function _renderPDFCSS(){
   return [
     '@page{size:letter;margin:0}',
     '.pdf-report *{box-sizing:border-box;margin:0;padding:0}',
-    '.pdf-report{font-family:Helvetica,Arial,sans-serif;color:#1e293b;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
+    '.pdf-report{font-family:Helvetica,Arial,sans-serif;color:#1e293b;-webkit-print-color-adjust:exact;print-color-adjust:exact;-webkit-text-size-adjust:100%;text-size-adjust:100%}',
+    '.pdf-report *{-webkit-text-size-adjust:100%!important;text-size-adjust:100%!important}',
     // CRÍTICO: el SPA tiene su propia clase .page con display:none (línea 26).
     // Sin override explícito de display/min-height, mis pages heredan eso y
     // html2canvas captura canvases de 0×0 → PDF en blanco. Bug de v.0069-v.0073.
@@ -5005,7 +5006,7 @@ function _renderPDFCSS(){
     '.pdf-report .kpi .lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:5px}',
     '.pdf-report .kpi .val{font-size:18px;font-weight:800;color:#1e3a5f;letter-spacing:-.01em;line-height:1}',
     '.pdf-report .kpi .sub{font-size:9px;color:#64748b;margin-top:4px}',
-    '.pdf-report .section-label{font-size:13px;color:#1e3a5f;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:10px;margin-top:16px}',
+    '.pdf-report .section-label{font-size:13px!important;color:#1e3a5f;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:10px;margin-top:16px;line-height:1.2!important;-webkit-text-size-adjust:100%!important;text-size-adjust:100%!important;transform:none!important;zoom:1!important}',
     '.pdf-report table.detail{width:100%;border-collapse:collapse;font-size:10px}',
     '.pdf-report table.detail thead th{background:#1e3a5f;color:#fff;text-align:left;padding:8px 10px;font-size:9px;text-transform:uppercase;letter-spacing:.06em;font-weight:700}',
     '.pdf-report table.detail tbody td{padding:7px 10px;border-bottom:1px solid #f1f5f9;color:#334155}',
@@ -5137,7 +5138,7 @@ function _renderPDFResumen(d, pageNum){
     donut='<div class="chart-box"><div class="chart-title">Distribución por categoría</div><div class="donut-wrap">'+_donutSVG(segs,100)+'<div class="legend">'+leg+'</div></div></div>';
   }
 
-  return '<div class="page"><div class="pg-header"><h2>Resumen Ejecutivo</h2><div class="crumb">'+(d.isMultiProj?'Consolidado por proyecto':'Detalle del proyecto')+'</div></div><div class="pg-body"><div class="kpis">'+kpis+'</div>'+projTbl+'<div class="charts-row">'+donut+'<div class="chart-box bar-chart"><div class="chart-title">'+(d.isMultiProj?'Categorías globales':'Top categorías')+'</div>'+bars+'</div></div><div class="section-label" style="font-size:13px">Distribución por categoría</div><table class="detail"><thead><tr><th>Categoría</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th><th style="text-align:right">%</th></tr></thead><tbody>'+catRows+'<tr class="totals"><td>TOTAL</td><td class="num">'+d.totalFacturas+'</td><td class="num">'+_fmtMoney(d.totalMonto)+'</td><td class="pct">100%</td></tr></tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+' · Resumen ejecutivo</span><span>Pág. '+pageNum+' de '+d.totalPages+'</span></div></div>';
+  return '<div class="page"><div class="pg-header"><h2>Resumen Ejecutivo</h2><div class="crumb">'+(d.isMultiProj?'Consolidado por proyecto':'Detalle del proyecto')+'</div></div><div class="pg-body"><div class="kpis">'+kpis+'</div>'+projTbl+'<div class="charts-row">'+donut+'<div class="chart-box bar-chart"><div class="chart-title">'+(d.isMultiProj?'Categorías globales':'Top categorías')+'</div>'+bars+'</div></div><div class="section-label" style="font-size:13px!important;line-height:1.2!important;-webkit-text-size-adjust:100%!important;transform:none!important;zoom:1!important">Distribución por categoría</div><table class="detail"><thead><tr><th>Categoría</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th><th style="text-align:right">%</th></tr></thead><tbody>'+catRows+'<tr class="totals"><td>TOTAL</td><td class="num">'+d.totalFacturas+'</td><td class="num">'+_fmtMoney(d.totalMonto)+'</td><td class="pct">100%</td></tr></tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+' · Resumen ejecutivo</span><span>Pág. '+pageNum+' de '+d.totalPages+'</span></div></div>';
 }
 
 function _renderPDFProjDivider(proj, pIdx, totProjs, grandTotal, pageNum, totalPages, cliente){
