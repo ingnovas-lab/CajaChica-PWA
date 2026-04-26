@@ -1051,11 +1051,26 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <button class="btn" onclick="probarScript()" style="padding:10px;font-size:12px">Probar conexión</button>
       </div>
 
-      <button class="btn btn-blue" onclick="consolidarFacturas()" style="margin-top:10px">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <button class="btn btn-blue" onclick="consolidarFacturas()" style="padding:10px;font-size:12px;margin-top:10px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Consolidar facturas ahora
       </button>
       <div id="consolidar-status" style="font-size:11px;color:var(--text2);margin-top:8px"></div>
+    </div>
+
+    <!-- Gestión de categorías y cuentas contables (v.0092) -->
+    <div class="card" data-admin-only>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+        </div>
+        <h3 style="margin:0">Categorías y cuentas contables</h3>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Edita el nombre de cada categoría y asigna su cuenta contable. La cuenta solo aparece en el reporte "Contabilidad / Soporte Fiscal". Configura todo previamente sin tener que iniciar una factura.</div>
+      <button class="btn btn-amber" onclick="manageCategorias()" style="padding:10px;font-size:12px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        Gestionar categorías
+      </button>
     </div>
 
     <div class="card" data-admin-only>
@@ -1065,11 +1080,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         </div>
         <h3 style="margin:0">Mantenimiento</h3>
       </div>
-      <button class="btn btn-amber" onclick="repairFormulas()">Reparar fórmulas del Dashboard</button>
+      <button class="btn btn-amber" onclick="repairFormulas()" style="padding:10px;font-size:12px">Reparar fórmulas del Dashboard</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO, URL_COMPROBANTE) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
-      <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="margin-top:10px">Sincronizar archivos con Sheet</button>
+      <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="padding:10px;font-size:12px;margin-top:10px">Sincronizar archivos con Sheet</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
-      <button class="btn btn-red" onclick="resetApp()" style="margin-top:10px">Borrar todo y empezar de cero</button>
+      <button class="btn btn-red" onclick="resetApp()" style="padding:10px;font-size:12px;margin-top:10px">Borrar todo y empezar de cero</button>
       <div style="font-size:11px;color:#fca5a5;margin-top:6px;line-height:1.4;opacity:.85">⚠️ Borra TODA la configuración local de este dispositivo: token de Google, clave de Gemini, empresa activa, proyectos cacheados, balances cacheados, e IndexedDB (registros pendientes sin sincronizar). NO toca tus datos en Google Drive ni en los Sheets — esos quedan intactos. Útil si quieres empezar limpio o si la app se rompió.</div>
     </div>
 
@@ -1410,7 +1425,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0091';
+const APP_VERSION = '0092';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
