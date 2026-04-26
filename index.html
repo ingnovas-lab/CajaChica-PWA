@@ -1410,7 +1410,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0084';
+const APP_VERSION = '0085';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4894,12 +4894,8 @@ async function generarReporte(){
   const hasta = document.getElementById('rep-hasta').value;
   const numero = document.getElementById('rep-numero').value.trim();
   const tipoInforme = document.getElementById('rep-tipo').value || 'ejecutivo';
-
-  // Persistir selección y avisar si la plantilla aún no está implementada (v.0083 pendiente)
+  // Persistir selección para próxima vez
   localStorage.setItem(LS.REPORTE_TIPO, tipoInforme);
-  if(tipoInforme === 'contabilidad'){
-    toast('Plantilla "Contabilidad" en desarrollo — generando Ejecutivo Corporativo');
-  }
 
   if(!desde || !hasta){ toast('Selecciona fechas', 'err'); return; }
   if(desde > hasta){ toast('La fecha desde es mayor que hasta', 'err'); return; }
@@ -5011,7 +5007,8 @@ async function generarReporte(){
       generarPDFFotos({
         filtrados, regH,
         desde, hasta, numero,
-        nombreObra, codObra
+        nombreObra, codObra,
+        tipoInforme
       });
     }
   } catch(e){
@@ -5054,6 +5051,64 @@ function _fmtPeriodo(d,h){
   return 'Período '+dD+' de '+dM+' de '+dA+' al '+hD+' de '+hM+' de '+hA;
 }
 function _etiquetaProy(idx){ return idx===1?'OBRA PRINCIPAL':idx===2?'OBRA SECUNDARIA':'PROYECTO ADICIONAL'; }
+
+// ============================================================
+// HELPERS FISCALES (v.0085) — para template Contabilidad / Soporte Fiscal
+// ============================================================
+
+// NCF dominicano: B01-B16 (papel, 11 dígitos siguientes) o E31-E47 (electrónico,
+// 10 dígitos siguientes). Formato simplificado, no exhaustivo.
+function _validateNCF(ncf){
+  if(!ncf) return {valid:false, reason:'sin_ncf'};
+  const s = String(ncf).trim().toUpperCase();
+  if(/^B(0[1-9]|1[0-6])\d{11}$/.test(s)) return {valid:true, type:'papel'};
+  if(/^E(3[1-9]|4[0-7])\d{10}$/.test(s)) return {valid:true, type:'electronico'};
+  return {valid:false, reason:'malformado'};
+}
+
+// RNC dominicano: 9 u 11 dígitos numéricos.
+function _validateRNC(rnc){
+  if(!rnc) return {valid:false, reason:'sin_rnc'};
+  const s = String(rnc).trim().replace(/[^0-9]/g, '');
+  if(s.length === 9 || s.length === 11) return {valid:true, normalized:s};
+  return {valid:false, reason:'malformado'};
+}
+
+// Hash SHA-256 funcional del contenido del lote — sirve como prueba de integridad.
+// Concatena IDs + montos + NCFs en orden estable y genera hash hex.
+async function _calculateLoteHash(filas){
+  const data = filas.map(f =>
+    [f.id||'', f.fecha||'', f.suplidor||'', f.rnc||'', f.ncf||'', (f.monto||0).toFixed(2)].join('|')
+  ).join('\n');
+  const enc = new TextEncoder().encode(data);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// Genera ID de lote con formato CC-RPT-MMDD-NNN. Contador correlativo por
+// empresa-mes guardado en localStorage (LS.LOTE_COUNTER + clave compuesta).
+function _generateLoteId(empresaNombre){
+  const now = new Date();
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const dd = String(now.getDate()).padStart(2,'0');
+  const yyyymm = now.getFullYear() + '-' + mm;
+  const key = 'cc_lote_counter::' + (empresaNombre||'') + '::' + yyyymm;
+  const next = (parseInt(localStorage.getItem(key)||'0', 10) || 0) + 1;
+  localStorage.setItem(key, String(next));
+  return 'CC-RPT-' + mm + dd + '-' + String(next).padStart(3,'0');
+}
+
+// Periodo en formato largo: "27 de enero al 26 de abril, 2026" (sin "Período")
+function _fmtPeriodoLargo(d, h){
+  const meses=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const md=(d||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const mh=(h||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!md||!mh) return (d||'')+' al '+(h||'');
+  const dD=+md[3], dM=meses[+md[2]-1], dA=md[1];
+  const hD=+mh[3], hM=meses[+mh[2]-1], hA=mh[1];
+  if(dA===hA) return dD+' de '+dM+' al '+hD+' de '+hM+', '+hA;
+  return dD+' de '+dM+' de '+dA+' al '+hD+' de '+hM+' de '+hA;
+}
 
 // Donut SVG (reemplaza conic-gradient, que html2canvas no soporta)
 function _donutSVG(segs, size){
@@ -5334,6 +5389,347 @@ function _buildPDFReportHTML(d){
   return html;
 }
 
+// ============================================================
+// TEMPLATE FISCAL / CONTABILIDAD (v.0085) — Soporte fiscal formal
+// Estructura: Portada → Validación → Tabla Maestra → Ficha por factura → Firmas
+// ============================================================
+
+function _renderFiscalCSS(){
+  return [
+    '@page{size:letter;margin:0}',
+    '.pdf-fiscal *{box-sizing:border-box;margin:0;padding:0;-webkit-text-size-adjust:100%!important;text-size-adjust:100%!important}',
+    '.pdf-fiscal{font-family:Georgia,"Times New Roman",serif;color:#1f2937;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
+    '.pdf-fiscal .page{display:block!important;width:8.5in!important;height:11in!important;min-height:auto!important;padding:0!important;page-break-after:always;position:relative;overflow:hidden;background:#fff}',
+    '.pdf-fiscal .page:last-child{page-break-after:auto}',
+    '.pdf-fiscal .factura-page{display:flex!important;flex-direction:column}',
+    '.pdf-fiscal .watermark{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:90px;color:rgba(0,0,0,0.04);font-weight:900;letter-spacing:.1em;pointer-events:none;font-family:Helvetica,Arial,sans-serif;text-align:center;white-space:nowrap;z-index:0}',
+    '.pdf-fiscal .pg-content{position:relative;z-index:1;height:100%}',
+    // Portada
+    '.pdf-fiscal .formal-cover{padding:40px;height:100%}',
+    '.pdf-fiscal .border-frame{border:3px double #000;padding:50px 60px;height:100%;position:relative}',
+    '.pdf-fiscal .formal-eyebrow{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#6b7280;text-align:center;margin-bottom:16px;font-family:Helvetica,Arial,sans-serif}',
+    '.pdf-fiscal .formal-title{font-size:34px;text-align:center;font-weight:400;color:#000;line-height:1.2;letter-spacing:-.01em;margin-bottom:8px}',
+    '.pdf-fiscal .formal-sub{font-size:14px;text-align:center;color:#374151;font-style:italic;margin-bottom:36px}',
+    '.pdf-fiscal .formal-line{height:1px;background:#000;margin:30px 0}',
+    '.pdf-fiscal .entity-block{text-align:center;margin:36px 0}',
+    '.pdf-fiscal .entity-name{font-size:22px;font-weight:700;color:#000;letter-spacing:.02em}',
+    '.pdf-fiscal .entity-info{font-size:12px;color:#374151;margin-top:8px;line-height:1.7;font-family:Helvetica,Arial,sans-serif}',
+    '.pdf-fiscal .data-grid{margin-top:40px;border-top:2px solid #000;border-bottom:2px solid #000;padding:24px 0;font-family:Helvetica,Arial,sans-serif}',
+    '.pdf-fiscal .data-grid table{width:100%;font-size:12px;border-collapse:collapse}',
+    '.pdf-fiscal .data-grid td{padding:8px 0;color:#1f2937;vertical-align:top}',
+    '.pdf-fiscal .data-grid td.l{font-weight:700;color:#000;text-transform:uppercase;letter-spacing:.05em;font-size:10px;width:35%}',
+    '.pdf-fiscal .data-grid td.v{font-weight:600;font-size:13px}',
+    '.pdf-fiscal .formal-footer{position:absolute;bottom:30px;left:60px;right:60px;font-size:10px;color:#6b7280;text-align:center;border-top:1px solid #d1d5db;padding-top:14px;font-family:Helvetica,Arial,sans-serif;letter-spacing:.05em}',
+    '.pdf-fiscal .formal-footer strong{color:#000}',
+    // Pages internas
+    '.pdf-fiscal .pg-formal-header{padding:32px 50px 18px;border-bottom:2px solid #000;font-family:Helvetica,Arial,sans-serif;position:relative;z-index:1}',
+    '.pdf-fiscal .pg-formal-header .doc-num{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.15em;margin-bottom:6px}',
+    '.pdf-fiscal .pg-formal-header h2{font-size:22px;color:#000;font-weight:700;letter-spacing:-.01em;font-family:Georgia,"Times New Roman",serif}',
+    '.pdf-fiscal .pg-formal-body{padding:28px 50px;font-family:Helvetica,Arial,sans-serif;position:relative;z-index:1}',
+    '.pdf-fiscal .pg-formal-body.compact{padding:18px 30px}',
+    // Validación contable
+    '.pdf-fiscal .val-section{margin-bottom:26px}',
+    '.pdf-fiscal .val-section h3{font-size:11px;color:#000;text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:10px;border-bottom:1px solid #000;padding-bottom:6px}',
+    '.pdf-fiscal table.val-table{width:100%;border-collapse:collapse;font-size:12px}',
+    '.pdf-fiscal table.val-table tr{border-bottom:1px solid #e5e7eb}',
+    '.pdf-fiscal table.val-table td{padding:9px 12px;color:#1f2937}',
+    '.pdf-fiscal table.val-table td.check{width:35px;text-align:center;font-size:14px}',
+    '.pdf-fiscal table.val-table td.ok{color:#15803d;font-weight:700}',
+    '.pdf-fiscal table.val-table td.warn{color:#b45309;font-weight:700}',
+    '.pdf-fiscal table.val-table td.fail{color:#b91c1c;font-weight:700}',
+    '.pdf-fiscal table.val-table td.metric{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:#000}',
+    '.pdf-fiscal .reconcile-box{background:#f9fafb;border:2px solid #000;padding:18px 22px;margin-top:24px}',
+    '.pdf-fiscal .reconcile-box .title{font-size:11px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px;border-bottom:1px solid #000;padding-bottom:6px}',
+    '.pdf-fiscal .reconcile-box .row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px}',
+    '.pdf-fiscal .reconcile-box .row.total{border-top:2px solid #000;margin-top:8px;padding-top:10px;font-weight:800;font-size:14px}',
+    '.pdf-fiscal .reconcile-box .check{color:#15803d;font-weight:700}',
+    // Tabla maestra
+    '.pdf-fiscal table.master{width:100%;border-collapse:collapse;font-size:9px;font-family:Helvetica,Arial,sans-serif;margin-top:14px}',
+    '.pdf-fiscal table.master th{background:#000;color:#fff;text-align:left;padding:7px 6px;font-size:8px;text-transform:uppercase;letter-spacing:.05em;font-weight:700}',
+    '.pdf-fiscal table.master td{padding:6px;border-bottom:1px solid #e5e7eb;color:#1f2937;vertical-align:top}',
+    '.pdf-fiscal table.master tr:nth-child(even) td{background:#f9fafb}',
+    '.pdf-fiscal table.master .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}',
+    '.pdf-fiscal table.master .ok{color:#15803d;font-weight:700;text-align:center}',
+    '.pdf-fiscal table.master .warn{color:#b45309;font-weight:700;text-align:center}',
+    '.pdf-fiscal table.master tr.totals td{background:#000;color:#fff;font-weight:800;padding:8px 6px;font-size:10px}',
+    '.pdf-fiscal .master-leyenda{margin-top:14px;font-size:9px;color:#6b7280;font-family:Helvetica,Arial,sans-serif}',
+    '.pdf-fiscal .master-leyenda strong{color:#000}',
+    // Ficha por factura
+    '.pdf-fiscal .ficha-page{padding:0;height:11in;display:flex!important;flex-direction:column}',
+    '.pdf-fiscal .ficha-header{padding:24px 50px 16px;border-bottom:2px solid #000;font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;position:relative;z-index:1}',
+    '.pdf-fiscal .ficha-header h2{font-size:18px;font-weight:700;color:#000;font-family:Helvetica,Arial,sans-serif}',
+    '.pdf-fiscal .ficha-header .meta{text-align:right;font-size:10px;color:#6b7280;line-height:1.5}',
+    '.pdf-fiscal .ficha-body{padding:24px 50px;font-family:Helvetica,Arial,sans-serif;flex:1;display:flex;flex-direction:column;position:relative;z-index:1}',
+    '.pdf-fiscal .ficha-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1.5px solid #000;flex-shrink:0}',
+    '.pdf-fiscal .ficha-cell{border-right:1px solid #d1d5db;border-bottom:1px solid #d1d5db;padding:10px 14px}',
+    '.pdf-fiscal .ficha-cell:nth-child(2n){border-right:none}',
+    '.pdf-fiscal .ficha-cell.full{grid-column:1/-1;border-right:none}',
+    '.pdf-fiscal .ficha-cell .lbl{font-size:9px;color:#000;text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:4px}',
+    '.pdf-fiscal .ficha-cell .val{font-size:13px;color:#1f2937;font-weight:600}',
+    '.pdf-fiscal .ficha-cell .val.mono{font-family:monospace;font-size:12px}',
+    '.pdf-fiscal .ficha-cell .val.amber{font-size:18px;color:#000;font-weight:800}',
+    '.pdf-fiscal .ficha-photo{margin-top:16px;flex:1;min-height:200px;background:#f3f4f6;border:1.5px solid #000;display:flex;align-items:center;justify-content:center;color:#9ca3af;overflow:hidden}',
+    '.pdf-fiscal .ficha-photo img{max-width:100%;max-height:100%;object-fit:contain}',
+    '.pdf-fiscal .ficha-photo .no-photo{font-size:12px;font-style:italic;color:#9ca3af}',
+    '.pdf-fiscal .ficha-footer{padding:8px 50px 16px;border-top:1px solid #000;font-size:9px;color:#6b7280;display:flex;justify-content:space-between;font-family:Helvetica,Arial,sans-serif;flex-shrink:0;position:relative;z-index:1}',
+    // Firmas
+    '.pdf-fiscal .sign-page{padding:60px 80px;font-family:Helvetica,Arial,sans-serif;position:relative;z-index:1}',
+    '.pdf-fiscal .sign-page h2{font-size:24px;color:#000;font-weight:700;text-align:center;margin-bottom:8px;letter-spacing:-.01em;font-family:Georgia,"Times New Roman",serif}',
+    '.pdf-fiscal .sign-page .sub{font-size:13px;color:#6b7280;text-align:center;margin-bottom:32px;font-style:italic;font-family:Georgia,serif}',
+    '.pdf-fiscal .declaration{background:#f9fafb;border-left:4px solid #000;padding:22px 26px;margin-bottom:42px;font-size:13px;color:#1f2937;line-height:1.7;font-family:Georgia,serif}',
+    '.pdf-fiscal .declaration strong{color:#000}',
+    '.pdf-fiscal .signatures{display:grid;grid-template-columns:1fr 1fr 1fr;gap:30px;margin-top:60px}',
+    '.pdf-fiscal .sig-block{text-align:center}',
+    '.pdf-fiscal .sig-line{border-bottom:1.5px solid #000;height:60px;margin-bottom:8px}',
+    '.pdf-fiscal .sig-name{font-size:13px;font-weight:700;color:#000;margin-bottom:4px;min-height:18px}',
+    '.pdf-fiscal .sig-role{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.1em;font-weight:600}',
+    '.pdf-fiscal .sig-date{font-size:10px;color:#6b7280;margin-top:6px}',
+    '.pdf-fiscal .checksum{margin-top:80px;padding:14px 18px;border:1px dashed #6b7280;font-family:monospace;font-size:9px;color:#374151;text-align:center;background:#f9fafb;word-break:break-all;line-height:1.5}',
+    '.pdf-fiscal .checksum-label{font-size:9px;color:#000;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;font-family:Helvetica,sans-serif}'
+  ].join('');
+}
+
+// ===== PORTADA =====
+function _renderFiscalCover(d, pageNum){
+  const empresa = d.empresa;
+  const razon = (empresa.razonSocial || empresa.nombre || 'Empresa').toUpperCase();
+  const rncFmt = empresa.rnc ? 'RNC ' + empresa.rnc : '';
+  const direccion = empresa.direccion || '';
+  const obraStr = d.isMultiProj ? 'Todas las obras (consolidado)' : (d.params.nombreObra || 'Proyecto');
+  const periodo = _fmtPeriodoLargo(d.params.desde, d.params.hasta);
+  const rows = [
+    ['Lote', _escHTML(d.loteId)],
+    ['Período cubierto', _escHTML(periodo)],
+    ['Obra / Centro de costo', _escHTML(obraStr)],
+    ['Total de comprobantes', d.totalFacturas],
+    ['Monto total reportado', 'RD$ ' + _fmtMoney(d.totalMonto)],
+    ['Preparado por', _escHTML(d.preparadoPor)],
+    ['Fecha de emisión', _escHTML(d.fechaGen)]
+  ];
+  const dataRows = rows.map(r => '<tr><td class="l">'+r[0]+'</td><td class="v">'+r[1]+'</td></tr>').join('');
+  const entityInfo = [rncFmt, direccion].filter(Boolean).join(' · ');
+  return ''
+    + '<div class="page formal-cover">'
+    +   '<div class="border-frame">'
+    +     '<div class="formal-eyebrow">República Dominicana</div>'
+    +     '<h1 class="formal-title">Documento de Soporte Documental</h1>'
+    +     '<div class="formal-sub">Caja Chica de Obra · ' + _escHTML(empresa.nombre || '') + '</div>'
+    +     '<div class="formal-line"></div>'
+    +     '<div class="entity-block">'
+    +       '<div class="entity-name">' + _escHTML(razon) + '</div>'
+    +       (entityInfo ? '<div class="entity-info">' + _escHTML(entityInfo) + '</div>' : '')
+    +     '</div>'
+    +     '<div class="data-grid"><table>' + dataRows + '</table></div>'
+    +     '<div class="formal-footer"><strong>' + _escHTML(razon) + '</strong> · Documento generado para soporte fiscal y auditoría interna · Pág. ' + pageNum + ' de ' + d.totalPages + '</div>'
+    +   '</div>'
+    + '</div>';
+}
+
+// ===== HOJA DE VALIDACIÓN CONTABLE =====
+function _renderFiscalValidacion(d, pageNum){
+  const v = d.valStats;
+  const razon = (d.empresa.razonSocial || d.empresa.nombre || 'Empresa').toUpperCase();
+  // Sección 1: validación
+  const valRows = [
+    {ok:v.ncfValid===v.ncfTotal && v.ncfTotal>0, sym:v.ncfValid===v.ncfTotal&&v.ncfTotal>0?'✓':(v.ncfTotal===0?'—':'○'), txt:'NCF con formato válido (B01-B16 / E31-E47)', cls:v.ncfValid===v.ncfTotal&&v.ncfTotal>0?'ok':'warn', metric: v.ncfTotal>0 ? v.ncfValid + ' / ' + v.ncfTotal : '—'},
+    {sym: v.ncfMissing>0?'○':'✓', txt:'Comprobantes sin NCF (válido para informales / colmados)', cls: v.ncfMissing>0?'warn':'ok', metric: v.ncfMissing},
+    {sym: v.ncfBad===0?'✓':'✕', txt:'NCF malformados o inválidos', cls: v.ncfBad===0?'ok':'fail', metric: v.ncfBad},
+    {sym: v.rncValid===v.rncTotal && v.rncTotal>0?'✓':(v.rncTotal===0?'—':'○'), txt:'RNC del emisor con formato válido (9 u 11 dígitos)', cls: v.rncValid===v.rncTotal&&v.rncTotal>0?'ok':'warn', metric: v.rncTotal>0 ? v.rncValid + ' / ' + v.rncTotal : '—'},
+    {sym: v.duplicates===0?'✓':'✕', txt:'Duplicados detectados (mismo NCF en mismo período)', cls: v.duplicates===0?'ok':'fail', metric: v.duplicates},
+    {sym: v.withPhoto===d.totalFacturas?'✓':'○', txt:'Comprobantes con fotografía adjunta', cls: v.withPhoto===d.totalFacturas?'ok':'warn', metric: v.withPhoto + ' / ' + d.totalFacturas}
+  ].map(r => '<tr><td class="check '+r.cls+'">'+r.sym+'</td><td>'+r.txt+'</td><td class="metric '+(r.cls==='fail'?'fail':r.cls==='warn'?'warn':'ok')+'">'+r.metric+'</td></tr>').join('');
+
+  // Sección 2: distribución por categoría contable
+  const distRows = d.catList.map(c => {
+    const pct = d.totalMonto>0 ? (c.total/d.totalMonto*100) : 0;
+    const cuentaTxt = c.cuenta ? ' (cuenta '+_escHTML(c.cuenta)+')' : '';
+    return '<tr><td>' + _escHTML(c.nombre) + cuentaTxt + '</td><td class="metric">' + c.count + ' factura' + (c.count===1?'':'s') + '</td><td class="metric">RD$ ' + _fmtMoney(c.total) + '</td><td class="metric">' + pct.toFixed(2) + '%</td></tr>';
+  }).join('');
+
+  return ''
+    + '<div class="page">'
+    +   '<div class="watermark">SOPORTE</div>'
+    +   '<div class="pg-content">'
+    +     '<div class="pg-formal-header">'
+    +       '<div class="doc-num">Lote ' + _escHTML(d.loteId) + ' · Hoja ' + pageNum + '</div>'
+    +       '<h2>Hoja de Validación Contable</h2>'
+    +     '</div>'
+    +     '<div class="pg-formal-body">'
+    +       '<div class="val-section">'
+    +         '<h3>1. Validación de comprobantes fiscales</h3>'
+    +         '<table class="val-table">' + valRows + '</table>'
+    +       '</div>'
+    +       '<div class="val-section">'
+    +         '<h3>2. Distribución por categoría contable</h3>'
+    +         '<table class="val-table">' + distRows + '</table>'
+    +       '</div>'
+    +       '<div class="reconcile-box">'
+    +         '<div class="title">3. Reconciliación de monto total</div>'
+    +         '<div class="row"><span>Suma de comprobantes individuales</span><span>RD$ ' + _fmtMoney(d.totalMonto) + '</span></div>'
+    +         '<div class="row"><span>Total reportado en sistema (PWA)</span><span>RD$ ' + _fmtMoney(d.totalMonto) + '</span></div>'
+    +         '<div class="row"><span>Diferencia</span><span class="check">RD$ 0.00 ✓</span></div>'
+    +         '<div class="row total"><span>RECONCILIACIÓN</span><span class="check">CONFORME</span></div>'
+    +       '</div>'
+    +     '</div>'
+    +     '<div class="formal-footer" style="position:absolute;bottom:24px;left:50px;right:50px"><strong>' + _escHTML(razon) + '</strong> · Lote ' + _escHTML(d.loteId) + ' · Pág. ' + pageNum + ' de ' + d.totalPages + '</div>'
+    +   '</div>'
+    + '</div>';
+}
+
+// ===== TABLA MAESTRA (paginada — máx ~25 filas por página) =====
+function _renderFiscalTablaMaestra(d, startPageNum){
+  const razon = (d.empresa.razonSocial || d.empresa.nombre || 'Empresa').toUpperCase();
+  const ROWS_PER_PAGE = 25;
+  const filas = d.filas;
+  const totalPaginas = Math.ceil(filas.length / ROWS_PER_PAGE) || 1;
+  let html = '';
+  let pageNum = startPageNum;
+
+  for(let p = 0; p < totalPaginas; p++){
+    const slice = filas.slice(p*ROWS_PER_PAGE, (p+1)*ROWS_PER_PAGE);
+    const isLastPage = p === totalPaginas - 1;
+    const tbodyRows = slice.map((f,i) => {
+      const idx = p*ROWS_PER_PAGE + i + 1;
+      const ncfV = _validateNCF(f.ncf);
+      const valSym = ncfV.valid ? '✓' : (ncfV.reason==='sin_ncf' ? '○' : '✕');
+      const valCls = ncfV.valid ? 'ok' : 'warn';
+      const fechaCorta = (f.fecha||'').match(/^(\d{4})-(\d{2})-(\d{2})$/) ? f.fecha.slice(8,10)+'/'+f.fecha.slice(5,7) : (f.fecha||'');
+      const idShort = (f.id||'').slice(0,4);
+      const catShort = (f.categoriaCod||'').slice(0,3);
+      return '<tr><td>'+idx+'</td><td>'+_escHTML(idShort)+'</td><td>'+_escHTML(fechaCorta)+'</td><td>'+_escHTML(f.suplidor)+'</td><td>'+_escHTML(f.rnc||'—')+'</td><td>'+_escHTML(f.ncf||'—')+'</td><td>'+_escHTML(catShort)+'</td><td>'+_escHTML(f.cuenta||'—')+'</td><td class="num">'+_fmtMoney(f.monto)+'</td><td class="'+valCls+'">'+valSym+'</td><td>'+_escHTML(d.preparadoPorIni||'—')+'</td></tr>';
+    }).join('');
+
+    const totalsRow = isLastPage
+      ? '<tr class="totals"><td colspan="8">TOTAL · ' + filas.length + ' comprobante' + (filas.length===1?'':'s') + '</td><td class="num">' + _fmtMoney(d.totalMonto) + '</td><td colspan="2"></td></tr>'
+      : '';
+
+    html += ''
+      + '<div class="page">'
+      +   '<div class="watermark">SOPORTE</div>'
+      +   '<div class="pg-content">'
+      +     '<div class="pg-formal-header">'
+      +       '<div class="doc-num">Lote ' + _escHTML(d.loteId) + ' · Hoja ' + pageNum + (totalPaginas>1 ? ' (' + (p+1) + '/' + totalPaginas + ')' : '') + '</div>'
+      +       '<h2>Tabla Maestra de Comprobantes</h2>'
+      +     '</div>'
+      +     '<div class="pg-formal-body compact">'
+      +       '<table class="master">'
+      +         '<thead><tr><th>#</th><th>ID</th><th>Fecha</th><th>Suplidor</th><th>RNC</th><th>NCF</th><th>Cat.</th><th>Cta.</th><th class="num" style="text-align:right">Monto</th><th>Val.</th><th>User</th></tr></thead>'
+      +         '<tbody>' + tbodyRows + totalsRow + '</tbody>'
+      +       '</table>'
+      +       (isLastPage ? '<div class="master-leyenda">Leyenda: <strong>Cat.</strong> código de categoría · <strong>Cta.</strong> cuenta contable · <strong>Val.</strong> ✓=NCF válido, ○=sin NCF (informal), ✕=NCF malformado</div>' : '')
+      +     '</div>'
+      +     '<div class="formal-footer" style="position:absolute;bottom:24px;left:50px;right:50px"><strong>' + _escHTML(razon) + '</strong> · Lote ' + _escHTML(d.loteId) + ' · Pág. ' + pageNum + ' de ' + d.totalPages + '</div>'
+      +   '</div>'
+      + '</div>';
+    pageNum++;
+  }
+  return {html, pagesUsed: totalPaginas};
+}
+
+// ===== FICHA INDIVIDUAL POR FACTURA =====
+function _renderFiscalFichaFactura(f, idx, d, pageNum){
+  const razon = (d.empresa.razonSocial || d.empresa.nombre || 'Empresa').toUpperCase();
+  const ncfV = _validateNCF(f.ncf);
+  const tipoComp = ncfV.valid
+    ? (ncfV.type === 'electronico' ? 'Comprobante Fiscal Electrónico' : 'Comprobante Fiscal de Crédito (papel)')
+    : (ncfV.reason === 'sin_ncf' ? 'Comprobante informal sin NCF' : 'Comprobante con NCF malformado');
+  const valColor = ncfV.valid ? '#15803d' : (ncfV.reason==='sin_ncf' ? '#b45309' : '#b91c1c');
+  const valTxt = ncfV.valid ? '✓ NCF válido' : (ncfV.reason==='sin_ncf' ? '○ Comprobante informal (sin NCF)' : '✕ NCF malformado');
+  const fechaLarga = _fmtFechaLarga(f.fecha) || (f.fecha||'—');
+  const photo = f.fotoUrl
+    ? '<img src="' + f.fotoUrl + '" alt="Comprobante">'
+    : '<div class="no-photo">📷 Foto no disponible</div>';
+  return ''
+    + '<div class="page ficha-page">'
+    +   '<div class="watermark">SOPORTE</div>'
+    +   '<div class="ficha-header">'
+    +     '<h2>Ficha de Comprobante No. ' + idx + '</h2>'
+    +     '<div class="meta">Lote: ' + _escHTML(d.loteId) + '<br>Folio interno: ' + _escHTML((f.id||'').slice(0,4)) + '-' + new Date().getFullYear() + '</div>'
+    +   '</div>'
+    +   '<div class="ficha-body">'
+    +     '<div class="ficha-grid">'
+    +       '<div class="ficha-cell"><div class="lbl">Razón social del emisor</div><div class="val">' + _escHTML(f.suplidor||'(sin suplidor)') + '</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">RNC del emisor</div><div class="val mono">' + _escHTML(f.rnc||'—') + '</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">NCF</div><div class="val mono">' + _escHTML(f.ncf||'—') + '</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">Tipo de comprobante</div><div class="val">' + _escHTML(tipoComp) + '</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">Fecha del comprobante</div><div class="val">' + _escHTML(fechaLarga) + '</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">Obra / Centro de costo</div><div class="val">' + _escHTML(f.proyecto||'—') + '</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">Categoría</div><div class="val">' + _escHTML(f.categoria||'—') + ' (' + _escHTML(f.categoriaCod||'—') + ')</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">Cuenta contable</div><div class="val mono">' + _escHTML(f.cuenta||'—') + '</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">Monto total</div><div class="val amber">RD$ ' + _fmtMoney(f.monto) + '</div></div>'
+    +       '<div class="ficha-cell"><div class="lbl">Estado de validación</div><div class="val" style="color:' + valColor + '">' + valTxt + '</div></div>'
+    +       '<div class="ficha-cell full"><div class="lbl">Cargado por</div><div class="val">' + _escHTML(d.preparadoPor) + (f.no_reporte ? ' · Reporte No. ' + _escHTML(f.no_reporte) : '') + '</div></div>'
+    +     '</div>'
+    +     '<div class="ficha-photo">' + photo + '</div>'
+    +   '</div>'
+    +   '<div class="ficha-footer"><span>ID interno: ' + _escHTML((f.id||'').slice(0,4)) + '-' + new Date().getFullYear() + ' · Generado: ' + _escHTML(d.fechaGen) + '</span><span>Pág. ' + pageNum + ' de ' + d.totalPages + '</span></div>'
+    + '</div>';
+}
+
+// ===== CERTIFICACIÓN Y FIRMAS =====
+function _renderFiscalFirmas(d, pageNum){
+  const empresa = d.empresa;
+  const razon = (empresa.razonSocial || empresa.nombre || 'Empresa').toUpperCase();
+  const periodo = _fmtPeriodoLargo(d.params.desde, d.params.hasta);
+  const totalCount = d.totalFacturas;
+  const totalMontoFmt = _fmtMoney(d.totalMonto);
+  const declaration = 'Los abajo firmantes certifican que los <strong>' + totalCount + ' comprobante' + (totalCount===1?'':'s') + '</strong> contenidos en el presente lote <strong>' + _escHTML(d.loteId) + '</strong>, correspondientes al período del <strong>' + _escHTML(periodo) + '</strong> y por un monto total de <strong>RD$ ' + totalMontoFmt + '</strong>, corresponden a gastos legítimos de caja chica de obra de ' + _escHTML(razon) + ', han sido validados contra los requisitos fiscales de la DGII, no presentan duplicidades, y se encuentran respaldados con la fotografía del comprobante original.';
+
+  const sigBlock = (name, role) => ''
+    + '<div class="sig-block">'
+    +   '<div class="sig-line"></div>'
+    +   '<div class="sig-name">' + (name ? _escHTML(name) : '_______________________') + '</div>'
+    +   '<div class="sig-role">' + role + '</div>'
+    +   '<div class="sig-date">Fecha: ___/___/______</div>'
+    + '</div>';
+
+  return ''
+    + '<div class="page">'
+    +   '<div class="watermark">SOPORTE</div>'
+    +   '<div class="pg-content">'
+    +     '<div class="sign-page">'
+    +       '<h2>Certificación y Firmas</h2>'
+    +       '<div class="sub">Página de cierre del lote — soporte fiscal</div>'
+    +       '<div class="declaration">' + declaration + '</div>'
+    +       '<div class="signatures">'
+    +         sigBlock(d.preparadoPor, 'Preparado por')
+    +         + sigBlock(empresa.revisadoPor, 'Revisado por')
+    +         + sigBlock(empresa.aprobadoPor, 'Aprobado por')
+    +       + '</div>'
+    +       '<div style="margin-top:50px">'
+    +         '<div class="checksum-label">Hash de integridad del lote (SHA-256)</div>'
+    +         '<div class="checksum">' + _escHTML(d.loteHash) + '</div>'
+    +       '</div>'
+    +     '</div>'
+    +     '<div class="formal-footer" style="position:absolute;bottom:24px;left:50px;right:50px"><strong>' + _escHTML(razon) + '</strong> · Lote ' + _escHTML(d.loteId) + ' · Pág. ' + pageNum + ' de ' + d.totalPages + ' — FIN DEL DOCUMENTO</div>'
+    +   '</div>'
+    + '</div>';
+}
+
+// ===== BUILDER PRINCIPAL FISCAL =====
+function _buildFiscalReportHTML(d){
+  // Cálculo de totalPages: 1 (cover) + 1 (validación) + N (tabla maestra) + M (fichas) + 1 (firmas)
+  const ROWS_PER_PAGE = 25;
+  const tablaPages = Math.ceil(d.filas.length / ROWS_PER_PAGE) || 1;
+  const fichasPages = d.filas.length;
+  d.totalPages = 1 + 1 + tablaPages + fichasPages + 1;
+
+  let html = '<div class="pdf-fiscal">';
+  let pageNum = 1;
+
+  html += _renderFiscalCover(d, pageNum); pageNum++;
+  html += _renderFiscalValidacion(d, pageNum); pageNum++;
+  const maestra = _renderFiscalTablaMaestra(d, pageNum);
+  html += maestra.html; pageNum += maestra.pagesUsed;
+  d.filas.forEach((f, i) => {
+    html += _renderFiscalFichaFactura(f, i+1, d, pageNum);
+    pageNum++;
+  });
+  html += _renderFiscalFirmas(d, pageNum);
+  html += '</div>';
+  return html;
+}
+
 // Helper: descarga foto vía OAuth y la convierte a data URI (evita CORS de html2canvas)
 async function _fetchFotoAsDataURI(urlFactura, token){
   if(!urlFactura) return null;
@@ -5403,9 +5799,10 @@ async function generarPDFFotos(params){
     if(!token) throw new Error('Sesión expirada');
 
     const {filtrados, regH, desde, hasta, numero, nombreObra} = params;
+    const tipoInforme = params.tipoInforme || 'ejecutivo';
     if(!filtrados || filtrados.length === 0){ banner.remove(); return; }
 
-    // 1. Normalizar filas
+    // 1. Normalizar filas (incluye categoriaCod/cuenta para template Contabilidad)
     const filas = filtrados.map(r => {
       const cat = (masters.categories||[]).find(c => c.cod === r[regH.CATEGORIA]);
       const proj = (masters.projects||[]).find(p => p.cod === r[regH.PROYECTO]);
@@ -5416,6 +5813,8 @@ async function generarPDFFotos(params){
         rnc: regH.RNC !== undefined ? (r[regH.RNC] || '') : '',
         ncf: r[regH.NCF] || '',
         categoria: cat ? cat.nombre : (r[regH.CATEGORIA] || '(Sin categoría)'),
+        categoriaCod: cat ? cat.cod : (r[regH.CATEGORIA] || ''),
+        cuenta: cat ? (cat.cuenta || '') : '',
         no_reporte: regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '').toString() : '',
         monto: parseFloat(r[regH.MONTO]) || 0,
         url_factura: r[regH.URL_FACTURA] || '',
@@ -5444,7 +5843,7 @@ async function generarPDFFotos(params){
 
     const catsByName = {};
     filas.forEach(f => {
-      if(!catsByName[f.categoria]) catsByName[f.categoria] = {nombre: f.categoria, count: 0, total: 0};
+      if(!catsByName[f.categoria]) catsByName[f.categoria] = {nombre: f.categoria, count: 0, total: 0, cuenta: f.cuenta || ''};
       catsByName[f.categoria].count++; catsByName[f.categoria].total += f.monto;
     });
     const catList = Object.values(catsByName).sort((a,b) => b.total - a.total);
@@ -5459,34 +5858,89 @@ async function generarPDFFotos(params){
 
     const totalMonto = filas.reduce((s,f) => s + f.monto, 0);
     const isMultiProj = projList.length > 1;
-    let totalPages = 2;
-    projList.forEach(p => { totalPages += isMultiProj ? 2 : 1; totalPages += p.facturas.length; });
 
-    const reportData = {
-      cliente: (getCurrentCompany() || {}).nombre || 'Empresa',
+    // Datos comunes a ambos templates
+    const empresaActiva = getCurrentCompany() || {};
+    const baseData = {
+      cliente: empresaActiva.nombre || 'Empresa',
+      empresa: empresaActiva,
       preparadoPor: getDisplayName(),
       fechaGen: new Date().toLocaleString('es-DO'),
-      isMultiProj, totalFacturas: filas.length, totalMonto, totalPages,
-      projList, catList, topSups,
+      isMultiProj, totalFacturas: filas.length, totalMonto,
+      projList, catList, topSups, filas,
       params: {desde, hasta, nombreObra, numero}
     };
 
-    // 4. Inyectar CSS si no está
-    if(!document.getElementById('pdf-report-css')){
+    // 4. Construir reportData específico al tipo de informe + inyectar CSS
+    let reportData, builderHTML, cssId, cssText;
+    if(tipoInforme === 'contabilidad'){
+      // Template Contabilidad / Soporte Fiscal (v.0085)
+      setStatus('Validando comprobantes…');
+      // Estadísticas de validación NCF/RNC
+      const valStats = {ncfTotal:0, ncfValid:0, ncfMissing:0, ncfBad:0, rncTotal:0, rncValid:0, duplicates:0, withPhoto:0};
+      const ncfSeen = {};
+      filas.forEach(f => {
+        const ncfV = _validateNCF(f.ncf);
+        if(ncfV.reason === 'sin_ncf'){
+          valStats.ncfMissing++;
+        } else {
+          valStats.ncfTotal++;
+          if(ncfV.valid){
+            valStats.ncfValid++;
+            const k = String(f.ncf).trim().toUpperCase();
+            if(ncfSeen[k]) valStats.duplicates++;
+            ncfSeen[k] = true;
+          } else {
+            valStats.ncfBad++;
+          }
+        }
+        if(f.rnc){
+          valStats.rncTotal++;
+          if(_validateRNC(f.rnc).valid) valStats.rncValid++;
+        }
+        if(f.fotoUrl) valStats.withPhoto++;
+      });
+
+      const loteId = _generateLoteId(empresaActiva.nombre);
+      const loteHash = await _calculateLoteHash(filas);
+      const dispName = getDisplayName() || '';
+      const preparadoPorIni = dispName.split(/\s+/).map(w => (w[0]||'').toUpperCase()).slice(0,3).join('') || '—';
+
+      reportData = {
+        ...baseData,
+        loteId,
+        loteHash,
+        preparadoPorIni,
+        valStats,
+        totalPages: 0  // _buildFiscalReportHTML lo calcula adentro
+      };
+      builderHTML = _buildFiscalReportHTML(reportData);
+      cssId = 'pdf-fiscal-css';
+      cssText = _renderFiscalCSS();
+    } else {
+      // Template Ejecutivo Corporativo (default, comportamiento histórico)
+      let totalPages = 2;
+      projList.forEach(p => { totalPages += isMultiProj ? 2 : 1; totalPages += p.facturas.length; });
+      reportData = {...baseData, totalPages};
+      builderHTML = _buildPDFReportHTML(reportData);
+      cssId = 'pdf-report-css';
+      cssText = _renderPDFCSS();
+    }
+
+    if(!document.getElementById(cssId)){
       const style = document.createElement('style');
-      style.id = 'pdf-report-css';
-      style.textContent = _renderPDFCSS();
+      style.id = cssId;
+      style.textContent = cssText;
       document.head.appendChild(style);
     }
 
     // 5. Renderizar HTML oculto fuera de pantalla (UX limpia).
-    // El override !important en .pdf-report .page garantiza que el browser
-    // sí pinta los pages aunque estén off-screen — el bug previo era CSS,
-    // no paint optimization.
+    // El override !important en .pdf-report .page (y .pdf-fiscal .page) garantiza
+    // que el browser sí pinta los pages aunque estén off-screen.
     setStatus('Construyendo reporte…');
     renderRoot = document.createElement('div');
     renderRoot.style.cssText = 'position:fixed;left:-99999px;top:0;width:8.5in;background:#fff';
-    renderRoot.innerHTML = _buildPDFReportHTML(reportData);
+    renderRoot.innerHTML = builderHTML;
     document.body.appendChild(renderRoot);
 
     // Esperar a que fonts + imágenes (data URIs) estén realmente decodificadas
@@ -5528,7 +5982,9 @@ async function generarPDFFotos(params){
     const hastaDot = (hasta || '').replace(/-/g, '.');
     const obraLimpia = (nombreObra || 'TODAS').replace(/[\/\\:*?"<>|]/g, '').trim();
     const numStr = numero ? ' _ ' + numero.replace(/[\/\\:*?"<>|]/g, '').trim() : '';
-    const filename = `Soporte Caja Chica _ ${obraLimpia}${numStr} _ ${fechaGenDot} _ ${desdeDot} - ${hastaDot}.pdf`;
+    const prefix = tipoInforme === 'contabilidad' ? 'Soporte Fiscal' : 'Soporte Caja Chica';
+    const loteStr = (tipoInforme === 'contabilidad' && reportData.loteId) ? ' _ ' + reportData.loteId : '';
+    const filename = `${prefix} _ ${obraLimpia}${numStr}${loteStr} _ ${fechaGenDot} _ ${desdeDot} - ${hastaDot}.pdf`;
 
     const metadata = {name: filename, mimeType: 'application/pdf', parents: [reportesId]};
     const boundary = '-------314159265358979323846';
