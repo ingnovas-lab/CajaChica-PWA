@@ -1410,7 +1410,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0088';
+const APP_VERSION = '0089';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5708,7 +5708,7 @@ function _renderFiscalFichaFactura(f, idx, d, pageNum){
     +     '<div class="ficha-cell"><div class="lbl">Cuenta contable</div><div class="val mono">' + _escHTML(f.cuenta||'—') + '</div></div>'
     +     '<div class="ficha-cell"><div class="lbl">Monto total</div><div class="val amber">RD$ ' + _fmtMoney(f.monto) + '</div></div>'
     +     '<div class="ficha-cell"><div class="lbl">Estado de validación</div><div class="val" style="color:' + valColor + '">' + valTxt + '</div></div>'
-    +     '<div class="ficha-cell full"><div class="lbl">Cargado por</div><div class="val">' + _escHTML(f.usuarioNombre || f.usuarioEmail || '—') + (f.usuarioEmail && f.usuarioNombre && f.usuarioNombre !== f.usuarioEmail ? ' (' + _escHTML(f.usuarioEmail) + ')' : '') + (f.no_reporte ? ' · Reporte No. ' + _escHTML(f.no_reporte) : '') + '</div></div>'
+    +     '<div class="ficha-cell full"><div class="lbl">Cargado por</div><div class="val">' + _escHTML(f.usuarioNombre || f.usuarioEmail || '—') + (f.no_reporte ? ' · Reporte No. ' + _escHTML(f.no_reporte) : '') + '</div></div>'
     +   '</div>'
     +   '<div class="ficha-photo">' + photo + '</div>'
     +   '<div class="ficha-footer"><span>ID interno: ' + _escHTML((f.id||'').slice(0,4)) + '-' + new Date().getFullYear() + ' · Generado: ' + _escHTML(d.fechaGen) + '</span><span>Pág. ' + pageNum + ' de ' + d.totalPages + '</span></div>'
@@ -7478,18 +7478,43 @@ async function checkConsolidarStatus(){
 }
 
 async function contarFacturasSinConsolidar(){
-  const miEmail = localStorage.getItem(LS.EMAIL);
+  const miEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
   const raw = await sheetsGet('REGISTRO!A1:Z');
   if(!raw || raw.length < 2) return 0;
   const H = {};
   (raw[0] || []).forEach((h, i) => H[h] = i);
   if(H.URL_FACTURA === undefined || H.USUARIO === undefined) return 0;
 
-  return raw.slice(1).filter(r => {
+  // Candidatos: registros con USUARIO != miEmail (autor distinto al admin actual)
+  // ANTES (v.0088 y previas): se contaba directo. Pero si el usuario llena USUARIO
+  // manualmente con el email del autor original aunque la foto YA esté consolidada
+  // en el Drive del admin, falsamente disparaba el banner.
+  // AHORA (v.0089): verificar accesibilidad real del archivo via drive.file scope.
+  // Si la PWA puede leer el archivo → ya está en el Drive del admin → consolidado.
+  const candidatos = raw.slice(1).filter(r => {
     if(!r[H.ID] || !r[H.URL_FACTURA]) return false;
-    // Si el USUARIO es distinto al admin actual, y tiene URL, está sin consolidar
-    return r[H.USUARIO] && r[H.USUARIO] !== miEmail;
-  }).length;
+    const usr = (r[H.USUARIO] || '').toLowerCase();
+    return usr && usr !== miEmail;
+  });
+  if(candidatos.length === 0) return 0;
+
+  // Verificar accesibilidad en paralelo. Si la PWA puede leer el archivo, está
+  // dentro de su scope (consolidado). Si responde 404/403, está en otro Drive.
+  const token = getToken();
+  if(!token) return candidatos.length; // fallback: sin token, asumimos no consolidados
+
+  const checks = await Promise.all(candidatos.map(async r => {
+    const url = String(r[H.URL_FACTURA] || '');
+    const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if(!m) return false; // sin fileId extraíble → no podemos verificar, no contar
+    try {
+      const res = await fetch('https://www.googleapis.com/drive/v3/files/' + m[1] + '?fields=id', {
+        headers: {'Authorization': 'Bearer ' + token}
+      });
+      return !res.ok; // !ok = no accesible = sin consolidar
+    } catch(e){ return false; }
+  }));
+  return checks.filter(Boolean).length;
 }
 
 // Consolidación delegada al Apps Script (corre en servidores de Google, sin CORS).
