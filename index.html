@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0074';
+const APP_VERSION = '0075';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4992,7 +4992,7 @@ function _renderPDFCSS(){
     '.pdf-report .cover-totals{margin:30px 56px 0;display:flex;gap:14px}',
     '.pdf-report .total-card{flex:1;background:#1e3a5f;color:#fff;padding:22px;border-radius:8px}',
     '.pdf-report .total-card.amber{background:#d97706}',
-    '.pdf-report .total-card .lbl{font-size:10px;letter-spacing:.15em;text-transform:uppercase;opacity:.85;margin-bottom:6px}',
+    '.pdf-report .total-card .lbl{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:#fff;margin-bottom:6px}',
     '.pdf-report .total-card .val{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1}',
     '.pdf-report .page-footer{position:absolute;bottom:30px;left:56px;right:56px;display:flex;justify-content:space-between;font-size:9px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:12px}',
     '.pdf-report .pg-header{padding:28px 56px 18px;border-bottom:3px solid #1e3a5f;display:flex;justify-content:space-between;align-items:center}',
@@ -5040,7 +5040,7 @@ function _renderPDFCSS(){
     '.pdf-report .proj-kpis{display:flex;gap:12px;margin-bottom:26px}',
     '.pdf-report .proj-kpi{flex:1;background:#1e3a5f;color:#fff;padding:18px;border-radius:8px}',
     '.pdf-report .proj-kpi.amber{background:#d97706}',
-    '.pdf-report .proj-kpi .lbl{font-size:9px;letter-spacing:.15em;text-transform:uppercase;opacity:.85;margin-bottom:6px;font-weight:700}',
+    '.pdf-report .proj-kpi .lbl{font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:#fff;margin-bottom:6px;font-weight:700}',
     '.pdf-report .proj-kpi .val{font-size:20px;font-weight:800;letter-spacing:-.01em;line-height:1}',
     '.pdf-report .proj-note{background:#f8fafc;border-left:4px solid #d97706;padding:12px 16px;border-radius:0 6px 6px 0;font-size:11px;color:#334155;font-style:italic;margin-bottom:24px}',
     '.pdf-report .proj-note strong{color:#1e3a5f;font-style:normal}',
@@ -5137,12 +5137,7 @@ function _renderPDFResumen(d, pageNum){
     donut='<div class="chart-box"><div class="chart-title">Distribución por categoría</div><div class="donut-wrap">'+_donutSVG(segs,100)+'<div class="legend">'+leg+'</div></div></div>';
   }
 
-  let supRows='';
-  d.topSups.forEach((s,i)=>{
-    supRows+='<tr><td>'+(i+1)+'</td><td><strong>'+_escHTML(s.nombre)+'</strong></td><td class="num">'+s.count+'</td><td class="num">'+_fmtMoney(s.total)+'</td></tr>';
-  });
-
-  return '<div class="page"><div class="pg-header"><h2>Resumen Ejecutivo</h2><div class="crumb">'+(d.isMultiProj?'Consolidado por proyecto':'Detalle del proyecto')+'</div></div><div class="pg-body"><div class="kpis">'+kpis+'</div>'+projTbl+'<div class="charts-row">'+donut+'<div class="chart-box bar-chart"><div class="chart-title">'+(d.isMultiProj?'Categorías globales':'Top categorías')+'</div>'+bars+'</div></div><div class="section-label">Distribución por categoría</div><table class="detail"><thead><tr><th>Categoría</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th><th style="text-align:right">%</th></tr></thead><tbody>'+catRows+'<tr class="totals"><td>TOTAL</td><td class="num">'+d.totalFacturas+'</td><td class="num">'+_fmtMoney(d.totalMonto)+'</td><td class="pct">100%</td></tr></tbody></table><div class="section-label">Top suplidores por monto</div><table class="detail"><thead><tr><th>#</th><th>Suplidor</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th></tr></thead><tbody>'+supRows+'</tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+' · Resumen ejecutivo</span><span>Pág. '+pageNum+' de '+d.totalPages+'</span></div></div>';
+  return '<div class="page"><div class="pg-header"><h2>Resumen Ejecutivo</h2><div class="crumb">'+(d.isMultiProj?'Consolidado por proyecto':'Detalle del proyecto')+'</div></div><div class="pg-body"><div class="kpis">'+kpis+'</div>'+projTbl+'<div class="charts-row">'+donut+'<div class="chart-box bar-chart"><div class="chart-title">'+(d.isMultiProj?'Categorías globales':'Top categorías')+'</div>'+bars+'</div></div><div class="section-label">Distribución por categoría</div><table class="detail"><thead><tr><th>Categoría</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th><th style="text-align:right">%</th></tr></thead><tbody>'+catRows+'<tr class="totals"><td>TOTAL</td><td class="num">'+d.totalFacturas+'</td><td class="num">'+_fmtMoney(d.totalMonto)+'</td><td class="pct">100%</td></tr></tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+' · Resumen ejecutivo</span><span>Pág. '+pageNum+' de '+d.totalPages+'</span></div></div>';
 }
 
 function _renderPDFProjDivider(proj, pIdx, totProjs, grandTotal, pageNum, totalPages, cliente){
@@ -5159,7 +5154,8 @@ function _renderPDFProjDivider(proj, pIdx, totProjs, grandTotal, pageNum, totalP
   let supList=''; tops.forEach(s=>{ supList+='<div class="cat-row"><span class="name">'+_escHTML(s.nombre)+'</span><span class="count">'+s.count+' fact.</span><span class="amt">'+_fmtMoney(s.total)+'</span></div>'; });
   const eyebrow='Proyecto '+pIdx+' de '+totProjs+' · '+_etiquetaProy(pIdx);
   const sub=pIdx===1?('Cliente: '+cliente+' · Obra de mayor concentración del período'):('Cliente: '+cliente+' · '+proj.facturas.length+' facturas en el período');
-  return '<div class="page proj-divider"><div class="proj-band"></div><div class="proj-divider-header"><div class="proj-eyebrow">'+eyebrow+'</div><h1>'+_escHTML(proj.nombre)+'</h1><div class="sub">'+_escHTML(sub)+'</div></div><div class="proj-body"><div class="proj-kpis"><div class="proj-kpi"><div class="lbl">Facturas del proyecto</div><div class="val">'+proj.facturas.length+'</div></div><div class="proj-kpi amber"><div class="lbl">Monto del proyecto</div><div class="val">RD$ '+_fmtMoney(proj.total)+'</div></div><div class="proj-kpi"><div class="lbl">Promedio / Factura</div><div class="val">RD$ '+_fmtMoney(prom)+'</div></div></div><div class="proj-note">Representa el <strong>'+pctT.toFixed(1)+'%</strong> del monto consolidado del reporte.</div><div class="proj-cat-section"><div class="proj-mini-chart"><h4>Categorías dentro del proyecto</h4><div class="cat-list">'+catList+'</div></div><div class="proj-mini-chart"><h4>Top suplidores del proyecto</h4><div class="cat-list">'+supList+'</div></div></div></div><div class="page-footer"><span>'+_escHTML(cliente)+' · '+_escHTML(proj.nombre)+'</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
+  const accent=proj.color||'#1e3a5f';
+  return '<div class="page proj-divider"><div class="proj-band" style="background:'+accent+'"></div><div class="proj-divider-header"><div class="proj-eyebrow" style="color:'+accent+'">'+eyebrow+'</div><h1 style="color:'+accent+'">'+_escHTML(proj.nombre)+'</h1><div class="sub">'+_escHTML(sub)+'</div></div><div class="proj-body"><div class="proj-kpis"><div class="proj-kpi"><div class="lbl">Facturas del proyecto</div><div class="val">'+proj.facturas.length+'</div></div><div class="proj-kpi amber"><div class="lbl">Monto del proyecto</div><div class="val">RD$ '+_fmtMoney(proj.total)+'</div></div><div class="proj-kpi"><div class="lbl">Promedio / Factura</div><div class="val">RD$ '+_fmtMoney(prom)+'</div></div></div><div class="proj-note">Representa el <strong>'+pctT.toFixed(1)+'%</strong> del monto consolidado del reporte.</div><div class="proj-cat-section"><div class="proj-mini-chart"><h4>Categorías dentro del proyecto</h4><div class="cat-list">'+catList+'</div></div><div class="proj-mini-chart"><h4>Top suplidores del proyecto</h4><div class="cat-list">'+supList+'</div></div></div></div><div class="page-footer"><span>'+_escHTML(cliente)+' · '+_escHTML(proj.nombre)+'</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
 }
 
 function _renderPDFProjTable(proj, isMulti, prevIdx, pageNum, totalPages, cliente){
@@ -5180,22 +5176,28 @@ function _renderPDFProjTable(proj, isMulti, prevIdx, pageNum, totalPages, client
   return '<div class="page"><div class="pg-header"><h2>'+titulo+'</h2><div class="crumb">'+proj.facturas.length+' facturas · RD$ '+_fmtMoney(proj.total)+'</div></div><div class="pg-body"><table class="detail"><thead><tr><th style="width:30px">#</th><th style="width:75px">Fecha</th><th>Suplidor</th><th style="width:90px">RNC</th><th style="width:110px">NCF</th><th style="width:90px;text-align:right">Monto (RD$)</th></tr></thead><tbody>'+body+'</tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+(isMulti?' · '+_escHTML(proj.nombre):'')+' · Detalle por categoría</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
 }
 
-function _renderPDFFactura(f, idx, projName, pageNum, totalPages, cliente){
+function _renderPDFFactura(f, idx, projName, pageNum, totalPages, cliente, projColor){
   cliente=cliente||'Empresa';
+  const accent=projColor||'#d97706'; // naranja default si single-proj
   const fields=[
     '<div class="factura-field"><div class="lbl">Fecha</div><div class="val">'+_escHTML(f.fecha)+'</div></div>',
     '<div class="factura-field"><div class="lbl">RNC</div><div class="val">'+_escHTML(f.rnc||'—')+'</div></div>',
     '<div class="factura-field"><div class="lbl">NCF</div><div class="val">'+_escHTML(f.ncf||'—')+'</div></div>',
     '<div class="factura-field"><div class="lbl">Categoría</div><div class="val">'+_escHTML(f.categoria)+'</div></div>',
-    '<div class="factura-field"><div class="lbl">Monto</div><div class="val amber">RD$ '+_fmtMoney(f.monto)+'</div></div>',
+    '<div class="factura-field"><div class="lbl">Monto</div><div class="val" style="color:'+accent+';font-size:14px">RD$ '+_fmtMoney(f.monto)+'</div></div>',
     '<div class="factura-field"><div class="lbl">Reporte No.</div><div class="val">'+_escHTML(f.no_reporte||'—')+'</div></div>'
   ].join('');
   const photo=f.fotoUrl?'<img src="'+f.fotoUrl+'" alt="Factura">':'<div class="factura-no-photo">📷 Foto no disponible</div>';
   const projTag=projName?' · Obra: '+_escHTML(projName):'';
-  return '<div class="page factura-page"><div class="factura-band"></div><div class="factura-header"><div class="factura-num">'+idx+'</div><div class="factura-info"><div class="factura-supplier">'+_escHTML(f.suplidor||'(sin suplidor)')+'</div><div class="factura-meta">Comprobante de gasto'+projTag+'</div></div></div><div class="factura-fields">'+fields+'</div><div class="factura-photo-wrap">'+photo+'</div><div class="page-footer factura"><span>'+_escHTML(cliente)+(projName?' · '+_escHTML(projName):'')+'</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
+  return '<div class="page factura-page"><div class="factura-band" style="background:'+accent+'"></div><div class="factura-header"><div class="factura-num" style="background:'+accent+'">'+idx+'</div><div class="factura-info"><div class="factura-supplier">'+_escHTML(f.suplidor||'(sin suplidor)')+'</div><div class="factura-meta">Comprobante de gasto'+projTag+'</div></div></div><div class="factura-fields">'+fields+'</div><div class="factura-photo-wrap">'+photo+'</div><div class="page-footer factura"><span>'+_escHTML(cliente)+(projName?' · '+_escHTML(projName):'')+'</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
 }
 
 function _buildPDFReportHTML(d){
+  // Asignar color a cada proyecto (mismo que el donut chart). Se usa en
+  // factura-band, factura-num, monto, eyebrow + h1 + band del divider.
+  const projColors=['#1e3a5f','#0891b2','#7c3aed','#16a34a','#dc2626','#0284c7'];
+  d.projList.forEach((p,i)=>{ p.color=projColors[i%projColors.length]; });
+
   let html='<div class="pdf-report">', pageNum=1;
   html+=_renderPDFCover(d,pageNum); pageNum++;
   html+=_renderPDFResumen(d,pageNum); pageNum++;
@@ -5203,7 +5205,7 @@ function _buildPDFReportHTML(d){
   d.projList.forEach((p,i)=>{
     if(d.isMultiProj){ html+=_renderPDFProjDivider(p,i+1,d.projList.length,d.totalMonto,pageNum,d.totalPages,d.cliente); pageNum++; }
     html+=_renderPDFProjTable(p,d.isMultiProj,runIdx,pageNum,d.totalPages,d.cliente); pageNum++;
-    p.facturas.forEach(f=>{ runIdx++; html+=_renderPDFFactura(f,runIdx,d.isMultiProj?p.nombre:null,pageNum,d.totalPages,d.cliente); pageNum++; });
+    p.facturas.forEach(f=>{ runIdx++; html+=_renderPDFFactura(f,runIdx,d.isMultiProj?p.nombre:null,pageNum,d.totalPages,d.cliente,d.isMultiProj?p.color:null); pageNum++; });
   });
   html+='</div>';
   return html;
@@ -5337,9 +5339,14 @@ async function generarPDFFotos(params){
     let totalPages = 2;
     projList.forEach(p => { totalPages += isMultiProj ? 2 : 1; totalPages += p.facturas.length; });
 
+    // Buscar nombre del usuario actual (fallback al email si no se encuentra en USUARIOS)
+    const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
+    const myUser = (masters.users || []).find(u => (u.email || '').toLowerCase() === myEmail);
+    const preparadoPor = (myUser && myUser.nombre) || localStorage.getItem(LS.EMAIL) || 'Administrador';
+
     const reportData = {
       cliente: (getCurrentCompany() || {}).nombre || 'Empresa',
-      preparadoPor: localStorage.getItem(LS.EMAIL) || 'Administrador',
+      preparadoPor,
       fechaGen: new Date().toLocaleString('es-DO'),
       isMultiProj, totalFacturas: filas.length, totalMonto, totalPages,
       projList, catList, topSups,
