@@ -1410,7 +1410,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0086';
+const APP_VERSION = '0087';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5455,12 +5455,12 @@ function _renderFiscalCSS(){
     '.pdf-fiscal .master-leyenda{margin-top:14px;font-size:9px;color:#6b7280;font-family:Helvetica,Arial,sans-serif}',
     '.pdf-fiscal .master-leyenda strong{color:#000}',
     // Ficha por factura
-    '.pdf-fiscal .ficha-page{padding:0;height:11in;display:flex!important;flex-direction:column}',
+    '.pdf-fiscal .ficha-page{padding:0;height:11in;display:flex!important;flex-direction:column;position:relative}',
+    '.pdf-fiscal .ficha-page .watermark{z-index:0}',
     '.pdf-fiscal .ficha-header{padding:24px 50px 16px;border-bottom:2px solid #000;font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;position:relative;z-index:1}',
     '.pdf-fiscal .ficha-header h2{font-size:18px;font-weight:700;color:#000;font-family:Helvetica,Arial,sans-serif}',
     '.pdf-fiscal .ficha-header .meta{text-align:right;font-size:10px;color:#6b7280;line-height:1.5}',
-    '.pdf-fiscal .ficha-body{padding:24px 50px;font-family:Helvetica,Arial,sans-serif;flex:1;display:flex;flex-direction:column;position:relative;z-index:1}',
-    '.pdf-fiscal .ficha-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1.5px solid #000;flex-shrink:0}',
+    '.pdf-fiscal .ficha-grid{margin:24px 50px 0;display:grid;grid-template-columns:1fr 1fr;gap:0;border:1.5px solid #000;flex-shrink:0;position:relative;z-index:1;font-family:Helvetica,Arial,sans-serif}',
     '.pdf-fiscal .ficha-cell{border-right:1px solid #d1d5db;border-bottom:1px solid #d1d5db;padding:10px 14px}',
     '.pdf-fiscal .ficha-cell:nth-child(2n){border-right:none}',
     '.pdf-fiscal .ficha-cell.full{grid-column:1/-1;border-right:none}',
@@ -5468,10 +5468,10 @@ function _renderFiscalCSS(){
     '.pdf-fiscal .ficha-cell .val{font-size:13px;color:#1f2937;font-weight:600}',
     '.pdf-fiscal .ficha-cell .val.mono{font-family:monospace;font-size:12px}',
     '.pdf-fiscal .ficha-cell .val.amber{font-size:18px;color:#000;font-weight:800}',
-    '.pdf-fiscal .ficha-photo{margin-top:14px;flex:1 1 auto;min-height:0;background:#f3f4f6;border:1.5px solid #000;display:flex;align-items:center;justify-content:center;color:#9ca3af;overflow:hidden;padding:6px}',
-    '.pdf-fiscal .ficha-photo img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block}',
+    '.pdf-fiscal .ficha-photo{margin:14px 50px 0;flex:1;background:#f3f4f6;border:1.5px solid #000;display:flex;align-items:center;justify-content:center;color:#9ca3af;overflow:hidden;padding:6px;min-height:0;position:relative;z-index:1}',
+    '.pdf-fiscal .ficha-photo img{max-width:100%;max-height:100%;object-fit:contain}',
     '.pdf-fiscal .ficha-photo .no-photo{font-size:12px;font-style:italic;color:#9ca3af}',
-    '.pdf-fiscal .ficha-footer{padding:8px 50px 16px;border-top:1px solid #000;font-size:9px;color:#6b7280;display:flex;justify-content:space-between;font-family:Helvetica,Arial,sans-serif;flex-shrink:0;position:relative;z-index:1}',
+    '.pdf-fiscal .ficha-footer{margin:14px 50px 0;padding:8px 0 16px;border-top:1px solid #000;font-size:9px;color:#6b7280;display:flex;justify-content:space-between;font-family:Helvetica,Arial,sans-serif;flex-shrink:0;position:relative;z-index:1}',
     // Firmas
     '.pdf-fiscal .sign-page{padding:60px 80px;font-family:Helvetica,Arial,sans-serif;position:relative;z-index:1}',
     '.pdf-fiscal .sign-page h2{font-size:24px;color:#000;font-weight:700;text-align:center;margin-bottom:8px;letter-spacing:-.01em;font-family:Georgia,"Times New Roman",serif}',
@@ -5610,7 +5610,7 @@ function _renderFiscalTablaMaestra(d, startPageNum){
       const fechaCorta = (f.fecha||'').match(/^(\d{4})-(\d{2})-(\d{2})$/) ? f.fecha.slice(8,10)+'/'+f.fecha.slice(5,7)+'/'+f.fecha.slice(0,4) : (f.fecha||'');
       const idShort = (f.id||'').slice(0,4);
       const catShort = (f.categoriaCod||'').slice(0,3);
-      return '<tr><td>'+idx+'</td><td>'+_escHTML(idShort)+'</td><td>'+_escHTML(fechaCorta)+'</td><td>'+_escHTML(f.suplidor)+'</td><td>'+_escHTML(f.rnc||'—')+'</td><td>'+_escHTML(f.ncf||'—')+'</td><td>'+_escHTML(catShort)+'</td><td>'+_escHTML(f.cuenta||'—')+'</td><td class="num">'+_fmtMoney(f.monto)+'</td><td class="'+valCls+'">'+valSym+'</td><td>'+_escHTML(d.preparadoPorIni||'—')+'</td></tr>';
+      return '<tr><td>'+idx+'</td><td>'+_escHTML(idShort)+'</td><td>'+_escHTML(fechaCorta)+'</td><td>'+_escHTML(f.suplidor)+'</td><td>'+_escHTML(f.rnc||'—')+'</td><td>'+_escHTML(f.ncf||'—')+'</td><td>'+_escHTML(catShort)+'</td><td>'+_escHTML(f.cuenta||'—')+'</td><td class="num">'+_fmtMoney(f.monto)+'</td><td class="'+valCls+'">'+valSym+'</td><td>'+_escHTML(f.usuarioIni||'—')+'</td></tr>';
     }).join('');
 
     const totalsRow = isLastPage
@@ -5660,22 +5660,20 @@ function _renderFiscalFichaFactura(f, idx, d, pageNum){
     +     '<h2>Ficha de Comprobante No. ' + idx + '</h2>'
     +     '<div class="meta">Lote: ' + _escHTML(d.loteId) + '<br>Folio interno: ' + _escHTML((f.id||'').slice(0,4)) + '-' + new Date().getFullYear() + '</div>'
     +   '</div>'
-    +   '<div class="ficha-body">'
-    +     '<div class="ficha-grid">'
-    +       '<div class="ficha-cell"><div class="lbl">Razón social del emisor</div><div class="val">' + _escHTML(f.suplidor||'(sin suplidor)') + '</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">RNC del emisor</div><div class="val mono">' + _escHTML(f.rnc||'—') + '</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">NCF</div><div class="val mono">' + _escHTML(f.ncf||'—') + '</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">Tipo de comprobante</div><div class="val">' + _escHTML(tipoComp) + '</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">Fecha del comprobante</div><div class="val">' + _escHTML(fechaLarga) + '</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">Obra / Centro de costo</div><div class="val">' + _escHTML(f.proyecto||'—') + '</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">Categoría</div><div class="val">' + _escHTML(f.categoria||'—') + ' (' + _escHTML(f.categoriaCod||'—') + ')</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">Cuenta contable</div><div class="val mono">' + _escHTML(f.cuenta||'—') + '</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">Monto total</div><div class="val amber">RD$ ' + _fmtMoney(f.monto) + '</div></div>'
-    +       '<div class="ficha-cell"><div class="lbl">Estado de validación</div><div class="val" style="color:' + valColor + '">' + valTxt + '</div></div>'
-    +       '<div class="ficha-cell full"><div class="lbl">Cargado por</div><div class="val">' + _escHTML(d.preparadoPor) + (f.no_reporte ? ' · Reporte No. ' + _escHTML(f.no_reporte) : '') + '</div></div>'
-    +     '</div>'
-    +     '<div class="ficha-photo">' + photo + '</div>'
+    +   '<div class="ficha-grid">'
+    +     '<div class="ficha-cell"><div class="lbl">Razón social del emisor</div><div class="val">' + _escHTML(f.suplidor||'(sin suplidor)') + '</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">RNC del emisor</div><div class="val mono">' + _escHTML(f.rnc||'—') + '</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">NCF</div><div class="val mono">' + _escHTML(f.ncf||'—') + '</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">Tipo de comprobante</div><div class="val">' + _escHTML(tipoComp) + '</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">Fecha del comprobante</div><div class="val">' + _escHTML(fechaLarga) + '</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">Obra / Centro de costo</div><div class="val">' + _escHTML(f.proyecto||'—') + '</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">Categoría</div><div class="val">' + _escHTML(f.categoria||'—') + ' (' + _escHTML(f.categoriaCod||'—') + ')</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">Cuenta contable</div><div class="val mono">' + _escHTML(f.cuenta||'—') + '</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">Monto total</div><div class="val amber">RD$ ' + _fmtMoney(f.monto) + '</div></div>'
+    +     '<div class="ficha-cell"><div class="lbl">Estado de validación</div><div class="val" style="color:' + valColor + '">' + valTxt + '</div></div>'
+    +     '<div class="ficha-cell full"><div class="lbl">Cargado por</div><div class="val">' + _escHTML(f.usuarioNombre || f.usuarioEmail || '—') + (f.usuarioEmail && f.usuarioNombre && f.usuarioNombre !== f.usuarioEmail ? ' (' + _escHTML(f.usuarioEmail) + ')' : '') + (f.no_reporte ? ' · Reporte No. ' + _escHTML(f.no_reporte) : '') + '</div></div>'
     +   '</div>'
+    +   '<div class="ficha-photo">' + photo + '</div>'
     +   '<div class="ficha-footer"><span>ID interno: ' + _escHTML((f.id||'').slice(0,4)) + '-' + new Date().getFullYear() + ' · Generado: ' + _escHTML(d.fechaGen) + '</span><span>Pág. ' + pageNum + ' de ' + d.totalPages + '</span></div>'
     + '</div>';
 }
@@ -5817,10 +5815,16 @@ async function generarPDFFotos(params){
     const tipoInforme = params.tipoInforme || 'ejecutivo';
     if(!filtrados || filtrados.length === 0){ banner.remove(); return; }
 
-    // 1. Normalizar filas (incluye categoriaCod/cuenta para template Contabilidad)
+    // 1. Normalizar filas (incluye categoriaCod/cuenta/usuario para template Contabilidad)
     const filas = filtrados.map(r => {
       const cat = (masters.categories||[]).find(c => c.cod === r[regH.CATEGORIA]);
       const proj = (masters.projects||[]).find(p => p.cod === r[regH.PROYECTO]);
+      const usuarioEmail = (regH.USUARIO !== undefined ? (r[regH.USUARIO] || '') : '').toLowerCase();
+      const userObj = (masters.users || []).find(u => (u.email || '').toLowerCase() === usuarioEmail);
+      const usuarioNombre = userObj && userObj.nombre ? userObj.nombre : usuarioEmail;
+      const usuarioIni = (userObj && userObj.nombre)
+        ? userObj.nombre.split(/\s+/).map(w => (w[0]||'').toUpperCase()).slice(0,3).join('')
+        : (usuarioEmail ? usuarioEmail.slice(0,3).toUpperCase() : '—');
       return {
         id: r[regH.ID],
         fecha: (r[regH.FECHA_FACTURA] || r[regH.FECHA_REGISTRO] || '').toString(),
@@ -5833,7 +5837,10 @@ async function generarPDFFotos(params){
         no_reporte: regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '').toString() : '',
         monto: parseFloat(r[regH.MONTO]) || 0,
         url_factura: r[regH.URL_FACTURA] || '',
-        proyecto: proj ? proj.nombre : (r[regH.PROYECTO] || '(Sin proyecto)')
+        proyecto: proj ? proj.nombre : (r[regH.PROYECTO] || '(Sin proyecto)'),
+        usuarioEmail,
+        usuarioNombre,
+        usuarioIni
       };
     }).sort((a,b) => a.fecha.localeCompare(b.fecha));
 
