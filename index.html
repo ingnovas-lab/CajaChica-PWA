@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0075';
+const APP_VERSION = '0076';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5339,14 +5339,9 @@ async function generarPDFFotos(params){
     let totalPages = 2;
     projList.forEach(p => { totalPages += isMultiProj ? 2 : 1; totalPages += p.facturas.length; });
 
-    // Buscar nombre del usuario actual (fallback al email si no se encuentra en USUARIOS)
-    const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
-    const myUser = (masters.users || []).find(u => (u.email || '').toLowerCase() === myEmail);
-    const preparadoPor = (myUser && myUser.nombre) || localStorage.getItem(LS.EMAIL) || 'Administrador';
-
     const reportData = {
       cliente: (getCurrentCompany() || {}).nombre || 'Empresa',
-      preparadoPor,
+      preparadoPor: getDisplayName(),
       fechaGen: new Date().toLocaleString('es-DO'),
       isMultiProj, totalFacturas: filas.length, totalMonto, totalPages,
       projList, catList, topSups,
