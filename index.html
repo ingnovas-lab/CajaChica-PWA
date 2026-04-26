@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0069';
+const APP_VERSION = '0070';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5331,13 +5331,15 @@ async function generarPDFFotos(params){
       document.head.appendChild(style);
     }
 
-    // 5. Renderizar HTML en container oculto fuera de pantalla
+    // 5. Renderizar HTML en container invisible pero LAYOUT-VISIBLE
+    // (left:-99999px hace que algunos browsers salten el layout/paint y html2canvas
+    //  capture canvases vacíos. opacity:0.01 + z-index:-1 mantiene el layout).
     setStatus('Construyendo reporte…');
     renderRoot = document.createElement('div');
-    renderRoot.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;width:8.5in';
+    renderRoot.style.cssText = 'position:fixed;left:0;top:0;width:8.5in;background:#fff;opacity:0.01;z-index:-1;pointer-events:none';
     renderRoot.innerHTML = _buildPDFReportHTML(reportData);
     document.body.appendChild(renderRoot);
-    await new Promise(r => setTimeout(r, 50)); // que el browser pinte
+    await new Promise(r => setTimeout(r, 100)); // que el browser pinte
 
     // 6. Capturar página por página y armar el PDF
     const pages = renderRoot.querySelectorAll('.page');
@@ -5353,11 +5355,20 @@ async function generarPDFFotos(params){
     }
     const pdfBlob = pdf.output('blob');
 
-    // 7. Subir a Drive en /Empresa/Proyectos/<obra o "Todas las obras">/Reportes/
+    // 7. Subir a Drive
+    // - Si hay obra específica (codObra): /Empresa/Proyectos/<obra>/Reportes/
+    //   Reusa carpetas que la PWA ya creó al subir fotos (visibles con drive.file scope).
+    // - Si es consolidado (sin codObra): /Empresa/Reportes/
+    //   Evita crear "Todas las obras" duplicado: la carpeta existente la creó Apps Script
+    //   y la PWA no la ve (drive.file scope solo ve files que ELLA creó).
     setStatus('Subiendo a Drive…');
-    const proyectosId = await getProyectosFolderId();
-    const obraId = await ensureFolder(nombreObra || 'Todas las obras', proyectosId);
-    const reportesId = await ensureFolder('Reportes', obraId);
+    let reportesId;
+    if (codObra) {
+      reportesId = await getSubfolderObra(codObra, 'Reportes');
+    } else {
+      const empresaId = await getCompanyFolderId();
+      reportesId = await ensureFolder('Reportes', empresaId);
+    }
 
     const fechaGenDot = new Date().toISOString().slice(0,10).replace(/-/g, '.');
     const desdeDot = (desde || '').replace(/-/g, '.');
