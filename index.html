@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0076';
+const APP_VERSION = '0077';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5005,7 +5005,7 @@ function _renderPDFCSS(){
     '.pdf-report .kpi .lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:5px}',
     '.pdf-report .kpi .val{font-size:18px;font-weight:800;color:#1e3a5f;letter-spacing:-.01em;line-height:1}',
     '.pdf-report .kpi .sub{font-size:9px;color:#64748b;margin-top:4px}',
-    '.pdf-report .section-label{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:10px;margin-top:16px}',
+    '.pdf-report .section-label{font-size:13px;color:#1e3a5f;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:10px;margin-top:16px}',
     '.pdf-report table.detail{width:100%;border-collapse:collapse;font-size:10px}',
     '.pdf-report table.detail thead th{background:#1e3a5f;color:#fff;text-align:left;padding:8px 10px;font-size:9px;text-transform:uppercase;letter-spacing:.06em;font-weight:700}',
     '.pdf-report table.detail tbody td{padding:7px 10px;border-bottom:1px solid #f1f5f9;color:#334155}',
@@ -5019,7 +5019,7 @@ function _renderPDFCSS(){
     '.pdf-report table.detail tr.proj-total td{background:#1e3a5f;color:#fff;font-weight:800;font-size:11px;padding:9px 10px}',
     '.pdf-report .charts-row{display:flex;gap:16px;margin-top:14px}',
     '.pdf-report .chart-box{flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:14px}',
-    '.pdf-report .chart-title{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:12px}',
+    '.pdf-report .chart-title{font-size:13px;color:#1e3a5f;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:12px}',
     '.pdf-report .donut-wrap{display:flex;align-items:center;gap:14px}',
     '.pdf-report .legend{flex:1;font-size:10px}',
     '.pdf-report .legend div{display:flex;align-items:center;padding:3px 0}',
@@ -5044,9 +5044,9 @@ function _renderPDFCSS(){
     '.pdf-report .proj-kpi .val{font-size:20px;font-weight:800;letter-spacing:-.01em;line-height:1}',
     '.pdf-report .proj-note{background:#f8fafc;border-left:4px solid #d97706;padding:12px 16px;border-radius:0 6px 6px 0;font-size:11px;color:#334155;font-style:italic;margin-bottom:24px}',
     '.pdf-report .proj-note strong{color:#1e3a5f;font-style:normal}',
-    '.pdf-report .proj-cat-section{display:flex;gap:20px;margin-top:6px}',
-    '.pdf-report .proj-mini-chart{flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:14px}',
-    '.pdf-report .proj-mini-chart h4{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:10px}',
+    '.pdf-report .proj-cat-section{display:flex;flex-direction:column;gap:18px;margin-top:6px}',
+    '.pdf-report .proj-mini-chart{border:1px solid #e2e8f0;border-radius:8px;padding:16px}',
+    '.pdf-report .proj-mini-chart h4{font-size:13px;color:#1e3a5f;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:10px}',
     '.pdf-report .cat-list{font-size:10px}',
     '.pdf-report .cat-row{display:flex;align-items:center;padding:5px 0;border-bottom:1px solid #f1f5f9}',
     '.pdf-report .cat-row:last-child{border:none}',
@@ -5144,18 +5144,29 @@ function _renderPDFProjDivider(proj, pIdx, totProjs, grandTotal, pageNum, totalP
   cliente=cliente||'Empresa';
   const pctT=grandTotal>0?(proj.total/grandTotal)*100:0;
   const prom=proj.facturas.length>0?proj.total/proj.facturas.length:0;
-  const cols=['#1e3a5f','#d97706','#0891b2','#16a34a','#7c3aed','#dc2626'];
+
   const cats=Object.values(proj.byCat).sort((a,b)=>b.total-a.total);
-  let catList='';
-  cats.forEach((c,i)=>{ catList+='<div class="cat-row"><span class="sw" style="background:'+cols[i%cols.length]+'"></span><span class="name">'+_escHTML(c.nombre)+'</span><span class="count">'+c.facturas.length+' fact.</span><span class="amt">'+_fmtMoney(c.total)+'</span></div>'; });
+  let catRows='';
+  cats.forEach(c=>{
+    const pct=proj.total>0?(c.total/proj.total)*100:0;
+    catRows+='<tr><td><strong>'+_escHTML(c.nombre)+'</strong></td><td class="num">'+c.facturas.length+'</td><td class="num">'+_fmtMoney(c.total)+'</td><td class="pct">'+pct.toFixed(1)+'%</td></tr>';
+  });
+  const catTable='<table class="detail"><thead><tr><th>Categoría</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th><th style="text-align:right">%</th></tr></thead><tbody>'+catRows+'<tr class="totals"><td>TOTAL</td><td class="num">'+proj.facturas.length+'</td><td class="num">'+_fmtMoney(proj.total)+'</td><td class="pct">100%</td></tr></tbody></table>';
+
   const supMap={};
   proj.facturas.forEach(f=>{ const s=f.suplidor||'(Sin suplidor)'; if(!supMap[s])supMap[s]={nombre:s,count:0,total:0}; supMap[s].count++; supMap[s].total+=f.monto; });
   const tops=Object.values(supMap).sort((a,b)=>b.total-a.total).slice(0,5);
-  let supList=''; tops.forEach(s=>{ supList+='<div class="cat-row"><span class="name">'+_escHTML(s.nombre)+'</span><span class="count">'+s.count+' fact.</span><span class="amt">'+_fmtMoney(s.total)+'</span></div>'; });
+  let supRows='';
+  tops.forEach(s=>{
+    const pct=proj.total>0?(s.total/proj.total)*100:0;
+    supRows+='<tr><td><strong>'+_escHTML(s.nombre)+'</strong></td><td class="num">'+s.count+'</td><td class="num">'+_fmtMoney(s.total)+'</td><td class="pct">'+pct.toFixed(1)+'%</td></tr>';
+  });
+  const supTable='<table class="detail"><thead><tr><th>Suplidor</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th><th style="text-align:right">%</th></tr></thead><tbody>'+supRows+'</tbody></table>';
+
   const eyebrow='Proyecto '+pIdx+' de '+totProjs+' · '+_etiquetaProy(pIdx);
   const sub=pIdx===1?('Cliente: '+cliente+' · Obra de mayor concentración del período'):('Cliente: '+cliente+' · '+proj.facturas.length+' facturas en el período');
   const accent=proj.color||'#1e3a5f';
-  return '<div class="page proj-divider"><div class="proj-band" style="background:'+accent+'"></div><div class="proj-divider-header"><div class="proj-eyebrow" style="color:'+accent+'">'+eyebrow+'</div><h1 style="color:'+accent+'">'+_escHTML(proj.nombre)+'</h1><div class="sub">'+_escHTML(sub)+'</div></div><div class="proj-body"><div class="proj-kpis"><div class="proj-kpi"><div class="lbl">Facturas del proyecto</div><div class="val">'+proj.facturas.length+'</div></div><div class="proj-kpi amber"><div class="lbl">Monto del proyecto</div><div class="val">RD$ '+_fmtMoney(proj.total)+'</div></div><div class="proj-kpi"><div class="lbl">Promedio / Factura</div><div class="val">RD$ '+_fmtMoney(prom)+'</div></div></div><div class="proj-note">Representa el <strong>'+pctT.toFixed(1)+'%</strong> del monto consolidado del reporte.</div><div class="proj-cat-section"><div class="proj-mini-chart"><h4>Categorías dentro del proyecto</h4><div class="cat-list">'+catList+'</div></div><div class="proj-mini-chart"><h4>Top suplidores del proyecto</h4><div class="cat-list">'+supList+'</div></div></div></div><div class="page-footer"><span>'+_escHTML(cliente)+' · '+_escHTML(proj.nombre)+'</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
+  return '<div class="page proj-divider"><div class="proj-band" style="background:'+accent+'"></div><div class="proj-divider-header"><div class="proj-eyebrow" style="color:'+accent+'">'+eyebrow+'</div><h1 style="color:'+accent+'">'+_escHTML(proj.nombre)+'</h1><div class="sub">'+_escHTML(sub)+'</div></div><div class="proj-body"><div class="proj-kpis"><div class="proj-kpi"><div class="lbl">Facturas del proyecto</div><div class="val">'+proj.facturas.length+'</div></div><div class="proj-kpi amber"><div class="lbl">Monto del proyecto</div><div class="val">RD$ '+_fmtMoney(proj.total)+'</div></div><div class="proj-kpi"><div class="lbl">Promedio / Factura</div><div class="val">RD$ '+_fmtMoney(prom)+'</div></div></div><div class="proj-note">Representa el <strong>'+pctT.toFixed(1)+'%</strong> del monto consolidado del reporte.</div><div class="proj-cat-section"><div class="proj-mini-chart"><h4>Categorías dentro del proyecto</h4>'+catTable+'</div><div class="proj-mini-chart"><h4>Top suplidores del proyecto</h4>'+supTable+'</div></div></div><div class="page-footer"><span>'+_escHTML(cliente)+' · '+_escHTML(proj.nombre)+'</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
 }
 
 function _renderPDFProjTable(proj, isMulti, prevIdx, pageNum, totalPages, cliente){
