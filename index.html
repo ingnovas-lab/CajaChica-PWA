@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0077';
+const APP_VERSION = '0078';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5137,7 +5137,7 @@ function _renderPDFResumen(d, pageNum){
     donut='<div class="chart-box"><div class="chart-title">Distribución por categoría</div><div class="donut-wrap">'+_donutSVG(segs,100)+'<div class="legend">'+leg+'</div></div></div>';
   }
 
-  return '<div class="page"><div class="pg-header"><h2>Resumen Ejecutivo</h2><div class="crumb">'+(d.isMultiProj?'Consolidado por proyecto':'Detalle del proyecto')+'</div></div><div class="pg-body"><div class="kpis">'+kpis+'</div>'+projTbl+'<div class="charts-row">'+donut+'<div class="chart-box bar-chart"><div class="chart-title">'+(d.isMultiProj?'Categorías globales':'Top categorías')+'</div>'+bars+'</div></div><div class="section-label">Distribución por categoría</div><table class="detail"><thead><tr><th>Categoría</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th><th style="text-align:right">%</th></tr></thead><tbody>'+catRows+'<tr class="totals"><td>TOTAL</td><td class="num">'+d.totalFacturas+'</td><td class="num">'+_fmtMoney(d.totalMonto)+'</td><td class="pct">100%</td></tr></tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+' · Resumen ejecutivo</span><span>Pág. '+pageNum+' de '+d.totalPages+'</span></div></div>';
+  return '<div class="page"><div class="pg-header"><h2>Resumen Ejecutivo</h2><div class="crumb">'+(d.isMultiProj?'Consolidado por proyecto':'Detalle del proyecto')+'</div></div><div class="pg-body"><div class="kpis">'+kpis+'</div>'+projTbl+'<div class="charts-row">'+donut+'<div class="chart-box bar-chart"><div class="chart-title">'+(d.isMultiProj?'Categorías globales':'Top categorías')+'</div>'+bars+'</div></div><div class="section-label" style="font-size:13px">Distribución por categoría</div><table class="detail"><thead><tr><th>Categoría</th><th style="text-align:right">Facturas</th><th style="text-align:right">Monto (RD$)</th><th style="text-align:right">%</th></tr></thead><tbody>'+catRows+'<tr class="totals"><td>TOTAL</td><td class="num">'+d.totalFacturas+'</td><td class="num">'+_fmtMoney(d.totalMonto)+'</td><td class="pct">100%</td></tr></tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+' · Resumen ejecutivo</span><span>Pág. '+pageNum+' de '+d.totalPages+'</span></div></div>';
 }
 
 function _renderPDFProjDivider(proj, pIdx, totProjs, grandTotal, pageNum, totalPages, cliente){
@@ -5451,10 +5451,10 @@ async function generarPDFFotos(params){
     banner.innerHTML = `
       <div style="font-size:14px;font-weight:600;color:var(--green);margin-bottom:4px">✓ PDF de soporte listo</div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${fotosOk} foto(s) incluida(s) · ${sinFoto} sin foto</div>
-      <button class="btn btn-green" style="padding:10px" onclick="window.open('${driveUrl}', '_blank')">
+      <a class="btn btn-green" style="padding:10px;text-decoration:none" href="${driveUrl}" target="_blank" rel="noopener">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Abrir PDF con fotos
-      </button>
+      </a>
     `;
   } catch(e){
     if(renderRoot && renderRoot.parentNode) renderRoot.parentNode.removeChild(renderRoot);
