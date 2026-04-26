@@ -1410,7 +1410,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0087';
+const APP_VERSION = '0088';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3553,6 +3553,36 @@ function getDisplayName(){
   return localStorage.getItem(LS.NAME) || email || '—';
 }
 
+// Garantiza que LS.EMAIL esté seteado. Si está vacío y hay token vivo, lo
+// recupera desde Google userinfo y lo persiste. Si no, retorna ''.
+// Bug conocido (v.0088): silentRefresh no setea LS.EMAIL/LS.NAME — solo el flow
+// inicial de OAuth lo hace. Si el usuario abrió la app por primera vez vía
+// auto-login (USER_CONFIG) o si el localStorage se reset en algún momento,
+// LS.EMAIL puede quedar vacío y los registros nuevos se guardan con USUARIO=null.
+async function _ensureUserEmail(){
+  let email = (localStorage.getItem(LS.EMAIL) || '').trim();
+  if(email && email !== 'undefined' && email !== 'null') return email;
+
+  const token = getToken();
+  if(!token) return '';
+  try {
+    const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    if(!r.ok) return '';
+    const info = await r.json();
+    if(info && info.email){
+      localStorage.setItem(LS.EMAIL, info.email);
+      if(info.name) localStorage.setItem(LS.NAME, info.name);
+      console.log('[ensureUserEmail] LS.EMAIL recuperado vía userinfo:', info.email);
+      return info.email;
+    }
+  } catch(e){
+    console.warn('[ensureUserEmail] falló:', e);
+  }
+  return '';
+}
+
 // Aplicar visibilidad de elementos restringidos a ADMIN
 function applyRoleUI(){
   const admin = isAdmin();
@@ -4187,7 +4217,7 @@ async function saveEntry(){
     monto: monto,
     aprobado: aprobado,
     observaciones: document.getElementById('f-obs').value.trim(),
-    usuario: localStorage.getItem(LS.EMAIL),
+    usuario: await _ensureUserEmail(),
     ocr_status: currentCapture ? 'PROCESADO' : 'MANUAL',
     ocr_confidence: 0,
     image_base64: currentCapture ? currentCapture.base64 : null,
@@ -4283,7 +4313,7 @@ async function saveAbono(){
     tipo: document.getElementById('ab-tipo').value,
     monto: monto,
     referencia: document.getElementById('ab-ref').value.trim(),
-    usuario: localStorage.getItem(LS.EMAIL),
+    usuario: await _ensureUserEmail(),
   };
   if(abonoCapture){
     entry.image_base64 = abonoCapture.base64;
@@ -4389,15 +4419,22 @@ async function syncAll(){
 
     // 2) Preparar filas para REGISTRO (evita tocar W=MONTO_APROBADO que es fórmula)
     // Escribimos A:V (22 cols) + Y separado (ELIMINADO en col 25)
-    const regRowsMain = gastos.map(e => [
-      e.id, e.proyecto, e.no_reporte || '', e.fecha_registro.slice(0,10), e.fecha_factura,
-      e.suplidor, e.rnc, (e.ncf || '').toUpperCase(),
-      '', '', // VALIDACION_NCF y DUPLICADO son fórmulas, NO escribir
-      e.categoria, e.tipo, e.monto,
-      e.aprobado, e.observaciones, e.url_factura || '',
-      e.usuario, e.ocr_status, e.ocr_confidence || 0,
-      'NO', '', ''
-    ]);
+    // Defensa adicional: si un pending viejo quedó con usuario null/vacío
+    // (bug pre-v.0088), recuperarlo del email vivo antes de subir (v.0088).
+    const fallbackUser = await _ensureUserEmail();
+    const regRowsMain = gastos.map(e => {
+      const usr = (e.usuario && String(e.usuario).trim() && e.usuario !== 'null' && e.usuario !== 'undefined')
+        ? e.usuario : fallbackUser;
+      return [
+        e.id, e.proyecto, e.no_reporte || '', e.fecha_registro.slice(0,10), e.fecha_factura,
+        e.suplidor, e.rnc, (e.ncf || '').toUpperCase(),
+        '', '', // VALIDACION_NCF y DUPLICADO son fórmulas, NO escribir
+        e.categoria, e.tipo, e.monto,
+        e.aprobado, e.observaciones, e.url_factura || '',
+        usr, e.ocr_status, e.ocr_confidence || 0,
+        'NO', '', ''
+      ];
+    });
     const regRowsEliminado = gastos.map(e => ['NO']);
     // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0061+)
     const ingRows = abonos.map(e => [
@@ -7615,6 +7652,14 @@ function rewireClickable(root){
     loading(true, 'Iniciando', 'Renovando sesión...');
     const refreshed = await silentRefresh();
     if(refreshed) hasToken = refreshed;
+  }
+
+  // Health-check (v.0088): si hay token vivo pero LS.EMAIL está vacío, recuperarlo
+  // del endpoint userinfo. Esto cubre dispositivos donde el flow inicial de OAuth
+  // no llegó a setear LS.EMAIL — sin esto, los registros nuevos se guardaban con
+  // USUARIO=null y el reporte Contabilidad mostraba "—" en "Cargado por".
+  if(hasToken && !hasEmail){
+    await _ensureUserEmail();
   }
 
   // NUEVO: Si SUPER_ADMIN tiene token válido pero no tiene empresas ni Gemini,
