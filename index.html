@@ -1410,7 +1410,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0090';
+const APP_VERSION = '0091';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3205,7 +3205,7 @@ async function initializeSheetStructure(sheetId){
   const sheets = [
     {
       name: 'REGISTRO',
-      headers: ['ID','PROYECTO','NO_REPORTE','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF','VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO','APROBADO','OBSERVACIONES','URL_FACTURA','USUARIO','OCR_STATUS','OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO','ELIMINADO'],
+      headers: ['ID','PROYECTO','NO_REPORTE','FECHA_REGISTRO','FECHA_FACTURA','SUPLIDOR','RNC','NCF','VALIDACION_NCF','DUPLICADO','CATEGORIA','TIPO','MONTO','APROBADO','OBSERVACIONES','URL_FACTURA','USUARIO','OCR_STATUS','OCR_CONFIDENCE','EXPORTADO','FECHA_EXPORT','LOTE_EXPORT','MONTO_APROBADO','ELIMINADO','CONSOLIDADO'],
       formulas: {
         // VALIDACION_NCF (columna I): "OK" si el NCF cumple regex DGII, "INVALIDO" si no.
         I: '=ARRAYFORMULA(IF(ROW(H:H)=1,"VALIDACION_NCF",IF(H:H="","",IF(REGEXMATCH(UPPER(H:H),"^((B0[1-9]|B1[1-6])\\d{8}|(E3[1-4]|E4[1-7])\\d{10})$"),"OK","INVALIDO"))))',
@@ -4218,6 +4218,10 @@ async function saveEntry(){
     aprobado: aprobado,
     observaciones: document.getElementById('f-obs').value.trim(),
     usuario: await _ensureUserEmail(),
+    // v.0091: si el admin sube directamente desde la PWA, la foto va a su Drive
+    // → ya está consolidada. Si un user regular sube, va a SU Drive y Apps Script
+    // tendrá que consolidar después → CONSOLIDADO=NO.
+    consolidado: isAdmin() ? 'SI' : 'NO',
     ocr_status: currentCapture ? 'PROCESADO' : 'MANUAL',
     ocr_confidence: 0,
     image_base64: currentCapture ? currentCapture.base64 : null,
@@ -4314,6 +4318,9 @@ async function saveAbono(){
     monto: monto,
     referencia: document.getElementById('ab-ref').value.trim(),
     usuario: await _ensureUserEmail(),
+    // v.0091: ABONOS van a sheet INGRESOS (no REGISTRO) — pero sigamos el mismo
+    // patrón por consistencia. La PWA del admin marca consolidado para sus uploads.
+    consolidado: isAdmin() ? 'SI' : 'NO',
   };
   if(abonoCapture){
     entry.image_base64 = abonoCapture.base64;
@@ -4435,29 +4442,31 @@ async function syncAll(){
         'NO', '', ''
       ];
     });
-    const regRowsEliminado = gastos.map(e => ['NO']);
+    // X=ELIMINADO ('NO'), Y=CONSOLIDADO (e.consolidado || 'NO'). v.0091.
+    const regRowsXY = gastos.map(e => ['NO', e.consolidado || 'NO']);
     // INGRESOS ahora tiene 7 cols incluyendo URL_COMPROBANTE (v.0061+)
     const ingRows = abonos.map(e => [
       e.id, e.fecha, e.proyecto, e.tipo, e.monto, e.referencia, e.url_comprobante || ''
     ]);
 
-    // 3) Append masivo — escribir A-V primero (sin tocar W=fórmula), luego X=ELIMINADO
+    // 3) Append masivo — escribir A-V primero (sin tocar W=fórmula), luego X:Y juntos.
     let startRowReg = 0;
     if(regRowsMain.length > 0){
       const appendRes = await sheetsAppend('REGISTRO!A2', regRowsMain);
-      // Extraer la fila donde empezó la escritura para poder poner ELIMINADO en X
+      // Extraer la fila donde empezó la escritura para poder poner ELIMINADO/CONSOLIDADO en X:Y
       const updatedRange = appendRes.updatedRange || '';
       // updatedRange tiene formato "REGISTRO!A5:V7" — extraer 5
       const m = updatedRange.match(/!A(\d+):/);
       if(m) startRowReg = parseInt(m[1]);
-      if(startRowReg > 0 && regRowsEliminado.length > 0){
-        const xRange = `REGISTRO!X${startRowReg}`;
+      if(startRowReg > 0 && regRowsXY.length > 0){
+        const endRow = startRowReg + regRowsXY.length - 1;
+        const xyRange = `REGISTRO!X${startRowReg}:Y${endRow}`;
         const token = getToken();
         const ssid = getActiveSheetId();
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(xRange)}?valueInputOption=USER_ENTERED`, {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/${encodeURIComponent(xyRange)}?valueInputOption=USER_ENTERED`, {
           method: 'PUT',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-          body: JSON.stringify({values: regRowsEliminado})
+          body: JSON.stringify({values: regRowsXY})
         });
       }
     }
@@ -7486,43 +7495,23 @@ async function checkConsolidarStatus(){
 }
 
 async function contarFacturasSinConsolidar(){
-  const miEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
   const raw = await sheetsGet('REGISTRO!A1:Z');
   if(!raw || raw.length < 2) return 0;
   const H = {};
   (raw[0] || []).forEach((h, i) => H[h] = i);
-  if(H.URL_FACTURA === undefined || H.USUARIO === undefined) return 0;
+  if(H.URL_FACTURA === undefined) return 0;
 
-  // Candidatos: registros con USUARIO != miEmail (autor distinto al admin actual)
-  // ANTES (v.0088 y previas): se contaba directo. Pero si el usuario llena USUARIO
-  // manualmente con el email del autor original aunque la foto YA esté consolidada
-  // en el Drive del admin, falsamente disparaba el banner.
-  // AHORA (v.0089): verificar accesibilidad real del archivo via drive.file scope.
-  // Si la PWA puede leer el archivo → ya está en el Drive del admin → consolidado.
-  const candidatos = raw.slice(1).filter(r => {
+  // v.0091: lógica basada en columna CONSOLIDADO (escrita por Apps Script v.0070+
+  // y por la PWA cuando el admin sube directamente). Si el sheet aún no tiene la
+  // columna (no se ejecutó Apps Script v.0070+ todavía), retornar 0 — banner oculto
+  // hasta que la migración corra.
+  if(H.CONSOLIDADO === undefined) return 0;
+
+  return raw.slice(1).filter(r => {
     if(!r[H.ID] || !r[H.URL_FACTURA]) return false;
-    const usr = (r[H.USUARIO] || '').toLowerCase();
-    return usr && usr !== miEmail;
-  });
-  if(candidatos.length === 0) return 0;
-
-  // Verificar accesibilidad en paralelo. Si la PWA puede leer el archivo, está
-  // dentro de su scope (consolidado). Si responde 404/403, está en otro Drive.
-  const token = getToken();
-  if(!token) return candidatos.length; // fallback: sin token, asumimos no consolidados
-
-  const checks = await Promise.all(candidatos.map(async r => {
-    const url = String(r[H.URL_FACTURA] || '');
-    const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    if(!m) return false; // sin fileId extraíble → no podemos verificar, no contar
-    try {
-      const res = await fetch('https://www.googleapis.com/drive/v3/files/' + m[1] + '?fields=id', {
-        headers: {'Authorization': 'Bearer ' + token}
-      });
-      return !res.ok; // !ok = no accesible = sin consolidar
-    } catch(e){ return false; }
-  }));
-  return checks.filter(Boolean).length;
+    const consolidado = (r[H.CONSOLIDADO] || '').toString().trim().toUpperCase();
+    return consolidado !== 'SI';
+  }).length;
 }
 
 // Consolidación delegada al Apps Script (corre en servidores de Google, sin CORS).
