@@ -1402,7 +1402,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0073';
+const APP_VERSION = '0074';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4969,8 +4969,12 @@ function _renderPDFCSS(){
     '@page{size:letter;margin:0}',
     '.pdf-report *{box-sizing:border-box;margin:0;padding:0}',
     '.pdf-report{font-family:Helvetica,Arial,sans-serif;color:#1e293b;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
-    '.pdf-report .page{width:8.5in;height:11in;page-break-after:always;position:relative;overflow:hidden;background:#fff}',
+    // CRÍTICO: el SPA tiene su propia clase .page con display:none (línea 26).
+    // Sin override explícito de display/min-height, mis pages heredan eso y
+    // html2canvas captura canvases de 0×0 → PDF en blanco. Bug de v.0069-v.0073.
+    '.pdf-report .page{display:block!important;width:8.5in!important;height:11in!important;min-height:auto!important;padding:0;padding-bottom:0!important;page-break-after:always;position:relative;overflow:hidden;background:#fff}',
     '.pdf-report .page:last-child{page-break-after:auto}',
+    '.pdf-report .factura-page{display:flex!important;flex-direction:column}',
     '.pdf-report .cover-band{height:14px;background:linear-gradient(90deg,#1e3a5f 0%,#1e3a5f 70%,#d97706 70%,#d97706 100%)}',
     '.pdf-report .cover-header{padding:36px 56px 24px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #e2e8f0}',
     '.pdf-report .logo-box{width:140px;height:60px;border:2px solid #1e3a5f;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#1e3a5f;font-weight:800;font-size:13px;letter-spacing:.05em;text-align:center;line-height:1.2}',
@@ -5245,20 +5249,18 @@ async function generarPDFFotos(params){
   `;
   container.appendChild(banner);
 
-  // Banner sticky en la parte superior con el progreso. NO usamos overlay opaco
-  // porque algunos browsers optimizan saltándose el paint de elementos totalmente
-  // tapados → html2canvas captura canvases vacíos. El render del reporte queda
-  // visible debajo del banner y el usuario ve los pages pasar (UX menos elegante
-  // pero CONFIABLE — el browser SÍ pinta lo visible y html2canvas captura bien).
+  // Overlay full-screen con spinner (UX limpia). En v.0073 lo evitábamos por
+  // miedo a optimizaciones de paint, pero el bug real era el conflicto de CSS
+  // de .page (la PWA usa esa clase para sus pantallas SPA con display:none).
+  // Con el override !important en .pdf-report .page (display:block) ya no
+  // depende de visibility — el render funciona aún si el contenedor está oculto.
   const overlay = document.createElement('div');
   overlay.id = 'pdf-gen-overlay';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#0f172a;z-index:99999;color:#fff;padding:14px 18px;display:flex;align-items:center;gap:12px;box-shadow:0 4px 12px rgba(0,0,0,0.3);font-size:13px';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.96);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px';
   overlay.innerHTML = `
-    <div class="spinner" style="width:22px;height:22px;border:2px solid rgba(255,255,255,0.2);border-top-color:#d97706;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>
-    <div style="flex:1;min-width:0">
-      <div id="pdf-gen-msg" style="font-weight:600">Preparando datos del reporte…</div>
-      <div style="font-size:11px;color:rgba(255,255,255,0.7);margin-top:2px">No cierres esta pantalla. El reporte se está renderizando abajo.</div>
-    </div>
+    <div class="spinner" style="width:44px;height:44px;border:3px solid rgba(255,255,255,0.2);border-top-color:#d97706;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+    <div id="pdf-gen-msg" style="font-size:15px;font-weight:600">Preparando datos del reporte…</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.7);max-width:300px;line-height:1.5">No cierres esta pestaña. El proceso puede tardar 30–90 s según la cantidad de facturas.</div>
   `;
   document.body.appendChild(overlay);
 
@@ -5352,17 +5354,13 @@ async function generarPDFFotos(params){
       document.head.appendChild(style);
     }
 
-    // 5. Renderizar HTML 100% VISIBLE al usuario (debajo del banner sticky).
-    // CRÍTICO: cualquier intento de "esconder" el renderRoot (opacity:0,
-    // left:-99999px, visibility:hidden, overlay opaco encima) hace que algunos
-    // browsers (sobre todo mobile Safari) optimicen saltándose el paint, y
-    // html2canvas captura canvases vacíos → PDF en blanco.
-    // El usuario ve los pages pasar. UX menos elegante pero confiable.
-    // Bloqueamos scroll del body para que el banner siempre quede visible.
+    // 5. Renderizar HTML oculto fuera de pantalla (UX limpia).
+    // El override !important en .pdf-report .page garantiza que el browser
+    // sí pinta los pages aunque estén off-screen — el bug previo era CSS,
+    // no paint optimization.
     setStatus('Construyendo reporte…');
-    document.body.style.overflow = 'hidden';
     renderRoot = document.createElement('div');
-    renderRoot.style.cssText = 'position:fixed;left:0;top:60px;width:8.5in;height:calc(100vh - 60px);overflow-y:auto;background:#fff;z-index:9998';
+    renderRoot.style.cssText = 'position:fixed;left:-99999px;top:0;width:8.5in;background:#fff';
     renderRoot.innerHTML = _buildPDFReportHTML(reportData);
     document.body.appendChild(renderRoot);
 
