@@ -1410,7 +1410,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0083';
+const APP_VERSION = '0084';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2278,13 +2278,42 @@ function editarEmpresa(nombreActual){
     </div>
     <div class="field" style="margin-top:10px">
       <div class="lbl">Nuevo nombre</div>
-      <input type="text" id="edit-emp-nombre" value="${empresa.nombre}" autocapitalize="words">
+      <input type="text" id="edit-emp-nombre" value="${escapeHtml(empresa.nombre)}" autocapitalize="words">
     </div>
 
-    <div style="margin-top:12px;padding:10px 12px;background:rgba(59,130,246,0.08);border:1px solid var(--blue);border-radius:6px;font-size:11px;color:#93C5FD;line-height:1.5">
+    <div style="padding:10px 12px;background:rgba(59,130,246,0.08);border:1px solid var(--blue);border-radius:6px;font-size:11px;color:#93C5FD;line-height:1.5;margin-bottom:14px">
       <strong style="color:var(--blue)">Nota sobre reportes históricos</strong><br>
       Los PDFs de reportes ya generados <strong>mantendrán el nombre anterior</strong> ("${empresa.nombre}") como registro histórico contable.
       Los reportes nuevos usarán el nombre actualizado.
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0 14px;position:relative">
+    <div style="font-size:10px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin:-26px 0 8px 14px;background:var(--bg2);padding:0 10px;display:inline-block">Datos para reportes contables (opcional)</div>
+    <div style="font-size:11px;color:var(--text2);line-height:1.5;margin-bottom:12px">
+      Estos datos solo aparecen en el reporte "Contabilidad / Soporte Fiscal". Si los dejas vacíos, salen como "—" o líneas en blanco para firmar a mano.
+    </div>
+
+    <div class="field">
+      <div class="lbl">Razón social legal</div>
+      <input type="text" id="edit-emp-razonSocial" value="${escapeHtml(empresa.razonSocial || '')}" placeholder="Ej. CONSTRUCTORA LLODRA, S.R.L." autocapitalize="characters">
+    </div>
+    <div class="grid2" style="margin-bottom:14px;gap:8px">
+      <div class="field" style="margin-bottom:0">
+        <div class="lbl">RNC</div>
+        <input type="text" id="edit-emp-rnc" value="${escapeHtml(empresa.rnc || '')}" placeholder="9 u 11 dígitos" inputmode="numeric" style="font-family:var(--mono)">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <div class="lbl">Dirección</div>
+        <input type="text" id="edit-emp-direccion" value="${escapeHtml(empresa.direccion || '')}" placeholder="Av., calle, ciudad" autocapitalize="words">
+      </div>
+    </div>
+    <div class="field">
+      <div class="lbl">Revisado por (firmante)</div>
+      <input type="text" id="edit-emp-revisadoPor" value="${escapeHtml(empresa.revisadoPor || '')}" placeholder="Vacío = línea en blanco" autocapitalize="words">
+    </div>
+    <div class="field">
+      <div class="lbl">Aprobado por (firmante)</div>
+      <input type="text" id="edit-emp-aprobadoPor" value="${escapeHtml(empresa.aprobadoPor || '')}" placeholder="Vacío = línea en blanco" autocapitalize="words">
     </div>
 
     <div class="grid2" style="margin-top:12px;gap:8px">
@@ -2297,61 +2326,84 @@ function editarEmpresa(nombreActual){
 async function guardarEdicionEmpresa(nombreAnterior){
   const nuevoNombre = document.getElementById('edit-emp-nombre').value.trim();
   if(!nuevoNombre){ toast('Teclea un nombre', 'err'); return; }
-  if(nuevoNombre === nombreAnterior){ closeModal(); return; }
 
-  // Verificar que no exista otro con ese nombre
+  // Campos contables nuevos (v.0084) — todos opcionales
+  const datosContables = {
+    razonSocial: document.getElementById('edit-emp-razonSocial').value.trim(),
+    rnc: document.getElementById('edit-emp-rnc').value.trim().replace(/[^0-9]/g, ''),
+    direccion: document.getElementById('edit-emp-direccion').value.trim(),
+    revisadoPor: document.getElementById('edit-emp-revisadoPor').value.trim(),
+    aprobadoPor: document.getElementById('edit-emp-aprobadoPor').value.trim()
+  };
+
   const existing = getCompanies();
-  if(existing.find(c => c.nombre.toLowerCase() === nuevoNombre.toLowerCase() && c.nombre !== nombreAnterior)){
+  const empresa = existing.find(c => c.nombre === nombreAnterior);
+  if(!empresa){ toast('Empresa no encontrada', 'err'); return; }
+
+  // Detectar si cambió algo
+  const renameNeeded = nuevoNombre !== nombreAnterior;
+  const contablesChanged =
+    (empresa.razonSocial || '') !== datosContables.razonSocial ||
+    (empresa.rnc || '') !== datosContables.rnc ||
+    (empresa.direccion || '') !== datosContables.direccion ||
+    (empresa.revisadoPor || '') !== datosContables.revisadoPor ||
+    (empresa.aprobadoPor || '') !== datosContables.aprobadoPor;
+  if(!renameNeeded && !contablesChanged){ closeModal(); return; }
+
+  // Validar nombre nuevo si va a renombrar
+  if(renameNeeded && existing.find(c => c.nombre.toLowerCase() === nuevoNombre.toLowerCase() && c.nombre !== nombreAnterior)){
     toast('Ya existe una empresa con ese nombre', 'err');
     return;
   }
 
-  const empresa = existing.find(c => c.nombre === nombreAnterior);
-  if(!empresa){ toast('Empresa no encontrada', 'err'); return; }
-
   closeModal();
-  loading(true, 'Actualizando', 'Renombrando en Drive...');
+  loading(true, 'Actualizando', renameNeeded ? 'Renombrando en Drive...' : 'Guardando datos...');
 
   try {
     const token = getToken();
+    const empresaActualizada = {...empresa, nombre: nuevoNombre, ...datosContables};
 
-    // 1. Renombrar la carpeta de la empresa
-    if(empresa.folderId){
-      await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.folderId}`, {
+    if(renameNeeded){
+      // 1. Renombrar la carpeta de la empresa
+      if(empresa.folderId){
+        await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.folderId}`, {
+          method: 'PATCH',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({name: nuevoNombre})
+        });
+      }
+
+      // 2. Renombrar el Sheet (CajaChica_[Nombre])
+      const nuevoSheetName = `CajaChica_${nuevoNombre}`;
+      await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.sheetId}`, {
         method: 'PATCH',
         headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-        body: JSON.stringify({name: nuevoNombre})
+        body: JSON.stringify({name: nuevoSheetName})
       });
+
+      // 3. Actualizar localStorage: eliminar la vieja + insertar la nueva
+      removeCompany(nombreAnterior);
+      upsertCompany(empresaActualizada);
+
+      // 4. Si era la empresa activa, activar la nueva
+      if(localStorage.getItem(LS.CURRENT_COMPANY) === nombreAnterior){
+        localStorage.setItem(LS.CURRENT_COMPANY, nuevoNombre);
+      }
+
+      // 5. Actualizar Admin Index (remover viejo + agregar nuevo con campos completos)
+      await removeCompanyFromIndex(nombreAnterior);
+      await addCompanyToIndex(empresaActualizada);
+
+      // 6. Invalidar cache de carpetas (clave usa nombre)
+      localStorage.removeItem(LS.FOLDERS);
+    } else {
+      // Solo cambian campos contables — actualizar local y sheet sin renombrar nada en Drive
+      upsertCompany(empresaActualizada);
+      await addCompanyToIndex(empresaActualizada); // upsert también funciona para actualizar
     }
-
-    // 2. Renombrar el Sheet (CajaChica_[Nombre])
-    const nuevoSheetName = `CajaChica_${nuevoNombre}`;
-    await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.sheetId}`, {
-      method: 'PATCH',
-      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({name: nuevoSheetName})
-    });
-
-    // 3. Actualizar empresa local (localStorage)
-    // Eliminar la vieja + agregar la nueva con sheetId igual
-    removeCompany(nombreAnterior);
-    upsertCompany({...empresa, nombre: nuevoNombre});
-
-    // 4. Si era la empresa activa, activar la nueva
-    if(localStorage.getItem(LS.CURRENT_COMPANY) === nombreAnterior){
-      localStorage.setItem(LS.CURRENT_COMPANY, nuevoNombre);
-    }
-
-    // 5. Actualizar Admin Index (remover viejo + agregar nuevo)
-    await removeCompanyFromIndex(nombreAnterior);
-    await addCompanyToIndex({...empresa, nombre: nuevoNombre});
-
-    // 6. Invalidar caches de carpetas (el ID de la carpeta sigue siendo el mismo,
-    // pero el nombre cambió y el cache de ensureFolder usa el nombre como clave)
-    localStorage.removeItem(LS.FOLDERS);
 
     loading(false);
-    toast(`Empresa renombrada a "${nuevoNombre}"`, 'ok');
+    toast(renameNeeded ? `Empresa renombrada a "${nuevoNombre}"` : 'Datos contables actualizados', 'ok');
     await renderCompanyList();
   } catch(e){
     loading(false);
@@ -2793,7 +2845,7 @@ async function ensureAdminIndex(){
     body: JSON.stringify({
       valueInputOption: 'USER_ENTERED',
       data: [
-        {range: 'EMPRESAS!A1', values: [['NOMBRE','SHEET_ID','SCRIPT_URL','FOLDER_ID','CREATED_AT']]},
+        {range: 'EMPRESAS!A1', values: [['NOMBRE','SHEET_ID','SCRIPT_URL','FOLDER_ID','CREATED_AT','RAZON_SOCIAL','RNC','DIRECCION','REVISADO_POR','APROBADO_POR']]},
         {range: 'CONFIG!A1', values: [['KEY','VALUE']]}
       ]
     })
@@ -2812,8 +2864,10 @@ async function syncFromAdminIndex(){
     const token = getToken();
 
     // Leer EMPRESAS y CONFIG en un solo batch
+    // Columnas EMPRESAS: A=nombre, B=sheetId, C=scriptUrl, D=folderId, E=createdAt,
+    //                   F=razonSocial, G=rnc, H=direccion, I=revisadoPor, J=aprobadoPor (v.0084)
     const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values:batchGet?ranges=EMPRESAS!A2:E&ranges=CONFIG!A2:B`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values:batchGet?ranges=EMPRESAS!A2:J&ranges=CONFIG!A2:B`,
       {headers: {'Authorization': 'Bearer ' + token}}
     );
     if(!res.ok) throw new Error('No se pudo leer Admin Index');
@@ -2826,7 +2880,12 @@ async function syncFromAdminIndex(){
       sheetId: r[1],
       scriptUrl: r[2] || '',
       folderId: r[3] || '',
-      createdAt: r[4] || ''
+      createdAt: r[4] || '',
+      razonSocial: r[5] || '',
+      rnc: r[6] || '',
+      direccion: r[7] || '',
+      revisadoPor: r[8] || '',
+      aprobadoPor: r[9] || ''
     }));
     saveCompanies(companies);
 
@@ -2854,8 +2913,10 @@ async function addCompanyToIndex(company){
     const token = getToken();
 
     // Leer empresas actuales para ver si ya existe
+    // Columnas: A=nombre, B=sheetId, C=scriptUrl, D=folderId, E=createdAt,
+    //          F=razonSocial, G=rnc, H=direccion, I=revisadoPor, J=aprobadoPor (v.0084)
     const readRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/EMPRESAS!A2:E`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/EMPRESAS!A2:J`,
       {headers: {'Authorization': 'Bearer ' + token}}
     );
     const readData = await readRes.json();
@@ -2867,14 +2928,19 @@ async function addCompanyToIndex(company){
       company.sheetId,
       company.scriptUrl || '',
       company.folderId || '',
-      company.createdAt || new Date().toISOString()
+      company.createdAt || new Date().toISOString(),
+      company.razonSocial || '',
+      company.rnc || '',
+      company.direccion || '',
+      company.revisadoPor || '',
+      company.aprobadoPor || ''
     ];
 
     if(existingIdx >= 0){
       // Update en su posición (2-indexed porque saltamos header)
       const rowNum = existingIdx + 2;
       await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/EMPRESAS!A${rowNum}:E${rowNum}?valueInputOption=USER_ENTERED`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${indexId}/values/EMPRESAS!A${rowNum}:J${rowNum}?valueInputOption=USER_ENTERED`,
         {
           method: 'PUT',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
@@ -3505,10 +3571,16 @@ function applyRoleUI(){
 function manageCategorias(){
   if(!isAdmin()){ toast('Solo ADMIN', 'err'); return; }
   const rows = (masters.categories || []).map(c => `
-    <div class="cat-row" data-cod="${c.cod}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--border);margin-bottom:8px">
-      <span style="font-family:var(--mono);font-size:11px;color:var(--text2);background:var(--bg2);padding:3px 7px;border-radius:4px;flex-shrink:0">${c.cod}</span>
-      <input class="cat-input" data-original="${escapeHtml(c.nombre)}" value="${escapeHtml(c.nombre)}" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;padding:0;font-weight:500;outline:none" oninput="markCatDirty(this)">
-      <button class="cat-save" style="display:none;width:28px;height:28px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:18px" onclick="saveCatRow(this)">✓</button>
+    <div class="cat-row" data-cod="${c.cod}" style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--border);margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--text2);background:var(--bg2);padding:3px 7px;border-radius:4px;flex-shrink:0;min-width:50px;text-align:center">${c.cod}</span>
+        <input class="cat-input-nombre" data-original-nombre="${escapeHtml(c.nombre)}" value="${escapeHtml(c.nombre)}" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;padding:0;font-weight:500;outline:none" oninput="markCatDirty(this)">
+        <button class="cat-save" style="display:none;width:28px;height:28px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:18px" onclick="saveCatRow(this)">✓</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;padding-top:6px;border-top:1px solid var(--border)">
+        <span style="font-size:9px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;min-width:50px">Cuenta</span>
+        <input class="cat-input-cuenta" data-original-cuenta="${escapeHtml(c.cuenta || '')}" value="${escapeHtml(c.cuenta || '')}" placeholder="Sin cuenta — saldrá como —" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;padding:0;font-family:var(--mono);outline:none" oninput="markCatDirty(this)">
+      </div>
     </div>
   `).join('');
 
@@ -3518,15 +3590,21 @@ function manageCategorias(){
       <div style="font-size:18px;color:var(--text2);cursor:pointer" onclick="closeModal()">✕</div>
     </div>
     <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:14px">
-      Tap el nombre para editar. El código (MAT, MOB...) se mantiene en los registros existentes — solo cambia el nombre que se muestra.
+      Tap el nombre o la cuenta para editar. El código (MAT, MOB...) se mantiene en los registros existentes. La cuenta contable es opcional — solo se usa en el reporte "Contabilidad / Soporte Fiscal".
     </div>
     <div id="cat-list">${rows}</div>
     <div id="cat-add-row" style="display:none;margin-top:8px">
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--green)">
-        <span style="font-family:var(--mono);font-size:11px;color:var(--green);background:var(--bg2);padding:3px 7px;border-radius:4px;flex-shrink:0">NUEVO</span>
-        <input id="cat-new-input" placeholder="Nombre de la categoría" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;padding:0;outline:none">
-        <button style="width:28px;height:28px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:18px" onclick="saveCatNew()">✓</button>
-        <button style="width:28px;height:28px;background:transparent;border:none;color:var(--red);cursor:pointer;font-size:14px" onclick="cancelCatNew()">✕</button>
+      <div style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--green)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-family:var(--mono);font-size:11px;color:var(--green);background:var(--bg2);padding:3px 7px;border-radius:4px;flex-shrink:0;min-width:50px;text-align:center">NUEVO</span>
+          <input id="cat-new-input" placeholder="Nombre de la categoría" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;padding:0;outline:none">
+          <button style="width:28px;height:28px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:18px" onclick="saveCatNew()">✓</button>
+          <button style="width:28px;height:28px;background:transparent;border:none;color:var(--red);cursor:pointer;font-size:14px" onclick="cancelCatNew()">✕</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;padding-top:6px;border-top:1px solid var(--border)">
+          <span style="font-size:9px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;min-width:50px">Cuenta</span>
+          <input id="cat-new-cuenta" placeholder="Opcional — para Soporte Fiscal" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;padding:0;font-family:var(--mono);outline:none">
+        </div>
       </div>
     </div>
     <div id="cat-add-btn" style="display:flex;align-items:center;gap:8px;background:#052e16;border:1px dashed #166534;border-radius:10px;padding:12px;margin-top:8px;color:var(--green);font-size:13px;cursor:pointer;font-weight:500;justify-content:center" onclick="showCatAddRow()">+ Agregar nueva categoría</div>
@@ -3536,18 +3614,27 @@ function manageCategorias(){
 
 function markCatDirty(inp){
   const row = inp.closest('.cat-row');
-  const original = inp.dataset.original;
+  const nombreInp = row.querySelector('.cat-input-nombre');
+  const cuentaInp = row.querySelector('.cat-input-cuenta');
   const saveBtn = row.querySelector('.cat-save');
-  saveBtn.style.display = inp.value.trim() !== original ? 'flex' : 'none';
+  const dirty =
+    nombreInp.value.trim() !== nombreInp.dataset.originalNombre ||
+    cuentaInp.value.trim() !== cuentaInp.dataset.originalCuenta;
+  saveBtn.style.display = dirty ? 'flex' : 'none';
 }
 
 async function saveCatRow(btn){
   const row = btn.closest('.cat-row');
   const cod = row.dataset.cod;
-  const inp = row.querySelector('.cat-input');
-  const newName = inp.value.trim();
+  const nombreInp = row.querySelector('.cat-input-nombre');
+  const cuentaInp = row.querySelector('.cat-input-cuenta');
+  const newName = nombreInp.value.trim();
+  const newCuenta = cuentaInp.value.trim();
   if(!newName){ toast('El nombre no puede quedar vacío', 'err'); return; }
-  if(newName === inp.dataset.original){ btn.style.display = 'none'; return; }
+
+  const nombreChanged = newName !== nombreInp.dataset.originalNombre;
+  const cuentaChanged = newCuenta !== cuentaInp.dataset.originalCuenta;
+  if(!nombreChanged && !cuentaChanged){ btn.style.display = 'none'; return; }
 
   loading(true, 'Guardando', 'Actualizando categoría...');
   try {
@@ -3556,16 +3643,18 @@ async function saveCatRow(btn){
     const idx = (all || []).findIndex(r => r[0] === cod);
     if(idx < 0) throw new Error('Categoría no encontrada en hoja');
     const rowNum = idx + 2;
-    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${getActiveSheetId()}/values/CATEGORIAS!B${rowNum}?valueInputOption=USER_ENTERED`, {
+    // Escribir B (nombre) y C (cuenta) juntas — un solo PUT a B:C
+    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${getActiveSheetId()}/values/CATEGORIAS!B${rowNum}:C${rowNum}?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({values: [[newName]]})
+      body: JSON.stringify({values: [[newName, newCuenta]]})
     });
 
     // Actualizar masters local + selects abiertos
     const cat = (masters.categories || []).find(c => c.cod === cod);
-    if(cat) cat.nombre = newName;
-    inp.dataset.original = newName;
+    if(cat){ cat.nombre = newName; cat.cuenta = newCuenta; }
+    nombreInp.dataset.originalNombre = newName;
+    cuentaInp.dataset.originalCuenta = newCuenta;
     btn.style.display = 'none';
     refreshCategoriaSelects();
     loading(false);
@@ -3591,7 +3680,9 @@ function cancelCatNew(){
 
 async function saveCatNew(){
   const inp = document.getElementById('cat-new-input');
+  const cuentaInp = document.getElementById('cat-new-cuenta');
   const nombre = inp.value.trim();
+  const cuenta = cuentaInp ? cuentaInp.value.trim() : '';
   if(!nombre){ toast('Escribe un nombre', 'err'); return; }
 
   // Generar COD único: 3 letras del nombre, append numérico si conflicto
@@ -3603,8 +3694,8 @@ async function saveCatNew(){
 
   loading(true, 'Guardando', 'Agregando categoría...');
   try {
-    await sheetsAppend('CATEGORIAS!A2', [[cod, nombre, '']]);
-    masters.categories = [...(masters.categories || []), {cod, nombre, cuenta: ''}];
+    await sheetsAppend('CATEGORIAS!A2', [[cod, nombre, cuenta]]);
+    masters.categories = [...(masters.categories || []), {cod, nombre, cuenta}];
     refreshCategoriaSelects();
     loading(false);
     toast(`"${nombre}" (${cod}) agregada`, 'ok');
