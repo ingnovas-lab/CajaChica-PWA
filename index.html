@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0094';
+const APP_VERSION = '0095';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5162,13 +5162,18 @@ function _etiquetaProy(idx){ return idx===1?'OBRA PRINCIPAL':idx===2?'OBRA SECUN
 // HELPERS FISCALES (v.0085) — para template Contabilidad / Soporte Fiscal
 // ============================================================
 
-// NCF dominicano: B01-B16 (papel, 11 dígitos siguientes) o E31-E47 (electrónico,
-// 10 dígitos siguientes). Formato simplificado, no exhaustivo.
+// NCF dominicano (DGII). Formato real:
+// - Físico/papel (B): 11 caracteres → B + tipo (01-09 o 11-16) + 8 dígitos secuencial.
+// - Electrónico (E): 13 caracteres → E + tipo (31-34 o 41-47) + 10 dígitos secuencial.
+// El regex usado aquí es idéntico al que ya está en la fórmula del sheet
+// (VALIDACION_NCF, ver initializeSheetStructure). v.0094 y previas tenían un
+// error: pedían 11 dígitos para B (en lugar de 8), por eso TODOS los NCFs
+// tipo B salían como "malformados" en el reporte fiscal aunque eran válidos.
 function _validateNCF(ncf){
   if(!ncf) return {valid:false, reason:'sin_ncf'};
   const s = String(ncf).trim().toUpperCase();
-  if(/^B(0[1-9]|1[0-6])\d{11}$/.test(s)) return {valid:true, type:'papel'};
-  if(/^E(3[1-9]|4[0-7])\d{10}$/.test(s)) return {valid:true, type:'electronico'};
+  if(/^(B0[1-9]|B1[1-6])\d{8}$/.test(s)) return {valid:true, type:'papel'};
+  if(/^(E3[1-4]|E4[1-7])\d{10}$/.test(s)) return {valid:true, type:'electronico'};
   return {valid:false, reason:'malformado'};
 }
 
@@ -5619,8 +5624,8 @@ function _renderFiscalCover(d, pageNum){
     + '<div class="page formal-cover">'
     +   '<div class="border-frame">'
     +     '<div class="formal-eyebrow">República Dominicana</div>'
-    +     '<h1 class="formal-title">Documento de Soporte Documental</h1>'
-    +     '<div class="formal-sub">Caja Chica de Obra · ' + _escHTML(empresa.nombre || '') + '</div>'
+    +     '<h1 class="formal-title">Soporte Documental</h1>'
+    +     '<div class="formal-sub">Caja Chica de Obra</div>'
     +     '<div class="formal-line"></div>'
     +     '<div class="entity-block">'
     +       '<div class="entity-name">' + _escHTML(razon) + '</div>'
@@ -5951,11 +5956,25 @@ async function generarPDFFotos(params){
     }).sort((a,b) => a.fecha.localeCompare(b.fecha));
 
     // 2. Pre-fetch fotos como data URIs (evita CORS issues)
+    // v.0095: trackear qué facturas quedaron sin foto y por qué (URL vacía vs
+    // fetch falló) para mostrarlo al usuario al final del flow.
     let fotosOk = 0, sinFoto = 0;
+    const sinFotoDetalle = []; // [{idShort, suplidor, fecha, razon}]
     for(let i = 0; i < filas.length; i++){
       setStatus(`Descargando fotos (${i+1}/${filas.length})…`);
-      filas[i].fotoUrl = await _fetchFotoAsDataURI(filas[i].url_factura, token);
-      if(filas[i].fotoUrl) fotosOk++; else sinFoto++;
+      const f = filas[i];
+      if(!f.url_factura){
+        sinFoto++;
+        sinFotoDetalle.push({idShort: (f.id||'').slice(0,4), suplidor: f.suplidor || '(sin suplidor)', fecha: f.fecha || '', razon: 'sin URL en sheet'});
+        continue;
+      }
+      f.fotoUrl = await _fetchFotoAsDataURI(f.url_factura, token);
+      if(f.fotoUrl){
+        fotosOk++;
+      } else {
+        sinFoto++;
+        sinFotoDetalle.push({idShort: (f.id||'').slice(0,4), suplidor: f.suplidor || '(sin suplidor)', fecha: f.fecha || '', razon: 'no accesible (eliminada, otro Drive o error de red)'});
+      }
     }
 
     // 3. Agrupar por proyecto + categoría
@@ -6153,15 +6172,24 @@ async function generarPDFFotos(params){
     overlay.remove();
     document.body.style.overflow = '';
 
-    // 8. Banner de éxito
-    banner.style.cssText = 'background:rgba(34,197,94,0.12);border:1px solid var(--green);border-radius:var(--r);padding:14px;margin-top:14px;cursor:pointer;text-align:center';
+    // 8. Banner de éxito (v.0095: incluye detalle de fotos faltantes si las hay)
+    banner.style.cssText = 'background:rgba(34,197,94,0.12);border:1px solid var(--green);border-radius:var(--r);padding:14px;margin-top:14px;text-align:center';
+    let detalleSinFoto = '';
+    if(sinFotoDetalle.length > 0){
+      const filas = sinFotoDetalle.map(d => '<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:11px;color:var(--text2);text-align:left">' +
+        '<strong style="color:var(--amber);font-family:var(--mono)">' + escapeHtml(d.idShort) + '</strong> · ' +
+        escapeHtml(d.suplidor) + ' · ' + escapeHtml(d.fecha) +
+        '<br><span style="color:#fcd34d;font-size:10px">↳ ' + escapeHtml(d.razon) + '</span></div>').join('');
+      detalleSinFoto = '<details style="margin-top:10px;text-align:left"><summary style="cursor:pointer;font-size:11px;color:var(--amber);font-weight:600">Ver ' + sinFotoDetalle.length + ' factura(s) sin foto</summary><div style="margin-top:8px">' + filas + '</div></details>';
+    }
     banner.innerHTML = `
       <div style="font-size:14px;font-weight:600;color:var(--green);margin-bottom:4px">✓ PDF de soporte listo</div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${fotosOk} foto(s) incluida(s) · ${sinFoto} sin foto</div>
-      <a class="btn btn-green" style="padding:10px;text-decoration:none" href="${driveUrl}" target="_blank" rel="noopener">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <a class="btn btn-green" style="padding:10px;font-size:12px;text-decoration:none" href="${driveUrl}" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Abrir PDF con fotos
       </a>
+      ${detalleSinFoto}
     `;
   } catch(e){
     if(renderRoot && renderRoot.parentNode) renderRoot.parentNode.removeChild(renderRoot);
