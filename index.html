@@ -547,16 +547,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div class="lbl">Obra</div>
         <select id="fac-filtro-obra" onchange="loadFacturas()"></select>
       </div>
-      <div class="grid2" style="margin-bottom:8px">
-        <div class="field" style="margin-bottom:0">
-          <div class="lbl">Desde</div>
-          <input type="date" id="fac-filtro-desde" onchange="loadFacturas()">
-        </div>
-        <div class="field" style="margin-bottom:0">
-          <div class="lbl">Hasta</div>
-          <input type="date" id="fac-filtro-hasta" onchange="loadFacturas()">
-        </div>
-      </div>
       <div class="grid2">
         <div class="field" style="margin-bottom:0">
           <div class="lbl">Estado</div>
@@ -571,10 +561,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <div class="lbl">Buscar</div>
           <input type="text" id="fac-filtro-buscar" placeholder="Suplidor, NCF..." oninput="debounceBuscar()">
         </div>
-      </div>
-      <div id="fac-stats" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px">
-        <div><span id="fac-stat-count" style="font-weight:600;color:var(--text)">0</span> <span style="color:var(--text2)">facturas</span></div>
-        <div style="font-family:var(--mono);font-weight:600;color:var(--red)">RD$ <span id="fac-stat-total">0.00</span></div>
       </div>
     </div>
     <div id="fac-lista"></div>
@@ -773,7 +759,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   </div>
   <div class="body">
     <div id="cfm-img-wrap" style="display:none">
-      <img id="cfm-img" alt="" style="width:100%;max-height:240px;object-fit:contain;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);cursor:pointer" onclick="verFotoUrl(this.src)">
+      <img id="cfm-img" alt="" style="width:100%;max-height:240px;object-fit:contain;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2)">
     </div>
     <div id="cfm-warn" class="alert alert-amber" style="display:none"></div>
 
@@ -1454,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0102';
+const APP_VERSION = '0101';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2296,11 +2282,6 @@ async function renderCompanyList(){
 async function selectCompany(nombre){
   setCurrentCompany(nombre);
   toast(`Empresa activa: ${nombre}`, 'ok');
-
-  // v.0102: invalidar cache del badge "Por revisar". Sin esto, el badge muestra
-  // el count de la empresa anterior por hasta 60s (TTL del cache) — bug
-  // cross-empresa reportado por usuario en v.0101.
-  invalidateRevisarCache();
 
   // Cargar masters de la empresa nueva
   try {
@@ -4101,10 +4082,6 @@ function selectProject(p){
   const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
   delete cache[p.cod];
   localStorage.setItem(LS.BALCACHE, JSON.stringify(cache));
-  // v.0102: el badge "Por revisar" filtra por proyecto, así que cambiar de
-  // proyecto requiere recalcular. Sin esto, queda mostrando el count del
-  // proyecto anterior por hasta 60s.
-  invalidateRevisarCache();
   show('pg-home');
   // Check de versión silencioso (v.0093) — recarga si hay update.
   _checkForUpdate();
@@ -6347,7 +6324,7 @@ function renderReporte(d){
     <div id="reporte-printable">
       <div style="text-align:center;border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:16px">
         <div style="font-size:16px;font-weight:600">REPORTE DE BALANCE</div>
-        <div style="font-size:13px;color:var(--text2);margin-top:3px">${d.nombreObra}</div>
+        <div style="font-size:13px;color:var(--text2);margin-top:3px">${d.nombreObra}${d.codObra ? ' · '+d.codObra : ''}</div>
         <div style="font-size:11px;color:var(--text2);margin-top:6px">${filtrosTexto.join(' · ')}</div>
         <div style="font-size:10px;color:var(--text3);margin-top:4px">Generado: ${d.fechaGeneracion}</div>
       </div>
@@ -6555,24 +6532,16 @@ function initFacturas(){
   sel.innerHTML = '<option value="">— Todas las obras —</option>' +
     masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
 
-  // Default: desde vacío (ver todo), hasta = hoy. Permite filtrar Desde sin
-  // tener que tocar Hasta (queda anclado a hoy automáticamente).
-  const today = new Date().toISOString().slice(0, 10);
-
   // Restaurar filtros previos si existen (ej. volviendo de editar una factura)
   if(facturasFiltrosState){
     sel.value = facturasFiltrosState.obra || '';
     document.getElementById('fac-filtro-estado').value = facturasFiltrosState.estado || 'activas';
     document.getElementById('fac-filtro-buscar').value = facturasFiltrosState.buscar || '';
-    document.getElementById('fac-filtro-desde').value = facturasFiltrosState.desde || '';
-    document.getElementById('fac-filtro-hasta').value = facturasFiltrosState.hasta || today;
   } else {
     const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
     if(currentProj) sel.value = currentProj.cod;
     document.getElementById('fac-filtro-estado').value = 'activas';
     document.getElementById('fac-filtro-buscar').value = '';
-    document.getElementById('fac-filtro-desde').value = '';
-    document.getElementById('fac-filtro-hasta').value = today;
   }
 
   // Auto-cargar
@@ -6590,19 +6559,15 @@ async function loadFacturas(){
   const obra = document.getElementById('fac-filtro-obra').value;
   const estado = document.getElementById('fac-filtro-estado').value;
   const buscar = document.getElementById('fac-filtro-buscar').value.trim().toLowerCase();
-  const desde = document.getElementById('fac-filtro-desde').value;
-  const hasta = document.getElementById('fac-filtro-hasta').value;
 
   // Guardar estado para poder restaurar filtros al volver de editar
-  facturasFiltrosState = {obra, estado, buscar, desde, hasta};
+  facturasFiltrosState = {obra, estado, buscar};
 
   loading(true, 'Cargando', 'Leyendo facturas...');
   try {
     const raw = await sheetsGet('REGISTRO!A1:Z');
     if(!raw || raw.length === 0){
       document.getElementById('fac-lista').innerHTML = '<div class="alert alert-amber">REGISTRO vacío</div>';
-      document.getElementById('fac-stat-count').textContent = '0';
-      document.getElementById('fac-stat-total').textContent = '0.00';
       loading(false); return;
     }
 
@@ -6624,10 +6589,6 @@ async function loadFacturas(){
       if(estado === 'eliminadas' && !eliminado) return false;
       if(estado === 'revisar' && (!porRevisar || eliminado)) return false;
       if(obra && r[H.PROYECTO] !== obra) return false;
-      // Filtro por rango de fechas (FECHA_FACTURA es 'YYYY-MM-DD' — comparación lex segura)
-      const fechaFact = r[H.FECHA_FACTURA] || '';
-      if(desde && fechaFact && fechaFact < desde) return false;
-      if(hasta && fechaFact && fechaFact > hasta) return false;
       if(buscar){
         const text = ((r[H.SUPLIDOR] || '') + ' ' + (r[H.NCF] || '') + ' ' + (r[H.NO_REPORTE] || '')).toLowerCase();
         if(!text.includes(buscar)) return false;
@@ -6642,12 +6603,6 @@ async function loadFacturas(){
     facturasCache = filtered;
     renderFacturas();
     document.getElementById('fac-sub').textContent = filtered.length + ' factura(s) encontrada(s)';
-
-    // Stats al pie del card filtro
-    const totalMonto = filtered.reduce((s, f) => s + (parseFloat(f.row[H.MONTO]) || 0), 0);
-    document.getElementById('fac-stat-count').textContent = filtered.length;
-    document.getElementById('fac-stat-total').textContent = fmt(totalMonto).replace('RD$ ', '');
-
     loading(false);
   } catch(e){
     loading(false);
@@ -6676,17 +6631,7 @@ function renderFacturas(){
     return `
     <div class="card" style="${eliminado ? 'opacity:0.6' : ''};${borderStyle}">
       <div style="display:flex;gap:12px;align-items:flex-start">
-        ${(() => {
-          if(!url) return '<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">−</div>';
-          const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-          if(!m) return `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;color:var(--text2);cursor:pointer" onclick="verFotoDrive('${url}')" title="Ver foto">📄</div>`;
-          // Miniatura real con thumbnail de Drive. Si falla (foto privada o thumb
-          // aún no generado), onerror cae al fallback con icono 📄.
-          return `<div style="width:56px;height:56px;border-radius:10px;overflow:hidden;background:var(--bg3);flex-shrink:0;cursor:pointer;position:relative" onclick="verFotoDrive('${url}')" title="Ver foto">
-            <img src="https://drive.google.com/thumbnail?id=${m[1]}&sz=w200" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-            <div style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:18px;color:var(--text2)">📄</div>
-          </div>`;
-        })()}
+        ${url ? `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px;color:var(--text2);cursor:pointer" onclick="verFotoDrive('${url}')" title="Ver foto">📄</div>` : '<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">−</div>'}
         <div style="flex:1;min-width:0">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
             <div style="flex:1;min-width:0">
