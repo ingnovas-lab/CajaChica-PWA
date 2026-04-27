@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0100';
+const APP_VERSION = '0101';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2161,7 +2161,14 @@ async function probarScript(){
     const data = await res.json();
     loading(false);
     if(data.ok){
-      toast(`✓ Conexión OK. Script responde como: ${data.email || '(sin email)'}`, 'ok');
+      // data.version se introdujo en Apps Script v.0073. Si falta, el deploy
+      // está cacheado en versión vieja y hay que actualizarlo (Apps Script →
+      // Implementar → Administrar implementaciones → Versión nueva).
+      const verStr = data.version
+        ? ` (Apps Script ${data.version})`
+        : ' (Apps Script: versión vieja — actualiza el deploy)';
+      const emailStr = data.email || '(sin email)';
+      toast(`✓ Conexión OK con ${emailStr}${verStr}`, 'ok');
     } else {
       toast('Respuesta inválida del script: ' + JSON.stringify(data), 'err');
     }
@@ -5936,48 +5943,61 @@ async function generarPDFFotos(params){
   `;
   container.appendChild(banner);
 
-  // Overlay full-screen con spinner (UX limpia). En v.0073 lo evitábamos por
-  // miedo a optimizaciones de paint, pero el bug real era el conflicto de CSS
-  // de .page (la PWA usa esa clase para sus pantallas SPA con display:none).
-  // Con el override !important en .pdf-report .page (display:block) ya no
-  // depende de visibility — el render funciona aún si el contenedor está oculto.
-  // v.0100: position:fixed seguía siendo inconfiable en iOS PWA standalone aún
-  // con scrollTo(0,0). Approach final: position:absolute con top=scrollY actual.
-  // Eso ancla el overlay a la posición visible del viewport sin depender de
-  // que iOS interprete fixed correctamente. Bloquear scroll del body+html
-  // garantiza que el overlay no se "despegue" durante la generación.
-  const _prevScrollY = window.scrollY || window.pageYOffset || 0;
+  // Overlay full-screen con spinner (UX limpia).
+  // v.0101: el bug del overlay desplazado en iOS PWA standalone tenía dos
+  // capas que v.0099/v.0100 no detectaron:
+  // (1) window.scrollY retorna 0 en iOS standalone aunque body o html sí
+  //     estén scrolleados — el scroll real vive en otro path
+  //     (document.body.scrollTop o documentElement.scrollTop). Por eso
+  //     v.0099 (scrollTo) y v.0100 (top:scrollY) leyeron/escribieron el
+  //     path equivocado, sin efecto.
+  // (2) la PWA tiene scroll también en el wrapper interno .page.on > .body
+  //     (overflow-y:auto) que es el verdadero scroller en muchos casos.
+  // Solución: capturar el scroll real desde los 3 paths, forzar TODO al
+  // top, position:fixed apuntando al viewport (que ya está en top), bloquear
+  // overflow de los 3 contenedores, restaurar scroll original al cerrar.
+  const activeBody = document.querySelector('.page.on > .body');
+  const _prevScrollWindow = window.scrollY || window.pageYOffset || 0;
+  const _prevScrollHtml = document.documentElement.scrollTop || 0;
+  const _prevScrollBody = document.body.scrollTop || 0;
+  const _prevScrollActive = activeBody ? activeBody.scrollTop : 0;
+
+  // Forzar TODO al top antes de mostrar el overlay (los 3 paths)
+  try { window.scrollTo(0, 0); } catch(_){}
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  if(activeBody) activeBody.scrollTop = 0;
+
+  // Bloquear overflow en los 3 contenedores
+  const _prevHtmlOverflow = document.documentElement.style.overflow;
+  const _prevBodyOverflow = document.body.style.overflow;
+  const _prevActiveOverflow = activeBody ? activeBody.style.overflow : '';
+  document.documentElement.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden';
+  if(activeBody) activeBody.style.overflow = 'hidden';
 
   const overlay = document.createElement('div');
   overlay.id = 'pdf-gen-overlay';
-  const vpH = window.innerHeight;
-  const vpW = window.innerWidth;
-  overlay.style.cssText = 'position:absolute;top:' + _prevScrollY + 'px;left:0;width:' + vpW + 'px;height:' + vpH + 'px;background:rgba(15,23,42,0.96);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px;box-sizing:border-box;overflow:hidden;margin:0;transform:translateZ(0)';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;background:rgba(15,23,42,0.96);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px;box-sizing:border-box;overflow:hidden;margin:0;transform:translateZ(0)';
   overlay.innerHTML = `
     <div class="spinner" style="width:44px;height:44px;border:3px solid rgba(255,255,255,0.2);border-top-color:#d97706;border-radius:50%;animation:spin 0.8s linear infinite"></div>
     <div id="pdf-gen-msg" style="font-size:15px;font-weight:600">Preparando datos del reporte…</div>
     <div style="font-size:12px;color:rgba(255,255,255,0.7);max-width:300px;line-height:1.5">No cierres esta pestaña. El proceso puede tardar 30–90 s según la cantidad de facturas.</div>
   `;
-  document.documentElement.appendChild(overlay);
-  // Bloquear scroll del body mientras el overlay esté presente
-  const _prevBodyOverflow = document.body.style.overflow;
-  const _prevHtmlOverflow = document.documentElement.style.overflow;
-  document.body.style.overflow = 'hidden';
-  document.documentElement.style.overflow = 'hidden';
-  const _resizeOverlay = () => {
-    overlay.style.top = (window.scrollY || window.pageYOffset || 0) + 'px';
-    overlay.style.width = window.innerWidth + 'px';
-    overlay.style.height = window.innerHeight + 'px';
-  };
-  window.addEventListener('resize', _resizeOverlay);
-  window.addEventListener('orientationchange', _resizeOverlay);
+  document.body.appendChild(overlay);
+
+  // Forzar reflow para que iOS commit los styles antes del render del PDF
+  void overlay.offsetHeight;
+
   overlay._cleanup = () => {
-    document.body.style.overflow = _prevBodyOverflow;
     document.documentElement.style.overflow = _prevHtmlOverflow;
-    window.removeEventListener('resize', _resizeOverlay);
-    window.removeEventListener('orientationchange', _resizeOverlay);
-    // En v.0100 NO scrolleamos al inicio — el overlay queda en su posición
-    // original anclado al scroll del usuario. Solo restauramos overflow.
+    document.body.style.overflow = _prevBodyOverflow;
+    if(activeBody) activeBody.style.overflow = _prevActiveOverflow;
+    // Restaurar scroll original (los 3 paths)
+    try { window.scrollTo(0, _prevScrollWindow); } catch(_){}
+    document.documentElement.scrollTop = _prevScrollHtml;
+    document.body.scrollTop = _prevScrollBody;
+    if(activeBody) activeBody.scrollTop = _prevScrollActive;
   };
 
   const setStatus = (msg) => {
