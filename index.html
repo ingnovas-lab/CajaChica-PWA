@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0097';
+const APP_VERSION = '0098';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5943,18 +5943,35 @@ async function generarPDFFotos(params){
   // depende de visibility — el render funciona aún si el contenedor está oculto.
   const overlay = document.createElement('div');
   overlay.id = 'pdf-gen-overlay';
-  // v.0097: anclado a documentElement (no body) + transform:translateZ(0) para
-  // forzar nuevo stacking context. body tiene max-width:440px y position:relative
-  // que en iOS PWA standalone puede crear un containing block raro y cortar
-  // el overlay. Anclar al <html> evita esa interacción.
-  // height usa 100vh, 100dvh y 100lvh — fallback en cascada por compatibilidad.
-  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;height:100dvh;height:100lvh;background:rgba(15,23,42,0.96);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px;box-sizing:border-box;overflow:hidden;transform:translateZ(0);will-change:transform;margin:0';
+  // v.0098: en iOS PWA standalone los valores 100vh/dvh/lvh son inconsistentes
+  // — el overlay quedaba truncado mostrando solo la mitad superior. Solución:
+  // calcular el alto explícito en pixels con window.innerHeight y aplicarlo.
+  // También bloqueamos scroll del body mientras está el overlay para que el
+  // usuario no pueda mover la página detrás.
+  const vpH = window.innerHeight;
+  const vpW = window.innerWidth;
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:' + vpW + 'px;height:' + vpH + 'px;background:rgba(15,23,42,0.96);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px;box-sizing:border-box;overflow:hidden;margin:0;transform:translateZ(0)';
   overlay.innerHTML = `
     <div class="spinner" style="width:44px;height:44px;border:3px solid rgba(255,255,255,0.2);border-top-color:#d97706;border-radius:50%;animation:spin 0.8s linear infinite"></div>
     <div id="pdf-gen-msg" style="font-size:15px;font-weight:600">Preparando datos del reporte…</div>
     <div style="font-size:12px;color:rgba(255,255,255,0.7);max-width:300px;line-height:1.5">No cierres esta pestaña. El proceso puede tardar 30–90 s según la cantidad de facturas.</div>
   `;
   document.documentElement.appendChild(overlay);
+  // Bloquear scroll del body mientras el overlay esté presente
+  const _prevBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  // Re-ajustar el alto si la orientación cambia o el viewport se redimensiona
+  const _resizeOverlay = () => {
+    overlay.style.width = window.innerWidth + 'px';
+    overlay.style.height = window.innerHeight + 'px';
+  };
+  window.addEventListener('resize', _resizeOverlay);
+  window.addEventListener('orientationchange', _resizeOverlay);
+  overlay._cleanup = () => {
+    document.body.style.overflow = _prevBodyOverflow;
+    window.removeEventListener('resize', _resizeOverlay);
+    window.removeEventListener('orientationchange', _resizeOverlay);
+  };
 
   const setStatus = (msg) => {
     const p = banner.querySelector('.progress'); if(p) p.textContent = msg;
@@ -6216,8 +6233,8 @@ async function generarPDFFotos(params){
 
     const driveUrl = `https://drive.google.com/file/d/${upData.id}/view`;
     document.body.removeChild(renderRoot); renderRoot = null;
+    if(overlay._cleanup) overlay._cleanup();
     overlay.remove();
-    document.body.style.overflow = '';
 
     // 8. Banner de éxito (v.0095: incluye detalle de fotos faltantes si las hay)
     banner.style.cssText = 'background:rgba(34,197,94,0.12);border:1px solid var(--green);border-radius:var(--r);padding:14px;margin-top:14px;text-align:center';
@@ -6240,7 +6257,10 @@ async function generarPDFFotos(params){
     `;
   } catch(e){
     if(renderRoot && renderRoot.parentNode) renderRoot.parentNode.removeChild(renderRoot);
-    if(overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    if(overlay){
+      if(overlay._cleanup) overlay._cleanup();
+      if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
     document.body.style.overflow = '';
     banner.style.cssText = 'background:rgba(239,68,68,0.12);border:1px solid var(--red);border-radius:var(--r);padding:12px 14px;margin-top:14px;font-size:13px;color:var(--red);line-height:1.5';
     banner.innerHTML = `✗ Error generando PDF de fotos: ${e.message || e}`;
@@ -6254,15 +6274,18 @@ function renderReporte(d){
   const obraRows = Object.entries(d.porObra).sort((a,b) => b[1]-a[1])
     .map(([k,v]) => `<tr><td>${k}</td><td style="text-align:right;font-family:var(--mono)">${fmt(v)}</td></tr>`).join('');
 
+  // v.0098: white-space:nowrap en todas las celdas para que cada fila quepa en
+  // una sola línea (sin romper "2026-04-25" en 3). El wrapper tiene overflow-x:auto.
+  const tdBase = 'padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap';
   const detRows = d.filtrados
     .sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
     .map(r => `<tr>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border)">${r.fecha}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border)">${r.suplidor}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px">${r.ncf}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border)">${r.categoria}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-family:var(--mono)">${r.no_reporte}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:var(--mono)">${fmt(r.monto)}</td>
+      <td style="${tdBase}">${r.fecha}</td>
+      <td style="${tdBase}">${r.suplidor}</td>
+      <td style="${tdBase};font-family:var(--mono);font-size:11px">${r.ncf}</td>
+      <td style="${tdBase}">${r.categoria}</td>
+      <td style="${tdBase};font-family:var(--mono)">${r.no_reporte}</td>
+      <td style="${tdBase};text-align:right;font-family:var(--mono)">${fmt(r.monto)}</td>
     </tr>`).join('');
 
   const filtrosTexto = [];
@@ -6299,15 +6322,15 @@ function renderReporte(d){
       </table>
 
       <h4 style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text2);margin-bottom:8px">Detalle de facturas (${d.filtrados.length})</h4>
-      <div style="overflow-x:auto">
-      <table style="width:100%;font-size:12px;border-collapse:collapse">
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table style="width:100%;font-size:12px;border-collapse:collapse;white-space:nowrap">
         <thead><tr style="border-bottom:1px solid var(--border);color:var(--text2);font-size:10px;text-transform:uppercase;letter-spacing:.04em">
-          <th style="text-align:left;padding:6px 4px">Fecha</th>
-          <th style="text-align:left;padding:6px 4px">Suplidor</th>
-          <th style="text-align:left;padding:6px 4px">NCF</th>
-          <th style="text-align:left;padding:6px 4px">Categoría</th>
-          <th style="text-align:left;padding:6px 4px">No. Rep.</th>
-          <th style="text-align:right;padding:6px 4px">Monto</th>
+          <th style="text-align:left;padding:6px 8px">Fecha</th>
+          <th style="text-align:left;padding:6px 8px">Suplidor</th>
+          <th style="text-align:left;padding:6px 8px">NCF</th>
+          <th style="text-align:left;padding:6px 8px">Categoría</th>
+          <th style="text-align:left;padding:6px 8px">No. Rep.</th>
+          <th style="text-align:right;padding:6px 8px">Monto</th>
         </tr></thead>
         <tbody>${detRows || '<tr><td colspan="6" style="color:var(--text2);text-align:center;padding:16px">Sin facturas en este periodo</td></tr>'}</tbody>
       </table>
