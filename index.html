@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0099';
+const APP_VERSION = '0100';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5941,19 +5941,18 @@ async function generarPDFFotos(params){
   // de .page (la PWA usa esa clase para sus pantallas SPA con display:none).
   // Con el override !important en .pdf-report .page (display:block) ya no
   // depende de visibility — el render funciona aún si el contenedor está oculto.
-  // v.0099: bug encontrado — en iOS PWA standalone, position:fixed con top:0
-  // se anclaba al TOP del DOCUMENTO (no del viewport). Si el usuario scrolleó
-  // hacia abajo antes de tocar "Generar", el overlay quedaba fuera de pantalla.
-  // Fix: guardar scroll position, scrollear al top y bloquear scroll antes de
-  // crear el overlay. Al cerrar el overlay, restaurar el scroll.
+  // v.0100: position:fixed seguía siendo inconfiable en iOS PWA standalone aún
+  // con scrollTo(0,0). Approach final: position:absolute con top=scrollY actual.
+  // Eso ancla el overlay a la posición visible del viewport sin depender de
+  // que iOS interprete fixed correctamente. Bloquear scroll del body+html
+  // garantiza que el overlay no se "despegue" durante la generación.
   const _prevScrollY = window.scrollY || window.pageYOffset || 0;
-  window.scrollTo(0, 0);
 
   const overlay = document.createElement('div');
   overlay.id = 'pdf-gen-overlay';
   const vpH = window.innerHeight;
   const vpW = window.innerWidth;
-  overlay.style.cssText = 'position:fixed;top:0;left:0;width:' + vpW + 'px;height:' + vpH + 'px;background:rgba(15,23,42,0.96);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px;box-sizing:border-box;overflow:hidden;margin:0;transform:translateZ(0)';
+  overlay.style.cssText = 'position:absolute;top:' + _prevScrollY + 'px;left:0;width:' + vpW + 'px;height:' + vpH + 'px;background:rgba(15,23,42,0.96);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px;box-sizing:border-box;overflow:hidden;margin:0;transform:translateZ(0)';
   overlay.innerHTML = `
     <div class="spinner" style="width:44px;height:44px;border:3px solid rgba(255,255,255,0.2);border-top-color:#d97706;border-radius:50%;animation:spin 0.8s linear infinite"></div>
     <div id="pdf-gen-msg" style="font-size:15px;font-weight:600">Preparando datos del reporte…</div>
@@ -5966,6 +5965,7 @@ async function generarPDFFotos(params){
   document.body.style.overflow = 'hidden';
   document.documentElement.style.overflow = 'hidden';
   const _resizeOverlay = () => {
+    overlay.style.top = (window.scrollY || window.pageYOffset || 0) + 'px';
     overlay.style.width = window.innerWidth + 'px';
     overlay.style.height = window.innerHeight + 'px';
   };
@@ -5976,8 +5976,8 @@ async function generarPDFFotos(params){
     document.documentElement.style.overflow = _prevHtmlOverflow;
     window.removeEventListener('resize', _resizeOverlay);
     window.removeEventListener('orientationchange', _resizeOverlay);
-    // Restaurar scroll position cuando se cierra
-    window.scrollTo(0, _prevScrollY);
+    // En v.0100 NO scrolleamos al inicio — el overlay queda en su posición
+    // original anclado al scroll del usuario. Solo restauramos overflow.
   };
 
   const setStatus = (msg) => {
