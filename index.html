@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0098';
+const APP_VERSION = '0099';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5941,13 +5941,16 @@ async function generarPDFFotos(params){
   // de .page (la PWA usa esa clase para sus pantallas SPA con display:none).
   // Con el override !important en .pdf-report .page (display:block) ya no
   // depende de visibility — el render funciona aún si el contenedor está oculto.
+  // v.0099: bug encontrado — en iOS PWA standalone, position:fixed con top:0
+  // se anclaba al TOP del DOCUMENTO (no del viewport). Si el usuario scrolleó
+  // hacia abajo antes de tocar "Generar", el overlay quedaba fuera de pantalla.
+  // Fix: guardar scroll position, scrollear al top y bloquear scroll antes de
+  // crear el overlay. Al cerrar el overlay, restaurar el scroll.
+  const _prevScrollY = window.scrollY || window.pageYOffset || 0;
+  window.scrollTo(0, 0);
+
   const overlay = document.createElement('div');
   overlay.id = 'pdf-gen-overlay';
-  // v.0098: en iOS PWA standalone los valores 100vh/dvh/lvh son inconsistentes
-  // — el overlay quedaba truncado mostrando solo la mitad superior. Solución:
-  // calcular el alto explícito en pixels con window.innerHeight y aplicarlo.
-  // También bloqueamos scroll del body mientras está el overlay para que el
-  // usuario no pueda mover la página detrás.
   const vpH = window.innerHeight;
   const vpW = window.innerWidth;
   overlay.style.cssText = 'position:fixed;top:0;left:0;width:' + vpW + 'px;height:' + vpH + 'px;background:rgba(15,23,42,0.96);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px;box-sizing:border-box;overflow:hidden;margin:0;transform:translateZ(0)';
@@ -5959,8 +5962,9 @@ async function generarPDFFotos(params){
   document.documentElement.appendChild(overlay);
   // Bloquear scroll del body mientras el overlay esté presente
   const _prevBodyOverflow = document.body.style.overflow;
+  const _prevHtmlOverflow = document.documentElement.style.overflow;
   document.body.style.overflow = 'hidden';
-  // Re-ajustar el alto si la orientación cambia o el viewport se redimensiona
+  document.documentElement.style.overflow = 'hidden';
   const _resizeOverlay = () => {
     overlay.style.width = window.innerWidth + 'px';
     overlay.style.height = window.innerHeight + 'px';
@@ -5969,8 +5973,11 @@ async function generarPDFFotos(params){
   window.addEventListener('orientationchange', _resizeOverlay);
   overlay._cleanup = () => {
     document.body.style.overflow = _prevBodyOverflow;
+    document.documentElement.style.overflow = _prevHtmlOverflow;
     window.removeEventListener('resize', _resizeOverlay);
     window.removeEventListener('orientationchange', _resizeOverlay);
+    // Restaurar scroll position cuando se cierra
+    window.scrollTo(0, _prevScrollY);
   };
 
   const setStatus = (msg) => {
