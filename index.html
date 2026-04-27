@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0103';
+const APP_VERSION = '0104';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4692,7 +4692,8 @@ async function uploadImage(entry){
   return `https://drive.google.com/file/d/${data.id}/view`;
 }
 
-// Comparte un archivo de Drive con todos los admins registrados en USUARIOS.
+// Comparte un archivo de Drive con todos los admins registrados en USUARIOS
+// Y como anyone-with-link (público, vía CDN sin auth).
 // Se llama automáticamente después de subir cada foto.
 // No bloquea — si falla, solo avisa en consola.
 async function sharePhotoWithAdmins(fileId){
@@ -4703,13 +4704,10 @@ async function sharePhotoWithAdmins(fileId){
       .map(u => u.email)
       .filter(Boolean);
 
-    if(admins.length === 0){
-      console.warn('[sharePhoto] No hay admins en USUARIOS para compartir la foto');
-      return;
-    }
-
     const token = getToken();
-    // Compartir con cada admin (lectura)
+
+    // Compartir con cada admin (lectura). Necesario para que Apps Script del
+    // admin pueda procesar el archivo en consolidarFacturas.
     for(const adminEmail of admins){
       try {
         await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?sendNotificationEmail=false`, {
@@ -4728,8 +4726,99 @@ async function sharePhotoWithAdmins(fileId){
         console.warn(`[sharePhoto] No se pudo compartir con ${adminEmail}:`, e);
       }
     }
+
+    // v.0104: además compartir como anyone-with-link. Sin esto las miniaturas
+    // y los previews fallan porque el thumbnail público de Drive requiere foto
+    // accesible sin auth. Lo mismo que hace Apps Script v.0072+ al consolidar,
+    // pero ejecutado al subir para que las fotos sean accesibles inmediatamente.
+    await _ensurePublicShare(fileId);
   } catch(e){
     console.warn('[sharePhoto] Error general:', e);
+  }
+}
+
+// v.0104: comparte el archivo como anyone-with-link (lectura). Retorna true
+// si se aplicó. La PWA con scope drive.file puede modificar permisos de
+// archivos que ella misma creó. Para archivos de otros (ej. copia consolidada
+// hecha por Apps Script en el folder del admin), retorna false silencioso.
+async function _ensurePublicShare(fileId){
+  const token = getToken();
+  if(!token || !fileId) return false;
+  try {
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?sendNotificationEmail=false`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({role: 'reader', type: 'anyone'})
+    });
+    return r.ok;
+  } catch(e){
+    return false;
+  }
+}
+
+// v.0104: descarga el archivo de Drive con OAuth y lo retorna como blob URL.
+// Usado como fallback cuando _ensurePublicShare no puede hacer pública la foto
+// (ej. archivo creado por otro usuario). Más lento que thumbnail público pero
+// funciona para cualquier archivo accesible vía drive.file scope.
+async function _fetchPhotoBlobUrl(fileId){
+  const token = getToken();
+  if(!token || !fileId) return null;
+  try {
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    if(!r.ok) return null;
+    const blob = await r.blob();
+    return URL.createObjectURL(blob);
+  } catch(e){
+    return null;
+  }
+}
+
+// v.0104: handler de onerror para fotos Drive privadas. Cascada de recuperación
+// con stages para no perder estrategias si el retry también falla:
+//  stage 0: share-on-demand (PATCH permissions a anyone) → retry thumbnail.
+//  stage 1: si share funcionó pero retry thumbnail falló → OAuth fetch.
+//  stage 2: ya intentamos todo → mostrar fallback estático (.zoom-error).
+async function _recoverPrivatePhoto(img, fileId){
+  if(!img || !fileId) return;
+  const stage = parseInt(img.dataset.recoverStage || '0', 10);
+
+  // Si ya agotamos las estrategias, mostrar fallback
+  if(stage >= 2){
+    img.style.display = 'none';
+    if(img.nextElementSibling && img.nextElementSibling.style){
+      img.nextElementSibling.style.display = 'flex';
+    }
+    return;
+  }
+
+  if(stage === 0){
+    // Estrategia 1: share-on-demand → retry thumbnail con cache-buster
+    img.dataset.recoverStage = '1';
+    const shared = await _ensurePublicShare(fileId);
+    if(shared){
+      img.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600&_=${Date.now()}`;
+      return;
+    }
+    // Share falló — caer inmediatamente a estrategia 2
+  }
+
+  // Estrategia 2: OAuth fetch a blob URL
+  img.dataset.recoverStage = '2';
+  const blobUrl = await _fetchPhotoBlobUrl(fileId);
+  if(blobUrl){
+    img.src = blobUrl;
+    return;
+  }
+
+  // Falló todo
+  img.style.display = 'none';
+  if(img.nextElementSibling && img.nextElementSibling.style){
+    img.nextElementSibling.style.display = 'flex';
   }
 }
 
@@ -6681,6 +6770,8 @@ function renderFacturas(){
 // + doble-tap reset consistente en cualquier punto donde el usuario abra una foto
 // (Mis facturas, pendientes locales, edición de factura, preview de Confirmar gasto).
 // opts.driveLink: si está presente, agrega botón "Abrir en Drive" + fallback de error con link.
+// opts.fileId (v.0104): si está presente, activa la cascada de recuperación
+// para fotos privadas (share-on-demand → OAuth fetch → fallback).
 function _showFotoModal(src, opts){
   opts = opts || {};
   const errorHTML = opts.driveLink
@@ -6689,10 +6780,14 @@ function _showFotoModal(src, opts){
   const extraBtn = opts.driveLink
     ? `<button class="btn" onclick="window.open('${opts.driveLink}','_blank')">Abrir en Drive</button>`
     : '';
+  // Si hay fileId, usar cascada de recuperación; sino solo mostrar fallback estático
+  const onerrorAttr = opts.fileId
+    ? `onerror="_recoverPrivatePhoto(this,'${opts.fileId}')"`
+    : `onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"`;
   showModal(`
     <div style="text-align:center">
       <div class="zoom-wrap" style="overflow:hidden;width:100%;max-height:65vh;border-radius:8px;background:#000;touch-action:none;position:relative;display:flex;align-items:center;justify-content:center;min-height:200px">
-        <img class="zoom-img" src="${src}" style="max-width:100%;max-height:65vh;object-fit:contain;transform-origin:center center;transition:transform 0.05s linear;display:block;will-change:transform" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <img class="zoom-img" src="${src}" style="max-width:100%;max-height:65vh;object-fit:contain;transform-origin:center center;transition:transform 0.05s linear;display:block;will-change:transform" ${onerrorAttr}>
         <div class="zoom-error" style="display:none;color:var(--text2);padding:30px;text-align:center;align-items:center;justify-content:center;width:100%;height:100%">${errorHTML}</div>
       </div>
       <div style="margin-top:8px;font-size:11px;color:var(--text2)">Pellizca para hacer zoom · Doble tap para resetear</div>
@@ -6710,7 +6805,8 @@ function verFotoDrive(url){
   const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
   if(!m){ window.open(url, '_blank'); return; }
   const fileId = m[1];
-  _showFotoModal(`https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`, {driveLink: url});
+  // v.0104: pasar fileId activa la cascada de recuperación si la foto es privada
+  _showFotoModal(`https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`, {driveLink: url, fileId});
 }
 
 function verFotoUrl(src){
@@ -6850,7 +6946,13 @@ function editarFactura(idx){
   if(editContext.original.url_factura){
     const m = editContext.original.url_factura.match(/\/d\/([a-zA-Z0-9_-]+)/);
     if(m){
-      img.src = `https://drive.google.com/thumbnail?id=${m[1]}&sz=w1200`;
+      // v.0104: cascada de recuperación si la foto es privada (share-on-demand
+      // → OAuth fetch → mostrar broken). Sin esto, foto privada = "punto" del
+      // broken image icon. Reset el stage por si re-edit.
+      const fileId = m[1];
+      img.dataset.recoverStage = '0';
+      img.onerror = function(){ _recoverPrivatePhoto(this, fileId); };
+      img.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200`;
       imgWrap.style.display = 'block';
     } else imgWrap.style.display = 'none';
   } else imgWrap.style.display = 'none';
