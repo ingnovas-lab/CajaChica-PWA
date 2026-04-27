@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0106';
+const APP_VERSION = '0107';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3889,12 +3889,17 @@ async function refreshBadgeRevisar(){
       const H = {};
       (raw[0] || []).forEach((h, i) => H[h] = i);
       if(H.APROBADO === undefined){ badge.style.display = 'none'; return; }
-      const proj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+      // v.0107: filtrar por empresa activa (= masters.projects), no por proyecto
+      // activo. El usuario controla varios proyectos a la vez y necesita ver
+      // el total de facturas POR REVISAR de la empresa entera, no solo del
+      // proyecto activo. Mismo patrón que v.0106 (refreshHome) y v.0105
+      // (renderHistory).
+      const validCods = new Set(masters.projects.map(p => p.cod));
       count = raw.slice(1).filter(r => {
         if(!r[H.ID]) return false;
         const eliminado = H.ELIMINADO !== undefined && r[H.ELIMINADO] === 'SI';
         if(eliminado) return false;
-        if(proj && r[H.PROYECTO] !== proj.cod) return false;
+        if(!validCods.has(r[H.PROYECTO])) return false;
         return r[H.APROBADO] === 'REVISAR' || r[H.APROBADO] === 'PENDIENTE';
       }).length;
       revisarCache = {count, at: Date.now()};
@@ -6440,7 +6445,7 @@ function renderReporte(d){
     <div id="reporte-printable">
       <div style="text-align:center;border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:16px">
         <div style="font-size:16px;font-weight:600">REPORTE DE BALANCE</div>
-        <div style="font-size:13px;color:var(--text2);margin-top:3px">${d.nombreObra}${d.codObra ? ' · '+d.codObra : ''}</div>
+        <div style="font-size:13px;color:var(--text2);margin-top:3px">${d.nombreObra}</div>
         <div style="font-size:11px;color:var(--text2);margin-top:6px">${filtrosTexto.join(' · ')}</div>
         <div style="font-size:10px;color:var(--text3);margin-top:4px">Generado: ${d.fechaGeneracion}</div>
       </div>
