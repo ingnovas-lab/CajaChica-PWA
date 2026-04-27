@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0104';
+const APP_VERSION = '0105';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4383,10 +4383,23 @@ async function saveAbono(){
 // ============================================================
 async function renderHistory(){
   const body = document.getElementById('hist-body');
-  const all = await dbGetAll('pending');
-  document.getElementById('hist-sub').textContent = all.length + ' pendientes';
+  const allRaw = await dbGetAll('pending');
+  // v.0105: filtrar por proyectos válidos en la empresa activa.
+  // Los pendientes no guardan empresa explícita, solo el cod del proyecto.
+  // masters.projects ya está scoped a la empresa activa, así que filtrar
+  // contra él da los pendientes "de esta empresa". Los demás existen pero
+  // pertenecen a otras empresas — el usuario los ve cambiando de empresa.
+  const validCods = new Set(masters.projects.map(p => p.cod));
+  const all = allRaw.filter(e => validCods.has(e.proyecto));
+  const ocultosOtraEmpresa = allRaw.length - all.length;
+  const subText = all.length + ' pendientes' +
+    (ocultosOtraEmpresa > 0 ? ' (' + ocultosOtraEmpresa + ' en otras empresas)' : '');
+  document.getElementById('hist-sub').textContent = subText;
   if(all.length === 0){
-    body.innerHTML = '<div class="alert alert-green">No hay registros pendientes. Todo sincronizado.</div>';
+    const msg = ocultosOtraEmpresa > 0
+      ? 'No hay pendientes de esta empresa. Tienes ' + ocultosOtraEmpresa + ' en otras empresas — cambia de empresa para verlos.'
+      : 'No hay registros pendientes. Todo sincronizado.';
+    body.innerHTML = '<div class="alert alert-green">' + msg + '</div>';
     return;
   }
   body.innerHTML = all.map(e => {
@@ -4444,8 +4457,19 @@ async function syncAll(){
   btn.disabled = true;
   btn.textContent = 'Sincronizando...';
   try {
-    const all = await dbGetAll('pending');
-    if(all.length === 0){ toast('Nada que sincronizar', 'ok'); return; }
+    const allRaw = await dbGetAll('pending');
+    if(allRaw.length === 0){ toast('Nada que sincronizar', 'ok'); return; }
+
+    // v.0105: filtrar por proyectos válidos en la empresa activa. Sin esto,
+    // un pendiente con cod de obra de OTRA empresa rompe syncAll con
+    // "Proyecto no encontrado: OBR-XXXX-XXX" en uploadImage.
+    const validCods = new Set(masters.projects.map(p => p.cod));
+    const all = allRaw.filter(e => validCods.has(e.proyecto));
+    const otraEmpresa = allRaw.length - all.length;
+    if(all.length === 0){
+      toast('Ningún pendiente pertenece a esta empresa. Cambia de empresa para sincronizar.', 'err');
+      return;
+    }
 
     const gastos = all.filter(e => e.tipo_registro === 'GASTO');
     const abonos = all.filter(e => e.tipo_registro === 'ABONO');
@@ -4524,7 +4548,11 @@ async function syncAll(){
       localStorage.setItem(LS.BALCACHE, JSON.stringify(balCache));
     }
 
-    toast(`${all.length} registro(s) sincronizados`, 'ok');
+    // v.0105: si hay pendientes de otras empresas, avisar al usuario
+    const msgExtra = otraEmpresa > 0
+      ? ` · ${otraEmpresa} pendiente(s) de otra empresa — cambia de empresa para sincronizar`
+      : '';
+    toast(`${all.length} registro(s) sincronizados${msgExtra}`, 'ok');
     invalidateRevisarCache();
     renderHistory();
     refreshHome();  // verá caché vacío y mostrará "Calculando..." + auto-refresh
