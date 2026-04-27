@@ -547,6 +547,16 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div class="lbl">Obra</div>
         <select id="fac-filtro-obra" onchange="loadFacturas()"></select>
       </div>
+      <div class="grid2" style="margin-bottom:8px">
+        <div class="field" style="margin-bottom:0">
+          <div class="lbl">Desde</div>
+          <input type="date" id="fac-filtro-desde" onchange="loadFacturas()">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <div class="lbl">Hasta</div>
+          <input type="date" id="fac-filtro-hasta" onchange="loadFacturas()">
+        </div>
+      </div>
       <div class="grid2">
         <div class="field" style="margin-bottom:0">
           <div class="lbl">Estado</div>
@@ -1440,7 +1450,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0107';
+const APP_VERSION = '0108';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -6653,16 +6663,24 @@ function initFacturas(){
   sel.innerHTML = '<option value="">— Todas las obras —</option>' +
     masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
 
+  // v.0108: default Desde vacío (mostrar todo) + Hasta = hoy. Permite filtrar
+  // Desde sin tener que tocar Hasta (queda anclado al día actual).
+  const today = new Date().toISOString().slice(0, 10);
+
   // Restaurar filtros previos si existen (ej. volviendo de editar una factura)
   if(facturasFiltrosState){
     sel.value = facturasFiltrosState.obra || '';
     document.getElementById('fac-filtro-estado').value = facturasFiltrosState.estado || 'activas';
     document.getElementById('fac-filtro-buscar').value = facturasFiltrosState.buscar || '';
+    document.getElementById('fac-filtro-desde').value = facturasFiltrosState.desde || '';
+    document.getElementById('fac-filtro-hasta').value = facturasFiltrosState.hasta || today;
   } else {
     const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
     if(currentProj) sel.value = currentProj.cod;
     document.getElementById('fac-filtro-estado').value = 'activas';
     document.getElementById('fac-filtro-buscar').value = '';
+    document.getElementById('fac-filtro-desde').value = '';
+    document.getElementById('fac-filtro-hasta').value = today;
   }
 
   // Auto-cargar
@@ -6680,9 +6698,11 @@ async function loadFacturas(){
   const obra = document.getElementById('fac-filtro-obra').value;
   const estado = document.getElementById('fac-filtro-estado').value;
   const buscar = document.getElementById('fac-filtro-buscar').value.trim().toLowerCase();
+  const desde = document.getElementById('fac-filtro-desde').value;
+  const hasta = document.getElementById('fac-filtro-hasta').value;
 
   // Guardar estado para poder restaurar filtros al volver de editar
-  facturasFiltrosState = {obra, estado, buscar};
+  facturasFiltrosState = {obra, estado, buscar, desde, hasta};
 
   loading(true, 'Cargando', 'Leyendo facturas...');
   try {
@@ -6710,6 +6730,11 @@ async function loadFacturas(){
       if(estado === 'eliminadas' && !eliminado) return false;
       if(estado === 'revisar' && (!porRevisar || eliminado)) return false;
       if(obra && r[H.PROYECTO] !== obra) return false;
+      // v.0108: filtro por rango de fechas. FECHA_FACTURA es 'YYYY-MM-DD' →
+      // comparación lexicográfica segura. Vacío = sin restricción de ese lado.
+      const fechaFact = r[H.FECHA_FACTURA] || '';
+      if(desde && fechaFact && fechaFact < desde) return false;
+      if(hasta && fechaFact && fechaFact > hasta) return false;
       if(buscar){
         const text = ((r[H.SUPLIDOR] || '') + ' ' + (r[H.NCF] || '') + ' ' + (r[H.NO_REPORTE] || '')).toLowerCase();
         if(!text.includes(buscar)) return false;
