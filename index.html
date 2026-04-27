@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0105';
+const APP_VERSION = '0106';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3950,9 +3950,13 @@ async function refreshHome(){
 
   document.getElementById('user-email').textContent = getDisplayName();
 
-  // Stats pendientes locales (solo del proyecto activo; si no hay proj, contar 0)
+  // Stats pendientes locales — v.0106: por empresa activa, no por proyecto.
+  // El usuario controla varios proyectos a la vez y necesita ver el total de
+  // pendientes de la empresa para no perder ninguno. Igual que pg-history
+  // (v.0105). Filtro vía masters.projects (que ya está scoped a empresa).
   const pending = await dbGetAll('pending');
-  const myPending = proj ? pending.filter(p => p.proyecto === proj.cod) : [];
+  const validCods = new Set(masters.projects.map(p => p.cod));
+  const myPending = pending.filter(p => validCods.has(p.proyecto));
   const netoPendiente = myPending.reduce((s, p) => s + (p.tipo_registro === 'ABONO' ? +p.monto : -Math.abs(+p.monto)), 0);
   document.getElementById('s-pending').textContent = myPending.length;
   document.getElementById('s-total').textContent = fmt(netoPendiente);
