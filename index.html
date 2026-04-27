@@ -1440,7 +1440,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0095';
+const APP_VERSION = '0096';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5855,27 +5855,61 @@ function _buildFiscalReportHTML(d){
 }
 
 // Helper: descarga foto vía OAuth y la convierte a data URI (evita CORS de html2canvas)
+// v.0096: 3 estrategias en cascada porque scope drive.file no ve archivos creados
+// por Apps Script (consolidados). Si la primera falla, prueba siguiente:
+//   1. lh3.googleusercontent.com con auth — funciona si la PWA creó el archivo
+//      o si el archivo es público (anyone-with-link).
+//   2. drive/v3/files/{id}?alt=media&fields=... con auth — más permisivo,
+//      funciona si la PWA tiene scope drive.file Y el archivo es de la app.
+//   3. lh3.googleusercontent.com SIN auth — funciona solo si el archivo es
+//      anyone-with-link (caso post Apps Script v.0071 que comparte al consolidar).
+function _blobToDataURI(blob){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function _fetchFotoAsDataURI(urlFactura, token){
   if(!urlFactura) return null;
   const m = String(urlFactura).match(/\/d\/([a-zA-Z0-9_-]+)/);
   if(!m) return null;
   const fileId = m[1];
+
+  // Estrategia 1: lh3 con auth (caso normal — PWA creó el archivo o es público)
   try {
     const r = await fetch('https://lh3.googleusercontent.com/d/' + fileId + '=w2000', {
       headers: {'Authorization': 'Bearer ' + token}
     });
-    if(!r.ok) return null;
-    const blob = await r.blob();
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+    if(r.ok){
+      const blob = await r.blob();
+      if(blob.size > 1000) return await _blobToDataURI(blob); // >1KB = real
+    }
+  } catch(e){ console.warn('[fetchFoto:lh3+auth] falló para', fileId, e); }
+
+  // Estrategia 2: Drive API con alt=media (más permisivo si scope drive.file ve el archivo)
+  try {
+    const r = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
+      headers: {'Authorization': 'Bearer ' + token}
     });
-  } catch(e){
-    console.warn('[fetchFoto] falló para fileId', fileId, e);
-    return null;
-  }
+    if(r.ok){
+      const blob = await r.blob();
+      if(blob.size > 1000) return await _blobToDataURI(blob);
+    }
+  } catch(e){ console.warn('[fetchFoto:driveAPI] falló para', fileId, e); }
+
+  // Estrategia 3: lh3 sin auth (público — funciona si Apps Script v.0071+ compartió como anyone-with-link)
+  try {
+    const r = await fetch('https://lh3.googleusercontent.com/d/' + fileId + '=w2000');
+    if(r.ok){
+      const blob = await r.blob();
+      if(blob.size > 1000) return await _blobToDataURI(blob);
+    }
+  } catch(e){ console.warn('[fetchFoto:lh3-noauth] falló para', fileId, e); }
+
+  return null;
 }
 
 // ============================================================
@@ -5901,7 +5935,10 @@ async function generarPDFFotos(params){
   // depende de visibility — el render funciona aún si el contenedor está oculto.
   const overlay = document.createElement('div');
   overlay.id = 'pdf-gen-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.96);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px';
+  // v.0096: usar top/left/right/bottom explícito + width/height con dvh por
+  // iOS PWA standalone. `inset:0` solo era inconsistente y a veces el overlay
+  // no cubría toda la pantalla cuando había barra del sistema variable.
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;height:100dvh;background:rgba(15,23,42,0.96);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-align:center;padding:20px;box-sizing:border-box;overflow:hidden';
   overlay.innerHTML = `
     <div class="spinner" style="width:44px;height:44px;border:3px solid rgba(255,255,255,0.2);border-top-color:#d97706;border-radius:50%;animation:spin 0.8s linear infinite"></div>
     <div id="pdf-gen-msg" style="font-size:15px;font-weight:600">Preparando datos del reporte…</div>
