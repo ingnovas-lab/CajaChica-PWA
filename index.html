@@ -1536,7 +1536,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0113';
+const APP_VERSION = '0114';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3917,11 +3917,19 @@ async function loadMasters(){
     const amAdmin = myRow && (myRow[2] || '').trim().toUpperCase() === 'ADMIN';
     masters.myRole = amAdmin ? 'ADMIN' : 'USUARIO';
 
-    // Log útil para diagnosticar problemas de permisos
+    // v.0114: persistir estado de "usuario no encontrado" o "sin obras" para
+    // mostrar mensaje claro en pg-proj-select. Antes el mensaje era genérico
+    // ("No tienes obras asignadas") y un email mal escrito por el admin no
+    // se distinguía de un usuario válido sin obras asignadas todavía.
+    masters.userEmail = email;
     if(!myRow){
+      masters.accessIssue = 'email_not_found';
       console.warn('[loadMasters] No se encontró fila para email actual:', email, '— Usuarios en Sheet:', usr.map(r => r[0]));
     } else if(!amAdmin && myProjCodes.length === 0){
+      masters.accessIssue = 'no_projects_assigned';
       console.warn('[loadMasters] Usuario sin obras asignadas. Revisa columna D (PROYECTOS_ASIGNADOS) del Sheet para:', email);
+    } else {
+      masters.accessIssue = null;
     }
 
     masters.projects = proj
@@ -4156,7 +4164,21 @@ async function refreshBalance(forceRemote){
 function renderProjects(){
   const box = document.getElementById('proj-list');
   if(masters.projects.length === 0){
-    box.innerHTML = '<div class="alert alert-amber">No tienes obras asignadas. Pide al admin que te agregue a USUARIOS en la hoja.</div>';
+    // v.0114: mensaje específico según el motivo. masters.accessIssue lo setea
+    // loadMasters al detectar email no registrado vs sin obras asignadas.
+    const issue = masters.accessIssue;
+    const myEmail = masters.userEmail || '';
+    let msg;
+    if(issue === 'email_not_found'){
+      msg = `Tu email <strong style="font-family:var(--mono);color:var(--text)">${myEmail}</strong> no está registrado por el admin en esta empresa. ` +
+            `Pídele que verifique el email exacto en la hoja USUARIOS — un typo o mayúscula distinta basta para no encontrarte.`;
+    } else if(issue === 'no_projects_assigned'){
+      msg = `Estás registrado como <strong style="font-family:var(--mono);color:var(--text)">${myEmail}</strong> pero el admin no te asignó ninguna obra. ` +
+            `Pídele que la asigne en la columna D (PROYECTOS_ASIGNADOS) de la hoja USUARIOS.`;
+    } else {
+      msg = 'No tienes obras asignadas. Pide al admin que te agregue a USUARIOS en la hoja.';
+    }
+    box.innerHTML = '<div class="alert alert-amber" style="line-height:1.5">' + msg + '</div>';
     return;
   }
   box.innerHTML = masters.projects.map(p => {
