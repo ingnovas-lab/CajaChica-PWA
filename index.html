@@ -424,6 +424,35 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div style="font-size:11px;color:var(--text2);margin-top:4px">Este nombre se usará para la carpeta en Drive y el nombre del Sheet</div>
       </div>
 
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0 14px;position:relative">
+      <div style="font-size:10px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin:-26px 0 8px 14px;background:var(--bg2);padding:0 10px;display:inline-block">Datos para reportes contables (opcional)</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.5;margin-bottom:12px">
+        Estos datos solo aparecen en el reporte "Contabilidad / Soporte Fiscal". Si los dejas vacíos, salen como "—" o líneas en blanco para firmar a mano. Puedes editarlos después en "Configuración → Cambiar empresa → Editar".
+      </div>
+
+      <div class="field">
+        <div class="lbl">Razón social legal</div>
+        <input type="text" id="newcomp-razonSocial" placeholder="Ej. CONSTRUCTORA MABRICK, S.R.L." autocapitalize="characters">
+      </div>
+      <div class="grid2" style="margin-bottom:14px;gap:8px">
+        <div class="field" style="margin-bottom:0">
+          <div class="lbl">RNC</div>
+          <input type="text" id="newcomp-rnc" placeholder="9 u 11 dígitos" inputmode="numeric" style="font-family:var(--mono)">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <div class="lbl">Dirección</div>
+          <input type="text" id="newcomp-direccion" placeholder="Av., calle, ciudad" autocapitalize="words">
+        </div>
+      </div>
+      <div class="field">
+        <div class="lbl">Revisado por (firmante)</div>
+        <input type="text" id="newcomp-revisadoPor" placeholder="Vacío = línea en blanco" autocapitalize="words">
+      </div>
+      <div class="field">
+        <div class="lbl">Aprobado por (firmante)</div>
+        <input type="text" id="newcomp-aprobadoPor" placeholder="Vacío = línea en blanco" autocapitalize="words">
+      </div>
+
       <button class="btn btn-amber" onclick="crearEmpresa()" id="btn-crear-empresa" style="margin-top:12px">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21V12h6v9"/></svg>
         Crear empresa
@@ -1454,7 +1483,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0110';
+const APP_VERSION = '0111';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3226,13 +3255,25 @@ async function crearEmpresa(){
       bdFolderId: bdFolderId
     };
 
+    // v.0111: leer datos contables del formulario (todos opcionales).
+    // Antes solo se podía agregar después en "Editar empresa". Ahora se
+    // captura todo en una sola pasada al crear.
+    const datosContables = {
+      razonSocial: document.getElementById('newcomp-razonSocial').value.trim(),
+      rnc: document.getElementById('newcomp-rnc').value.trim().replace(/[^0-9]/g, ''),
+      direccion: document.getElementById('newcomp-direccion').value.trim(),
+      revisadoPor: document.getElementById('newcomp-revisadoPor').value.trim(),
+      aprobadoPor: document.getElementById('newcomp-aprobadoPor').value.trim()
+    };
+
     // Pre-registrar empresa (sin scriptUrl todavía)
     const empresaData = {
       nombre: nombre,
       sheetId: sheetId,
       scriptUrl: '',
       folderId: empresaFolderId,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      ...datosContables
     };
     upsertCompany(empresaData);
     // Sincronizar al Admin Index (otros dispositivos lo verán automáticamente)
