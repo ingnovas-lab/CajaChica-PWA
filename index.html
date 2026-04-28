@@ -1576,7 +1576,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0115</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0116</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1592,7 +1592,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0115';
+const APP_VERSION = '0116';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7828,8 +7828,11 @@ async function initBalance(){
       statusEl.textContent = 'Toca ↻ para actualizar';
     }
 
-    // Leer REGISTRO + INGRESOS + fondo apertura del proyecto
-    const [regRaw, ingRaw] = await sheetsBatchGet(['REGISTRO!A1:Z', 'INGRESOS!A1:G']);
+    // Leer REGISTRO + INGRESOS + fondo apertura del proyecto.
+    // sheetsBatchGet retorna [{values: [...]}, {values: [...]}], no arrays directos.
+    const [regData, ingData] = await sheetsBatchGet(['REGISTRO!A1:Z', 'INGRESOS!A1:G']);
+    const regRaw = regData.values || [];
+    const ingRaw = ingData.values || [];
 
     // Mapear headers REGISTRO
     const regH = {};
