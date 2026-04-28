@@ -130,7 +130,7 @@ input[type=date]{color-scheme:dark}
 
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:20px;z-index:80}
 .modal-bg.show{display:flex}
-.modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:20px;width:100%;max-width:400px;max-height:80vh;overflow-y:auto}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:20px;width:100%;max-width:400px;max-height:80vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 
 .ncf-status{display:flex;align-items:center;gap:6px;font-size:11px;margin-top:4px;font-weight:500}
 .ncf-status.ok{color:var(--green)}
@@ -1483,7 +1483,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0111';
+const APP_VERSION = '0112';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5143,11 +5143,48 @@ async function forceAppUpdate(){
   location.reload();
 }
 
+// v.0112: bloquear scroll del body+html+wrapper activo cuando hay modal abierto.
+// Sin esto, en iOS PWA standalone el touch a veces scrollea el fondo en lugar
+// del modal (mismo patrón de bug que el overlay PDF resuelto en v.0101).
+// Guardamos el scroll original y restauramos al cerrar.
+let _modalPrevScroll = null;
 function showModal(html){
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal').classList.add('show');
+
+  // Solo guardar scroll si no hay otro modal ya abierto (evita pisar el state)
+  if(!_modalPrevScroll){
+    const activeBody = document.querySelector('.page.on > .body');
+    _modalPrevScroll = {
+      window: window.scrollY || window.pageYOffset || 0,
+      html: document.documentElement.scrollTop || 0,
+      body: document.body.scrollTop || 0,
+      activeBody: activeBody ? activeBody.scrollTop : 0,
+      activeBodyEl: activeBody,
+      htmlOverflow: document.documentElement.style.overflow,
+      bodyOverflow: document.body.style.overflow,
+      activeBodyOverflow: activeBody ? activeBody.style.overflow : ''
+    };
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    if(activeBody) activeBody.style.overflow = 'hidden';
+  }
 }
-function closeModal(){ document.getElementById('modal').classList.remove('show'); }
+function closeModal(){
+  document.getElementById('modal').classList.remove('show');
+  if(_modalPrevScroll){
+    const s = _modalPrevScroll;
+    document.documentElement.style.overflow = s.htmlOverflow;
+    document.body.style.overflow = s.bodyOverflow;
+    if(s.activeBodyEl) s.activeBodyEl.style.overflow = s.activeBodyOverflow;
+    // Restaurar scroll original (los 3 paths)
+    try { window.scrollTo(0, s.window); } catch(_){}
+    document.documentElement.scrollTop = s.html;
+    document.body.scrollTop = s.body;
+    if(s.activeBodyEl) s.activeBodyEl.scrollTop = s.activeBody;
+    _modalPrevScroll = null;
+  }
+}
 
 // ============================================================
 // REPORTES DE BALANCE
