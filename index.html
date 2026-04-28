@@ -1576,7 +1576,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0116</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0117</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1592,7 +1592,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0116';
+const APP_VERSION = '0117';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4194,6 +4194,14 @@ async function refreshBalance(forceRemote){
   const btn = document.getElementById('bal-refresh');
   btn.classList.add('spin');
   document.getElementById('balance-status').textContent = 'Actualizando...';
+  // v.0115: si pg-balance está visible, replicar el feedback (spin + status)
+  const balPageVisible = document.getElementById('pg-balance').classList.contains('on');
+  const btnPage = document.getElementById('bal-page-refresh');
+  if(balPageVisible){
+    if(btnPage) btnPage.classList.add('spin');
+    const stPage = document.getElementById('bal-page-status');
+    if(stPage) stPage.textContent = 'Actualizando...';
+  }
 
   try {
     // 1) Refrescar masters (proyectos, suplidores, categorías) — detecta cambios de nombres
@@ -4208,8 +4216,7 @@ async function refreshBalance(forceRemote){
     localStorage.setItem(LS.BALCACHE, JSON.stringify(cache));
     refreshHome();
     // v.0115: si pg-balance está visible, sincronizar su card también
-    const balPage = document.getElementById('pg-balance');
-    if(balPage && balPage.classList.contains('on')){
+    if(balPageVisible){
       const el = document.getElementById('bal-page-amt');
       const stEl = document.getElementById('bal-page-status');
       if(el){
@@ -4224,8 +4231,13 @@ async function refreshBalance(forceRemote){
     // podría no verlo. Así sabe que tocó algo y puede reintentar.
     const statusEl = document.getElementById('balance-status');
     if(statusEl) statusEl.textContent = 'Error al actualizar — toca para reintentar';
+    if(balPageVisible){
+      const stPage = document.getElementById('bal-page-status');
+      if(stPage) stPage.textContent = 'Error — toca ↻ para reintentar';
+    }
   } finally {
     btn.classList.remove('spin');
+    if(balPageVisible && btnPage) btnPage.classList.remove('spin');
   }
 }
 
@@ -7928,7 +7940,10 @@ async function initBalance(){
     document.getElementById('bal-mon-fac').textContent = fmt(montoFac);
     document.getElementById('bal-cnt-ing').textContent = totalIng;
     document.getElementById('bal-mon-ing').textContent = fmt(montoIng);
-    document.getElementById('bal-sub').textContent = `${proj.cod} · ${items.length} movimiento${items.length === 1 ? '' : 's'}`;
+    // Mostrar nombre del proyecto (más legible). Si por alguna razón no hay nombre
+    // en el cache de LS.PROJ, fallback al cod para no quedar vacío.
+    const projDisplay = proj.nombre || proj.cod;
+    document.getElementById('bal-sub').textContent = `${projDisplay} · ${items.length} movimiento${items.length === 1 ? '' : 's'}`;
 
     renderBalanceLista();
     loading(false);
