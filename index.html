@@ -572,6 +572,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <input type="text" id="fac-filtro-buscar" placeholder="Suplidor, NCF..." oninput="debounceBuscar()">
         </div>
       </div>
+      <div id="fac-stats" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px">
+        <div><span id="fac-stat-count" style="font-weight:600;color:var(--text)">0</span> <span style="color:var(--text2)">factura(s)</span></div>
+        <div style="font-family:var(--mono);font-weight:600;color:var(--red)">RD$ <span id="fac-stat-total">0.00</span></div>
+      </div>
     </div>
     <div id="fac-lista"></div>
   </div>
@@ -1450,7 +1454,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0108';
+const APP_VERSION = '0109';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -6663,23 +6667,27 @@ function initFacturas(){
   sel.innerHTML = '<option value="">— Todas las obras —</option>' +
     masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
 
-  // v.0108: default Desde vacío (mostrar todo) + Hasta = hoy. Permite filtrar
-  // Desde sin tener que tocar Hasta (queda anclado al día actual).
-  const today = new Date().toISOString().slice(0, 10);
+  // v.0109: default Desde = primer día del mes en curso, Hasta = hoy.
+  // Mes en curso es lo más útil por defecto para revisar gastos recientes.
+  // El usuario puede vaciar Desde para ver todo el histórico.
+  const todayD = new Date();
+  const today = todayD.toISOString().slice(0, 10);
+  const firstOfMonth = new Date(todayD.getFullYear(), todayD.getMonth(), 1)
+    .toISOString().slice(0, 10);
 
   // Restaurar filtros previos si existen (ej. volviendo de editar una factura)
   if(facturasFiltrosState){
     sel.value = facturasFiltrosState.obra || '';
     document.getElementById('fac-filtro-estado').value = facturasFiltrosState.estado || 'activas';
     document.getElementById('fac-filtro-buscar').value = facturasFiltrosState.buscar || '';
-    document.getElementById('fac-filtro-desde').value = facturasFiltrosState.desde || '';
+    document.getElementById('fac-filtro-desde').value = facturasFiltrosState.desde !== undefined ? facturasFiltrosState.desde : firstOfMonth;
     document.getElementById('fac-filtro-hasta').value = facturasFiltrosState.hasta || today;
   } else {
     const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
     if(currentProj) sel.value = currentProj.cod;
     document.getElementById('fac-filtro-estado').value = 'activas';
     document.getElementById('fac-filtro-buscar').value = '';
-    document.getElementById('fac-filtro-desde').value = '';
+    document.getElementById('fac-filtro-desde').value = firstOfMonth;
     document.getElementById('fac-filtro-hasta').value = today;
   }
 
@@ -6709,6 +6717,10 @@ async function loadFacturas(){
     const raw = await sheetsGet('REGISTRO!A1:Z');
     if(!raw || raw.length === 0){
       document.getElementById('fac-lista').innerHTML = '<div class="alert alert-amber">REGISTRO vacío</div>';
+      // v.0109: resetear stats cuando el sheet está vacío
+      document.getElementById('fac-sub').textContent = '0 factura(s) en la empresa';
+      document.getElementById('fac-stat-count').textContent = '0';
+      document.getElementById('fac-stat-total').textContent = '0.00';
       loading(false); return;
     }
 
@@ -6748,7 +6760,18 @@ async function loadFacturas(){
 
     facturasCache = filtered;
     renderFacturas();
-    document.getElementById('fac-sub').textContent = filtered.length + ' factura(s) encontrada(s)';
+
+    // v.0109: subtítulo del topbar muestra SIEMPRE el total de la empresa
+    // (todos los registros con ID, sin importar filtros). Eso da contexto del
+    // tamaño total de la empresa, fijo. Los stats al pie del card sí cambian
+    // con los filtros (count + monto del filtro actual).
+    const totalEmpresa = rows.filter(r => r[H.ID]).length;
+    document.getElementById('fac-sub').textContent = totalEmpresa + ' factura(s) en la empresa';
+
+    const totalMonto = filtered.reduce((s, f) => s + (parseFloat(f.row[H.MONTO]) || 0), 0);
+    document.getElementById('fac-stat-count').textContent = filtered.length;
+    document.getElementById('fac-stat-total').textContent = fmt(totalMonto).replace('RD$ ', '');
+
     loading(false);
   } catch(e){
     loading(false);
