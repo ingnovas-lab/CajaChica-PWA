@@ -1576,7 +1576,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0119</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0120</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1592,7 +1592,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0119';
+const APP_VERSION = '0120';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -6276,6 +6276,43 @@ function _buildFiscalReportHTML(d){
   return html;
 }
 
+// v.0120: instrumentación del flujo PDF para diagnóstico real (vs paños tibios).
+// _pdfTrace acumula líneas con timestamp relativo desde el inicio de la generación.
+// El usuario puede copiarlo desde botones en banners/overlay para mandarlo y diagnosticar.
+window._pdfTrace = window._pdfTrace || [];
+window._pdfTraceStart = 0;
+function _pdfLog(msg, data){
+  const t = window._pdfTraceStart ? (Date.now() - window._pdfTraceStart) : 0;
+  let line = `[+${t}ms] ${msg}`;
+  if(data !== undefined){
+    try { line += ' ' + JSON.stringify(data); } catch(_){ line += ' [non-serializable]'; }
+  }
+  console.log('[PDF] ' + line);
+  window._pdfTrace.push(line);
+}
+
+// Copia el _pdfTrace al portapapeles. Funciona en Mac/Windows/iOS PWA con
+// navigator.clipboard. Fallback a modal con textarea seleccionable si la API
+// no está disponible (raro en HTTPS pero defensa).
+async function copiarLogPDF(){
+  const log = (window._pdfTrace || []).join('\n');
+  if(!log){ toast('No hay log para copiar', 'err'); return; }
+  const header = `=== LOG PDF — ${new Date().toISOString()} ===\nApp v.${APP_VERSION} · empresa: ${(getCurrentCompany()||{}).nombre || '?'} · userAgent: ${navigator.userAgent}\n\n`;
+  const fullLog = header + log;
+  try {
+    await navigator.clipboard.writeText(fullLog);
+    toast('Log copiado al portapapeles', 'ok');
+  } catch(e){
+    // Fallback: modal con textarea pre-seleccionado
+    showModal(`<div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">Log del PDF</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">No se pudo copiar automáticamente. Selecciona todo (Cmd+A / Ctrl+A) y copia.</div>
+      <textarea id="pdf-log-text" style="width:100%;height:300px;font-family:var(--mono);font-size:10px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);white-space:pre" readonly>${fullLog.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c])}</textarea>
+      <button class="btn" style="margin-top:10px;width:100%;padding:10px" onclick="document.getElementById('pdf-log-text').select();document.execCommand('copy');toast('Copiado','ok');closeModal()">Copiar y cerrar</button>
+    </div>`);
+  }
+}
+
 // Helper: descarga foto vía OAuth y la convierte a data URI (evita CORS de html2canvas)
 // v.0096: 3 estrategias en cascada porque scope drive.file no ve archivos creados
 // por Apps Script (consolidados). Si la primera falla, prueba siguiente:
@@ -6295,21 +6332,14 @@ function _blobToDataURI(blob){
 }
 
 async function _fetchFotoAsDataURI(urlFactura, token){
-  if(!urlFactura) return null;
+  if(!urlFactura){ _pdfLog('fetchFoto: skipped (urlFactura vacía)'); return null; }
   const m = String(urlFactura).match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if(!m) return null;
+  if(!m){ _pdfLog('fetchFoto: skipped (URL sin formato /d/{fileId})', {url: urlFactura}); return null; }
   const fileId = m[1];
-  // v.0097: logging detallado de cada estrategia para diagnóstico. Acumulamos
-  // info en window._fetchFotoLog para revisar después si fallan las 3.
-  const log = (str, status, size) => console.warn(`[fetchFoto:${str}] fileId=${fileId} status=${status||'?'} size=${size||0}`);
+  const fileIdShort = fileId.slice(0, 8);
   if(!window._fetchFotoLog) window._fetchFotoLog = [];
 
-  // v.0118: AbortController con timeout 25s por estrategia. Antes los fetches
-  // no tenían timeout — si Drive se colgaba, el await nunca resolvía y
-  // generarPDFFotos quedaba "Generando PDF..." indefinido (Issue #1 del
-  // handover 2026-04-28). Con timeout, en el peor caso se gastan 75s totales
-  // (3 estrategias × 25s) y retorna null, que la llamadora detecta y aborta
-  // la generación con advertencia visible al usuario.
+  // v.0118: AbortController con timeout 25s por estrategia.
   const TIMEOUT_MS = 25000;
   const fetchWithTimeout = async (url, opts) => {
     const ctrl = new AbortController();
@@ -6322,39 +6352,73 @@ async function _fetchFotoAsDataURI(urlFactura, token){
   };
 
   // Estrategia 1: lh3 con auth
+  let t0 = Date.now();
   try {
+    _pdfLog(`fetchFoto[${fileIdShort}]: estrategia lh3+auth start`);
     const r = await fetchWithTimeout('https://lh3.googleusercontent.com/d/' + fileId + '=w2000', {
       headers: {'Authorization': 'Bearer ' + token}
     });
     if(r.ok){
       const blob = await r.blob();
-      if(blob.size > 1000){ window._fetchFotoLog.push({fileId, strategy:'lh3+auth', ok:true, status:r.status, size:blob.size}); return await _blobToDataURI(blob); }
-      log('lh3+auth-tinyblob', r.status, blob.size);
-    } else log('lh3+auth-fail', r.status);
-  } catch(e){ log('lh3+auth-error', e.name === 'AbortError' ? 'timeout >25s' : e.message); }
+      _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth status=${r.status} size=${blob.size}B en ${Date.now()-t0}ms`);
+      if(blob.size > 1000){
+        window._fetchFotoLog.push({fileId, strategy:'lh3+auth', ok:true, status:r.status, size:blob.size});
+        const tConv = Date.now();
+        const uri = await _blobToDataURI(blob);
+        _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI en ${Date.now()-tConv}ms (resultado ${uri.length}B)`);
+        return uri;
+      }
+      _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth tinyblob (size=${blob.size}<1000), pasando a estrategia 2`);
+    } else _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth fail status=${r.status} en ${Date.now()-t0}ms`);
+  } catch(e){
+    _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth error: ${e.name === 'AbortError' ? 'timeout>25s' : e.message} en ${Date.now()-t0}ms`);
+  }
 
   // Estrategia 2: Drive API con alt=media
+  t0 = Date.now();
   try {
+    _pdfLog(`fetchFoto[${fileIdShort}]: estrategia driveAPI start`);
     const r = await fetchWithTimeout('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
       headers: {'Authorization': 'Bearer ' + token}
     });
     if(r.ok){
       const blob = await r.blob();
-      if(blob.size > 1000){ window._fetchFotoLog.push({fileId, strategy:'driveAPI', ok:true, status:r.status, size:blob.size}); return await _blobToDataURI(blob); }
-      log('driveAPI-tinyblob', r.status, blob.size);
-    } else log('driveAPI-fail', r.status);
-  } catch(e){ log('driveAPI-error', e.name === 'AbortError' ? 'timeout >25s' : e.message); }
+      _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI status=${r.status} size=${blob.size}B en ${Date.now()-t0}ms`);
+      if(blob.size > 1000){
+        window._fetchFotoLog.push({fileId, strategy:'driveAPI', ok:true, status:r.status, size:blob.size});
+        const tConv = Date.now();
+        const uri = await _blobToDataURI(blob);
+        _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI en ${Date.now()-tConv}ms (resultado ${uri.length}B)`);
+        return uri;
+      }
+      _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI tinyblob (size=${blob.size}<1000), pasando a estrategia 3`);
+    } else _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI fail status=${r.status} en ${Date.now()-t0}ms`);
+  } catch(e){
+    _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI error: ${e.name === 'AbortError' ? 'timeout>25s' : e.message} en ${Date.now()-t0}ms`);
+  }
 
   // Estrategia 3: lh3 sin auth (requiere anyone-with-link)
+  t0 = Date.now();
   try {
+    _pdfLog(`fetchFoto[${fileIdShort}]: estrategia lh3-noauth start`);
     const r = await fetchWithTimeout('https://lh3.googleusercontent.com/d/' + fileId + '=w2000');
     if(r.ok){
       const blob = await r.blob();
-      if(blob.size > 1000){ window._fetchFotoLog.push({fileId, strategy:'lh3-noauth', ok:true, status:r.status, size:blob.size}); return await _blobToDataURI(blob); }
-      log('lh3-noauth-tinyblob', r.status, blob.size);
-    } else log('lh3-noauth-fail', r.status);
-  } catch(e){ log('lh3-noauth-error', e.name === 'AbortError' ? 'timeout >25s' : e.message); }
+      _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth status=${r.status} size=${blob.size}B en ${Date.now()-t0}ms`);
+      if(blob.size > 1000){
+        window._fetchFotoLog.push({fileId, strategy:'lh3-noauth', ok:true, status:r.status, size:blob.size});
+        const tConv = Date.now();
+        const uri = await _blobToDataURI(blob);
+        _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI en ${Date.now()-tConv}ms (resultado ${uri.length}B)`);
+        return uri;
+      }
+      _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth tinyblob (size=${blob.size}<1000)`);
+    } else _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth fail status=${r.status} en ${Date.now()-t0}ms`);
+  } catch(e){
+    _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth error: ${e.name === 'AbortError' ? 'timeout>25s' : e.message} en ${Date.now()-t0}ms`);
+  }
 
+  _pdfLog(`fetchFoto[${fileIdShort}]: TODAS las estrategias fallaron`);
   window._fetchFotoLog.push({fileId, strategy:'all-failed', ok:false});
   return null;
 }
@@ -6364,8 +6428,16 @@ async function _fetchFotoAsDataURI(urlFactura, token){
 // Recibe: { filtrados (raw rows), regH, masters, desde, hasta, numero, nombreObra, codObra }
 // ============================================================
 async function generarPDFFotos(params){
+  // v.0120: reset de instrumentación al inicio de cada generación
+  window._pdfTrace = [];
+  window._pdfTraceStart = Date.now();
+  window._pdfCancelRequested = false;
+  _pdfLog(`=== INICIO generarPDFFotos · v.${APP_VERSION} ===`);
+  _pdfLog(`empresa: ${(getCurrentCompany()||{}).nombre || '?'} · params: ${params.filtrados?.length||0} filas, tipo=${params.tipoInforme||'ejecutivo'}`);
+  _pdfLog(`userAgent: ${navigator.userAgent}`);
+
   const container = document.getElementById('rep-resultado');
-  if(!container) return;
+  if(!container){ _pdfLog('ABORT: contenedor #rep-resultado no encontrado'); return; }
   const banner = document.createElement('div');
   banner.id = 'pdf-fotos-banner';
   banner.style.cssText = 'background:rgba(59,130,246,0.12);border:1px solid var(--blue);border-radius:var(--r);padding:12px 14px;margin-top:14px;display:flex;align-items:center;gap:10px;font-size:13px';
@@ -6415,6 +6487,10 @@ async function generarPDFFotos(params){
     <div class="spinner" style="width:44px;height:44px;border:3px solid rgba(255,255,255,0.2);border-top-color:#d97706;border-radius:50%;animation:spin 0.8s linear infinite"></div>
     <div id="pdf-gen-msg" style="font-size:15px;font-weight:600">Preparando datos del reporte…</div>
     <div style="font-size:12px;color:rgba(255,255,255,0.7);max-width:300px;line-height:1.5">No cierres esta pestaña. El proceso puede tardar 30–90 s según la cantidad de facturas.</div>
+    <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap;justify-content:center">
+      <button onclick="copiarLogPDF()" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:#fff;padding:8px 14px;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">📋 Copiar log</button>
+      <button onclick="window._pdfCancelRequested=true" style="background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);color:#fca5a5;padding:8px 14px;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">✕ Cancelar generación</button>
+    </div>
   `;
   document.body.appendChild(overlay);
 
@@ -6439,17 +6515,26 @@ async function generarPDFFotos(params){
 
   let renderRoot = null;
   try {
+    _pdfLog('check libs');
     if(typeof window.html2canvas !== 'function' || !window.jspdf){
       throw new Error('Librerías PDF no cargadas (revisa conexión).');
     }
+    _pdfLog(`libs OK: html2canvas=${typeof window.html2canvas}, jspdf=${typeof window.jspdf}`);
     const token = getToken();
     if(!token) throw new Error('Sesión expirada');
+    _pdfLog(`token OK (${token.slice(0,12)}...)`);
 
     const {filtrados, regH, desde, hasta, numero, nombreObra, codObra} = params;
     const tipoInforme = params.tipoInforme || 'ejecutivo';
-    if(!filtrados || filtrados.length === 0){ banner.remove(); return; }
+    if(!filtrados || filtrados.length === 0){
+      _pdfLog('ABORT: filtrados vacío');
+      banner.remove();
+      return;
+    }
+    _pdfLog(`params: ${filtrados.length} filas, tipoInforme=${tipoInforme}, codObra=${codObra||'(consolidado)'}, rango=${desde}/${hasta}`);
 
     // 1. Normalizar filas (incluye categoriaCod/cuenta/usuario para template Contabilidad)
+    const tNorm = Date.now();
     const filas = filtrados.map(r => {
       const cat = (masters.categories||[]).find(c => c.cod === r[regH.CATEGORIA]);
       const proj = (masters.projects||[]).find(p => p.cod === r[regH.PROYECTO]);
@@ -6477,17 +6562,21 @@ async function generarPDFFotos(params){
         usuarioIni
       };
     }).sort((a,b) => a.fecha.localeCompare(b.fecha));
+    _pdfLog(`normalize: ${filas.length} filas en ${Date.now()-tNorm}ms`);
 
     // 2. Pre-fetch fotos como data URIs (evita CORS issues)
-    // v.0118: filosofía cambiada. Antes (v.0095) se generaba el PDF aún con
-    // facturas sin foto y se listaba al final. Ahora si CUALQUIER factura no
-    // tiene su foto disponible, se ABORTA la generación y se muestra una
-    // advertencia con el detalle — el reporte sirve como soporte documental,
-    // si está incompleto no debe existir. El usuario decide qué hacer
-    // (verificar Drive, reintentar, marcar la factura como sin foto).
+    // v.0118: filosofía cambiada — si CUALQUIER factura no tiene su foto
+    // disponible, se ABORTA y se muestra advertencia con detalle.
+    _pdfLog(`prefetch: iniciando descarga de ${filas.length} fotos`);
+    const tPrefetchStart = Date.now();
     let fotosOk = 0;
+    let totalDataUriBytes = 0;
     const sinFotoDetalle = []; // [{idShort, id, suplidor, fecha, monto, no_reporte, razon}]
     for(let i = 0; i < filas.length; i++){
+      if(window._pdfCancelRequested){
+        _pdfLog(`prefetch: cancelación manual recibida en foto ${i+1}/${filas.length}`);
+        throw new Error('CANCELADO_POR_USUARIO');
+      }
       setStatus(`Descargando fotos (${i+1}/${filas.length})…`);
       const f = filas[i];
       const detalle = (razon) => ({
@@ -6506,16 +6595,19 @@ async function generarPDFFotos(params){
       f.fotoUrl = await _fetchFotoAsDataURI(f.url_factura, token);
       if(f.fotoUrl){
         fotosOk++;
+        totalDataUriBytes += f.fotoUrl.length;
       } else {
         // Las 3 estrategias de fetch fallaron o timeoutearon (>25s c/u).
         sinFotoDetalle.push(detalle('foto no accesible (timeout, eliminada de Drive o sin permisos)'));
       }
     }
+    _pdfLog(`prefetch DONE: ${fotosOk}/${filas.length} OK, ${sinFotoDetalle.length} faltantes, total dataURI=${(totalDataUriBytes/1024/1024).toFixed(2)}MB, t=${Date.now()-tPrefetchStart}ms`);
 
     // v.0118: si falta cualquier foto, abortar y mostrar advertencia.
     // Guardamos los params en window para que el botón "Reintentar" pueda
     // re-disparar la misma generación sin reconstruir filtros.
     if(sinFotoDetalle.length > 0){
+      _pdfLog(`ABORT: ${sinFotoDetalle.length} foto(s) faltante(s)`);
       window._lastPDFParams = params;
       // Cleanup overlay y banner de progreso
       if(overlay){
@@ -6545,7 +6637,10 @@ async function generarPDFFotos(params){
           2. Si la red está lenta o Drive responde lento, reintenta en un minuto.<br>
           3. Si la foto se borró, edita la factura para cargarla de nuevo.
         </div>
-        <button class="btn btn-blue" onclick="reintentarGenerarPDF()" style="padding:10px;font-size:13px;width:100%">↻ Reintentar generación</button>
+        <div class="grid2" style="gap:8px">
+          <button class="btn btn-blue" onclick="reintentarGenerarPDF()" style="padding:10px;font-size:13px">↻ Reintentar generación</button>
+          <button class="btn" onclick="copiarLogPDF()" style="padding:10px;font-size:13px">📋 Copiar log diagnóstico</button>
+        </div>
       `;
       console.warn('[generarPDFFotos] abortado por fotos faltantes:', sinFotoDetalle);
       return;
@@ -6622,11 +6717,14 @@ async function generarPDFFotos(params){
         if(f.fotoUrl) valStats.withPhoto++;
       });
 
+      const tHash = Date.now();
       const loteId = _generateLoteId(empresaActiva.nombre);
       const loteHash = await _calculateLoteHash(filas);
+      _pdfLog(`buildHTML[contabilidad]: loteHash en ${Date.now()-tHash}ms`);
       const dispName = getDisplayName() || '';
       const preparadoPorIni = dispName.split(/\s+/).map(w => (w[0]||'').toUpperCase()).slice(0,3).join('') || '—';
 
+      const tBuild = Date.now();
       reportData = {
         ...baseData,
         loteId,
@@ -6638,14 +6736,17 @@ async function generarPDFFotos(params){
       builderHTML = _buildFiscalReportHTML(reportData);
       cssId = 'pdf-fiscal-css';
       cssText = _renderFiscalCSS();
+      _pdfLog(`buildHTML[contabilidad]: html ${(builderHTML.length/1024).toFixed(1)}KB, css ${(cssText.length/1024).toFixed(1)}KB, t=${Date.now()-tBuild}ms`);
     } else {
       // Template Ejecutivo Corporativo (default, comportamiento histórico)
+      const tBuild = Date.now();
       let totalPages = 2;
       projList.forEach(p => { totalPages += isMultiProj ? 2 : 1; totalPages += p.facturas.length; });
       reportData = {...baseData, totalPages};
       builderHTML = _buildPDFReportHTML(reportData);
       cssId = 'pdf-report-css';
       cssText = _renderPDFCSS();
+      _pdfLog(`buildHTML[ejecutivo]: estimado ${totalPages} páginas, html ${(builderHTML.length/1024).toFixed(1)}KB, css ${(cssText.length/1024).toFixed(1)}KB, t=${Date.now()-tBuild}ms`);
     }
 
     if(!document.getElementById(cssId)){
@@ -6653,56 +6754,87 @@ async function generarPDFFotos(params){
       style.id = cssId;
       style.textContent = cssText;
       document.head.appendChild(style);
+      _pdfLog(`CSS injected: id=${cssId}`);
     }
 
     // 5. Renderizar HTML oculto fuera de pantalla (UX limpia).
-    // El override !important en .pdf-report .page (y .pdf-fiscal .page) garantiza
-    // que el browser sí pinta los pages aunque estén off-screen.
     setStatus('Construyendo reporte…');
+    const tRender = Date.now();
     renderRoot = document.createElement('div');
     renderRoot.style.cssText = 'position:fixed;left:-99999px;top:0;width:8.5in;background:#fff';
     renderRoot.innerHTML = builderHTML;
     document.body.appendChild(renderRoot);
+    _pdfLog(`renderRoot appended a body, t=${Date.now()-tRender}ms`);
 
-    // Esperar a que fonts + imágenes (data URIs) estén realmente decodificadas
-    try { await document.fonts.ready; } catch(e) {}
+    // Esperar a que fonts + imágenes (data URIs) estén realmente decodificadas.
+    // v.0120: instrumentar cada paso para detectar si fonts.ready o img decode
+    // se cuelga. Si una <img> tiene src vacío, ni onload ni onerror disparan —
+    // la promesa quedaría pendiente para siempre. Lo detectamos contando.
+    const tFonts = Date.now();
+    try { await document.fonts.ready; _pdfLog(`document.fonts.ready en ${Date.now()-tFonts}ms`); }
+    catch(e) { _pdfLog(`document.fonts.ready ERROR: ${e.message}`); }
     const allImgs = Array.from(renderRoot.querySelectorAll('img'));
-    await Promise.all(allImgs.map(img => img.complete ? Promise.resolve() :
-      new Promise(res => { img.onload = img.onerror = res; })));
+    const imgsEmpty = allImgs.filter(img => !img.src || img.src === '' || img.src === window.location.href);
+    _pdfLog(`imgs en renderRoot: ${allImgs.length} total, ${imgsEmpty.length} con src vacío/inválido`);
+    if(imgsEmpty.length > 0){
+      _pdfLog(`WARN: ${imgsEmpty.length} <img> con src vacío encontradas — onload/onerror nunca van a disparar para esas`);
+    }
+    const tImgs = Date.now();
+    await Promise.all(allImgs.map((img, idx) => {
+      if(img.complete){ return Promise.resolve(); }
+      // Defensa contra <img src=""> que nunca disparan eventos: timeout 10s
+      // por imagen, pasa de largo si no resolvió. v.0120.
+      return Promise.race([
+        new Promise(res => { img.onload = img.onerror = res; }),
+        new Promise(res => setTimeout(() => {
+          _pdfLog(`WARN: img[${idx}] no completó en 10s, src.length=${(img.src||'').length}, complete=${img.complete}`);
+          res();
+        }, 10000))
+      ]);
+    }));
+    _pdfLog(`imgs decode wait DONE en ${Date.now()-tImgs}ms`);
     await new Promise(r => setTimeout(r, 250)); // margen extra para layout final
+    _pdfLog(`pre-render layout settle DONE`);
 
     // 6. Capturar página por página y armar el PDF.
-    // v.0119: timeout 60s por página vía Promise.race. Antes html2canvas podía
-    // colgarse indefinido (Issue #1 reaparecido tras v.0118 — el timeout de
-    // _fetchFotoAsDataURI cubrió el pre-fetch, pero el render podía atascarse
-    // dentro de html2canvas sin dar feedback). Si una página supera 60s, throw
-    // con mensaje específico que sugiere dividir el reporte. También bajamos
-    // scale 2→1.5 para reducir memoria en iOS PWA (calidad sigue siendo buena
-    // para impresión). Liberamos el canvas tras usarlo para que iOS pueda
-    // hacer GC entre páginas.
+    // v.0120: revertido scale a 2 (v.0119 lo bajó a 1.5 como paño tibio sin
+    // diagnóstico). Timeout subido a 300s (5 min) — solo red de seguridad
+    // para cuelgue real, no para cortar render lento legítimo. Mantenida la
+    // liberación de canvas + setTimeout(0) entre páginas (esos sí ayudan a
+    // iOS PWA con GC sin enmascarar el bug raíz). Instrumentación detallada
+    // vía _pdfLog para diagnóstico.
     const pages = renderRoot.querySelectorAll('.page');
     const {jsPDF} = window.jspdf;
     const pdf = new jsPDF({unit: 'in', format: 'letter', orientation: 'portrait'});
-    const PAGE_TIMEOUT_MS = 60000;
+    const PAGE_TIMEOUT_MS = 300000;
+    _pdfLog(`render: jsPDF inicializado, ${pages.length} páginas a renderizar`);
     for(let i = 0; i < pages.length; i++){
+      // Permitir cancelación manual desde el botón del overlay
+      if(window._pdfCancelRequested){
+        _pdfLog(`render: cancelación manual recibida en página ${i+1}/${pages.length}`);
+        throw new Error('CANCELADO_POR_USUARIO');
+      }
       setStatus(`Generando PDF (página ${i+1}/${pages.length})…`);
       await new Promise(r => setTimeout(r, 0));
+      _pdfLog(`render: página ${i+1}/${pages.length} html2canvas start`);
       const t0 = Date.now();
       let canvas;
       try {
         canvas = await Promise.race([
-          html2canvas(pages[i], {scale: 1.5, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816}),
+          html2canvas(pages[i], {scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816}),
           new Promise((_, rej) => setTimeout(() => rej(new Error('PAGE_TIMEOUT')), PAGE_TIMEOUT_MS))
         ]);
       } catch(canvasErr){
+        _pdfLog(`render: página ${i+1} ERROR ${canvasErr.message}`);
         if(canvasErr.message === 'PAGE_TIMEOUT'){
-          throw new Error(`El render de la página ${i+1}/${pages.length} tomó más de ${PAGE_TIMEOUT_MS/1000}s. Suele pasar con muchas fotos en alta resolución o memoria insuficiente. Sugerencia: divide el reporte en rangos de fechas más cortos (ej. una semana en lugar de un mes).`);
+          throw new Error(`Render de la página ${i+1}/${pages.length} excedió ${PAGE_TIMEOUT_MS/1000}s. El log detallado debajo ayudará a diagnosticar.`);
         }
         throw canvasErr;
       }
       const dt = Date.now() - t0;
-      console.log(`[generarPDFFotos] página ${i+1}/${pages.length} renderizada en ${dt}ms (canvas ${canvas.width}×${canvas.height})`);
+      _pdfLog(`render: página ${i+1}/${pages.length} html2canvas DONE en ${dt}ms (canvas ${canvas.width}×${canvas.height})`);
       const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      _pdfLog(`render: página ${i+1} toDataURL en ${Date.now()-t0-dt}ms (jpeg q=0.92)`);
       if(i > 0) pdf.addPage();
       pdf.addImage(imgData, 'JPEG', 0, 0, 8.5, 11);
       // Liberar canvas — set width/height a 0 fuerza al browser a liberar el
@@ -6712,7 +6844,9 @@ async function generarPDFFotos(params){
       // Tick al event loop para permitir GC + actualizar UI
       await new Promise(r => setTimeout(r, 0));
     }
+    _pdfLog(`render: todas las páginas listas, generando blob...`);
     const pdfBlob = pdf.output('blob');
+    _pdfLog(`render: pdf.output('blob') DONE, size=${pdfBlob.size} bytes`);
 
     // 7. Subir a Drive — ubicación según el alcance del reporte (v.0090)
     // - Single project (codObra presente): /Empresa/Proyectos/[Obra]/Reportes/
@@ -6724,6 +6858,8 @@ async function generarPDFFotos(params){
     // PWA ahora ve las carpetas de proyectos (las creó originalmente con el ID que
     // tiene cacheado, solo cambió el display name vía Drive).
     setStatus('Subiendo a Drive…');
+    _pdfLog(`upload: resolviendo carpeta destino...`);
+    const tFolder = Date.now();
     let reportesId;
     if(codObra){
       // /Caja Chica Master/[Empresa]/Proyectos/[Obra]/Reportes/
@@ -6734,6 +6870,7 @@ async function generarPDFFotos(params){
       const todasLasObrasId = await ensureFolder('Todas las obras', proyectosId);
       reportesId = await ensureFolder('Reportes', todasLasObrasId);
     }
+    _pdfLog(`upload: carpeta destino resuelta en ${Date.now()-tFolder}ms (id=${reportesId})`);
 
     const fechaGenDot = new Date().toISOString().slice(0,10).replace(/-/g, '.');
     const desdeDot = (desde || '').replace(/-/g, '.');
@@ -6753,13 +6890,19 @@ async function generarPDFFotos(params){
       pdfBlob,
       `\r\n--${boundary}--`
     ]);
+    _pdfLog(`upload: enviando ${(pdfBlob.size/1024).toFixed(1)}KB a Drive como '${filename}'`);
+    const tUp = Date.now();
     const upRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method: 'POST',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}`},
       body: body
     });
-    if(!upRes.ok) throw new Error('Upload Drive falló: ' + upRes.status);
+    if(!upRes.ok){
+      _pdfLog(`upload: ERROR status=${upRes.status} en ${Date.now()-tUp}ms`);
+      throw new Error('Upload Drive falló: ' + upRes.status);
+    }
     const upData = await upRes.json();
+    _pdfLog(`upload: OK fileId=${upData.id} en ${Date.now()-tUp}ms`);
 
     // Compartir con anyone-with-link (igual que Apps Script)
     try {
@@ -6768,33 +6911,53 @@ async function generarPDFFotos(params){
         headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
         body: JSON.stringify({role: 'reader', type: 'anyone'})
       });
-    } catch(e){ console.warn('[generarPDFFotos] no se pudo compartir:', e); }
+      _pdfLog(`share: anyone-with-link OK`);
+    } catch(e){
+      _pdfLog(`share: WARN no se pudo compartir: ${e.message}`);
+      console.warn('[generarPDFFotos] no se pudo compartir:', e);
+    }
 
     const driveUrl = `https://drive.google.com/file/d/${upData.id}/view`;
     document.body.removeChild(renderRoot); renderRoot = null;
     if(overlay._cleanup) overlay._cleanup();
     overlay.remove();
+    _pdfLog(`=== FIN OK · total t=${Date.now()-window._pdfTraceStart}ms ===`);
 
-    // 8. Banner de éxito. v.0118: si llegamos aquí, todas las fotos están OK
-    // (el flow aborta antes con advertencia si falta alguna). Banner simplificado.
+    // 8. Banner de éxito.
     banner.style.cssText = 'background:rgba(34,197,94,0.12);border:1px solid var(--green);border-radius:var(--r);padding:14px;margin-top:14px;text-align:center';
     banner.innerHTML = `
       <div style="font-size:14px;font-weight:600;color:var(--green);margin-bottom:4px">✓ PDF de soporte listo</div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${fotosOk} foto(s) incluida(s)</div>
-      <a class="btn btn-green" style="padding:10px;font-size:12px;text-decoration:none" href="${driveUrl}" target="_blank" rel="noopener">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Abrir PDF con fotos
-      </a>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <a class="btn btn-green" style="padding:10px;font-size:12px;text-decoration:none" href="${driveUrl}" target="_blank" rel="noopener">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Abrir PDF con fotos
+        </a>
+        <button class="btn" style="padding:10px;font-size:12px" onclick="copiarLogPDF()">📋 Copiar log diagnóstico</button>
+      </div>
     `;
   } catch(e){
+    _pdfLog(`=== FIN ERROR: ${e.message || e} · total t=${Date.now()-window._pdfTraceStart}ms ===`);
+    if(e.stack) _pdfLog(`stack: ${e.stack.split('\n').slice(0,5).join(' | ')}`);
     if(renderRoot && renderRoot.parentNode) renderRoot.parentNode.removeChild(renderRoot);
     if(overlay){
       if(overlay._cleanup) overlay._cleanup();
       if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
     }
     document.body.style.overflow = '';
-    banner.style.cssText = 'background:rgba(239,68,68,0.12);border:1px solid var(--red);border-radius:var(--r);padding:12px 14px;margin-top:14px;font-size:13px;color:var(--red);line-height:1.5';
-    banner.innerHTML = `✗ Error generando PDF de fotos: ${e.message || e}`;
+    const isCancel = e.message === 'CANCELADO_POR_USUARIO';
+    banner.style.cssText = `background:rgba(239,68,68,0.12);border:1px solid var(--red);border-radius:var(--r);padding:14px 16px;margin-top:14px;font-size:13px;color:var(--text);line-height:1.5`;
+    banner.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="font-size:18px">${isCancel ? '✕' : '⚠️'}</span>
+        <strong style="color:var(--red);font-size:14px">${isCancel ? 'Generación cancelada' : 'Error generando PDF'}</strong>
+      </div>
+      <div style="margin-bottom:12px;color:var(--text2)">${isCancel ? 'La generación fue cancelada manualmente.' : (e.message || e)}</div>
+      <div style="background:rgba(15,23,42,0.4);border-radius:8px;padding:10px;margin-bottom:12px;font-size:11px;color:var(--text2);line-height:1.5">
+        Pulsa "Copiar log diagnóstico" para enviar al soporte. El log incluye los tiempos de cada fase y dónde se atascó.
+      </div>
+      <button class="btn" onclick="copiarLogPDF()" style="padding:10px;font-size:13px;width:100%">📋 Copiar log diagnóstico</button>
+    `;
     console.error('[generarPDFFotos]', e);
   }
 }
