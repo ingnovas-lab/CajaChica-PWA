@@ -307,13 +307,13 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <div class="balance" onclick="refreshBalance(true)">
+    <div class="balance" onclick="show('pg-balance')" style="cursor:pointer">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <div class="balance-label">Balance de obra</div>
-          <div class="balance-sub" id="balance-status">Toca para actualizar</div>
+          <div class="balance-sub" id="balance-status">Toca para ver historial</div>
         </div>
-        <div class="refresh" id="bal-refresh">
+        <div class="refresh" id="bal-refresh" onclick="event.stopPropagation();refreshBalance(true)" style="cursor:pointer" title="Actualizar balance">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
         </div>
       </div>
@@ -607,6 +607,62 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
     <div id="fac-lista"></div>
+  </div>
+</div>
+
+<!-- ========== PAGE: HISTORIAL DE BALANCE (v.0115) ========== -->
+<!-- Vista única del proyecto activo: balance + breakdown + listado cronológico
+     mezclando facturas (REGISTRO) e ingresos (INGRESOS) + fondo de apertura
+     (PROYECTOS!FONDO_INICIAL) como item virtual al final del orden temporal. -->
+<div class="page" id="pg-balance">
+  <div class="topbar">
+    <div class="ibtn" onclick="show('pg-home')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div>
+      <div class="topbar-title">Historial de movimientos</div>
+      <div class="topbar-sub" id="bal-sub">—</div>
+    </div>
+  </div>
+  <div class="body">
+    <!-- Card de balance (mismo look que home) -->
+    <div class="balance" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div class="balance-label">Balance de obra</div>
+          <div class="balance-sub" id="bal-page-status">—</div>
+        </div>
+        <div class="refresh" id="bal-page-refresh" onclick="refreshBalance(true)" style="cursor:pointer" title="Actualizar balance">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        </div>
+      </div>
+      <div class="balance-amt" id="bal-page-amt">RD$ --</div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(96,165,250,0.25);display:flex;flex-direction:column;gap:8px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:#bfdbfe">📥 Ingresos · <span id="bal-cnt-ing">0</span></span>
+          <span class="mono" style="color:#86efac;font-weight:600" id="bal-mon-ing">RD$ 0.00</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:#bfdbfe">📤 Facturas · <span id="bal-cnt-fac">0</span></span>
+          <span class="mono" style="color:#fca5a5;font-weight:600" id="bal-mon-fac">RD$ 0.00</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filtro de tipo -->
+    <div class="card" style="padding:12px;margin-bottom:14px">
+      <div class="field" style="margin-bottom:0">
+        <div class="lbl">Tipo</div>
+        <select id="bal-filtro-tipo" onchange="renderBalanceLista()">
+          <option value="todos">Todos los movimientos</option>
+          <option value="ingresos">Solo ingresos</option>
+          <option value="facturas">Solo facturas</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Listado cronológico -->
+    <div id="bal-lista"></div>
   </div>
 </div>
 
@@ -1520,7 +1576,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0113</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0115</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1536,7 +1592,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0114';
+const APP_VERSION = '0115';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1724,6 +1780,7 @@ function show(id){
   if(id==='pg-new-proj') initNewProj();
   if(id==='pg-new-company') initNewCompany();
   if(id==='pg-facturas') initFacturas();
+  if(id==='pg-balance') initBalance();
   if(id==='pg-users') initUsers();
   if(id==='pg-invite') initInvite();
   applyRoleUI();
@@ -4150,6 +4207,17 @@ async function refreshBalance(forceRemote){
     cache[proj.cod] = {value: balance, at: Date.now()};
     localStorage.setItem(LS.BALCACHE, JSON.stringify(cache));
     refreshHome();
+    // v.0115: si pg-balance está visible, sincronizar su card también
+    const balPage = document.getElementById('pg-balance');
+    if(balPage && balPage.classList.contains('on')){
+      const el = document.getElementById('bal-page-amt');
+      const stEl = document.getElementById('bal-page-status');
+      if(el){
+        el.textContent = fmt(balance);
+        el.className = 'balance-amt ' + (balance >= 0 ? 'pos' : 'neg');
+      }
+      if(stEl) stEl.textContent = 'Recién actualizado';
+    }
   } catch(e){
     toast('Error: ' + e.message, 'err');
     // Dejar evidencia visible en el balance — el toast es efímero y el usuario
@@ -4419,14 +4487,18 @@ async function saveEntry(){
 }
 
 // ===== Estado del formulario de abono =====
-// abonoEditingId: si estamos editando un pending, su id. null = nuevo.
+// abonoEditingId: si estamos editando un pending local, su id. null = nuevo.
 // abonoCapture: foto capturada/cargada {base64, mime}. null = sin foto.
+// abonoEditingSheet (v.0115): si estamos editando un ingreso ya en el sheet,
+// {row, id, urlComprobante, returnTo}. Foto NO editable en este modo.
 let abonoEditingId = null;
 let abonoCapture = null;
+let abonoEditingSheet = null;
 
 // Inicializa pg-abono en modo "nuevo" — limpia campos, fecha hoy, sin foto.
 function newAbono(){
   abonoEditingId = null;
+  abonoEditingSheet = null;
   abonoCapture = null;
   document.getElementById('ab-tipo').value = 'REPOSICION';
   document.getElementById('ab-fecha').value = today();
@@ -4436,15 +4508,22 @@ function newAbono(){
   document.getElementById('ab-title').textContent = 'Registrar ingreso';
   document.getElementById('ab-sub').textContent = 'Ingreso al fondo de obra';
   document.getElementById('btn-save-abono').textContent = 'Guardar abono';
+  // Asegurar UI de foto visible (puede haberse ocultado en edit-sheet)
+  document.getElementById('ab-photo-row').style.display = 'grid';
+  document.getElementById('ab-photo-preview').style.display = 'none';
+  const removeBtn = document.getElementById('ab-photo-preview').querySelector('button.btn-red');
+  if(removeBtn) removeBtn.style.display = '';
   updateAbonoPhotoPreview();
   show('pg-abono');
 }
 
 // Salir de pg-abono — limpiar estado para no contaminar la próxima entrada.
 function exitAbono(){
+  const back = abonoEditingSheet?.returnTo || 'pg-home';
   abonoEditingId = null;
+  abonoEditingSheet = null;
   abonoCapture = null;
-  show('pg-home');
+  show(back);
 }
 
 // Maneja selección de archivo (camera o gallery) para el comprobante.
@@ -4490,6 +4569,42 @@ async function saveAbono(){
   if(!proj){ err.textContent = 'Proyecto no seleccionado'; err.style.display = 'block'; return; }
   const monto = parseFloat(document.getElementById('ab-monto').value);
   if(!monto || monto <= 0){ err.textContent = 'Monto inválido'; err.style.display = 'block'; return; }
+
+  // v.0115: modo edit-sheet — escribir directo a INGRESOS!fila, no a IndexedDB.
+  // Comprobante (foto) no se modifica en este modo.
+  if(abonoEditingSheet){
+    loading(true, 'Guardando cambios', 'Actualizando INGRESOS...');
+    try {
+      const token = getToken();
+      const ssid = getActiveSheetId();
+      const row = abonoEditingSheet.row;
+      // INGRESOS schema: A=ID, B=FECHA, C=PROYECTO, D=TIPO, E=MONTO, F=REFERENCIA, G=URL_COMPROBANTE
+      const updates = [
+        {range: `INGRESOS!B${row}`, values: [[document.getElementById('ab-fecha').value]]},
+        {range: `INGRESOS!D${row}`, values: [[document.getElementById('ab-tipo').value]]},
+        {range: `INGRESOS!E${row}`, values: [[monto]]},
+        {range: `INGRESOS!F${row}`, values: [[document.getElementById('ab-ref').value.trim()]]}
+      ];
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values:batchUpdate`, {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: updates})
+      });
+      loading(false);
+      toast('Ingreso actualizado', 'ok');
+      const back = abonoEditingSheet.returnTo || 'pg-balance';
+      abonoEditingSheet = null;
+      abonoCapture = null;
+      show(back);
+      setTimeout(() => refreshBalance(true), 800);
+    } catch(e){
+      loading(false);
+      err.textContent = 'Error: ' + e.message;
+      err.style.display = 'block';
+      console.error(e);
+    }
+    return;
+  }
 
   const entry = {
     id: abonoEditingId || ('I-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,6).toUpperCase()),
@@ -7129,14 +7244,14 @@ function editarBackFn(){
   show(to);
 }
 
-function editarFactura(idx){
+function editarFactura(idx, returnTo){
   const f = facturasCache[idx];
   const H = facturasHeaders;
   const r = f.row;
 
   editContext = {
     mode: 'sheet',
-    returnTo: 'pg-facturas',
+    returnTo: returnTo || 'pg-facturas',
     sheetRow: f.sheetRow,
     original: {
       proyecto: r[H.PROYECTO] || '',
@@ -7209,6 +7324,7 @@ async function editarPending(id){
   // ABONO: cargar formulario de pg-abono en modo edición y navegar
   if(entry.tipo_registro === 'ABONO'){
     abonoEditingId = id;
+    abonoEditingSheet = null; // limpiar modo edit-sheet por si quedó set
     abonoCapture = entry.image_base64
       ? {base64: entry.image_base64, mime: entry.image_mime || 'image/jpeg'}
       : null;
@@ -7220,6 +7336,10 @@ async function editarPending(id){
     document.getElementById('ab-title').innerHTML = 'Editar abono <span style="color:var(--amber);font-weight:500;font-size:13px">(sin sincronizar)</span>';
     document.getElementById('ab-sub').textContent = 'ID: ' + entry.id;
     document.getElementById('btn-save-abono').textContent = 'Guardar cambios';
+    // Restaurar UI de fotos (puede haberse ocultado en edit-sheet previo)
+    document.getElementById('ab-photo-row').style.display = 'grid';
+    const removeBtn = document.getElementById('ab-photo-preview').querySelector('button.btn-red');
+    if(removeBtn) removeBtn.style.display = '';
     updateAbonoPhotoPreview();
     show('pg-abono');
     return;
@@ -7442,9 +7562,10 @@ async function saveEdit(){
 
     loading(false);
     toast('Cambios guardados', 'ok');
+    const returnTo = editContext.returnTo || 'pg-facturas';
     editContext = null;
-    show('pg-facturas');
-    // initFacturas() ya dispara loadFacturas() con los filtros preservados
+    show(returnTo);
+    // show() ya dispara init de la página destino (initFacturas / initBalance)
     invalidateRevisarCache();
     setTimeout(() => refreshBalance(true), 1500);
   } catch(e){
@@ -7665,6 +7786,436 @@ async function eliminarFacturaPermanente(idx){
     toast('Eliminada permanentemente', 'ok');
     await loadFacturas();
     invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 500);
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+// ============================================================
+// HISTORIAL DE BALANCE (v.0115)
+// Vista pg-balance: balance + breakdown + listado cronológico mezclando
+// facturas (REGISTRO) e ingresos (INGRESOS) + fondo de apertura como item virtual.
+// Scope: SIEMPRE el proyecto activo en localStorage.LS.PROJ. Sin filtros de obra/fecha.
+// ============================================================
+
+// Cache compartido para el render. lista contiene items unificados:
+// {tipo: 'factura'|'ingreso'|'fondo', sheetRow, fecha, monto, ...}
+// regH/ingH son los mapas header→idx para REGISTRO/INGRESOS.
+let balanceCache = {lista: [], regH: {}, ingH: {}, proj: null};
+
+async function initBalance(){
+  const proj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+  if(!proj){ toast('Elige una obra primero', 'err'); show('pg-home'); return; }
+
+  loading(true, 'Cargando', 'Leyendo movimientos...');
+  try {
+    // Sincronizar el card de balance con el cache local del home
+    const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
+    const cached = cache[proj.cod];
+    const amtEl = document.getElementById('bal-page-amt');
+    const statusEl = document.getElementById('bal-page-status');
+    if(cached){
+      const v = cached.value || 0;
+      amtEl.textContent = fmt(v);
+      amtEl.className = 'balance-amt ' + (v >= 0 ? 'pos' : 'neg');
+      const age = Math.floor((Date.now() - cached.at) / 60000);
+      statusEl.textContent = age === 0 ? 'Recién actualizado' : `Hace ${age} min`;
+    } else {
+      amtEl.textContent = 'RD$ --';
+      amtEl.className = 'balance-amt';
+      statusEl.textContent = 'Toca ↻ para actualizar';
+    }
+
+    // Leer REGISTRO + INGRESOS + fondo apertura del proyecto
+    const [regRaw, ingRaw] = await sheetsBatchGet(['REGISTRO!A1:Z', 'INGRESOS!A1:G']);
+
+    // Mapear headers REGISTRO
+    const regH = {};
+    (regRaw[0] || []).forEach((h, i) => regH[h] = i);
+    if(regH.PROYECTO === undefined || regH.FECHA_FACTURA === undefined || regH.MONTO === undefined){
+      throw new Error('Faltan columnas en REGISTRO. Corre "Reparar fórmulas" en Settings.');
+    }
+
+    // Mapear headers INGRESOS (orden conocido pero hacerlo robusto por si cambia)
+    const ingH = {};
+    (ingRaw[0] || []).forEach((h, i) => ingH[h] = i);
+    if(ingH.ID === undefined) ingH.ID = 0;
+    if(ingH.FECHA === undefined) ingH.FECHA = 1;
+    if(ingH.PROYECTO === undefined) ingH.PROYECTO = 2;
+    if(ingH.TIPO === undefined) ingH.TIPO = 3;
+    if(ingH.MONTO === undefined) ingH.MONTO = 4;
+    if(ingH.REFERENCIA === undefined) ingH.REFERENCIA = 5;
+    if(ingH.URL_COMPROBANTE === undefined) ingH.URL_COMPROBANTE = 6;
+
+    // Filtrar facturas del proyecto activo, NO eliminadas (papelera no entra)
+    const facturas = (regRaw.slice(1) || []).map((r, i) => ({r, sheetRow: i + 2}))
+      .filter(({r}) => {
+        if(!r[regH.ID]) return false;
+        if(r[regH.PROYECTO] !== proj.cod) return false;
+        if(regH.ELIMINADO !== undefined && r[regH.ELIMINADO] === 'SI') return false;
+        return true;
+      })
+      .map(({r, sheetRow}) => ({
+        tipo: 'factura',
+        sheetRow,
+        row: r,
+        id: r[regH.ID] || '',
+        fecha: r[regH.FECHA_FACTURA] || '',
+        monto: parseFloat(r[regH.MONTO]) || 0,
+        suplidor: r[regH.SUPLIDOR] || '',
+        ncf: r[regH.NCF] || '',
+        urlFoto: r[regH.URL_FACTURA] || '',
+        consolidado: regH.CONSOLIDADO !== undefined && r[regH.CONSOLIDADO] === 'SI',
+        aprobado: r[regH.APROBADO] || '',
+        no_reporte: regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '',
+        catCod: r[regH.CATEGORIA] || ''
+      }));
+
+    // Filtrar ingresos del proyecto activo
+    const ingresos = (ingRaw.slice(1) || []).map((r, i) => ({r, sheetRow: i + 2}))
+      .filter(({r}) => r[ingH.ID] && r[ingH.PROYECTO] === proj.cod)
+      .map(({r, sheetRow}) => ({
+        tipo: 'ingreso',
+        sheetRow,
+        row: r,
+        id: r[ingH.ID] || '',
+        fecha: r[ingH.FECHA] || '',
+        monto: parseFloat(r[ingH.MONTO]) || 0,
+        tipoIng: r[ingH.TIPO] || '',
+        referencia: r[ingH.REFERENCIA] || '',
+        urlFoto: r[ingH.URL_COMPROBANTE] || ''
+      }));
+
+    // Item virtual del fondo de apertura (si > 0).
+    // No tiene sheetRow porque vive en PROYECTOS!D, no en INGRESOS.
+    const fondoApertura = parseFloat(proj.fondo) || 0;
+    const items = [...facturas, ...ingresos];
+    if(fondoApertura > 0){
+      items.push({
+        tipo: 'fondo',
+        sheetRow: null,
+        fecha: '', // sin fecha — siempre va al final del orden cronológico
+        monto: fondoApertura,
+        tipoIng: 'FONDO_APERTURA'
+      });
+    }
+
+    // Orden cronológico desc (más reciente primero). El item de fondo (fecha vacía)
+    // queda al final por la comparación lexicográfica.
+    items.sort((a, b) => {
+      const fa = a.fecha || '';
+      const fb = b.fecha || '';
+      if(fa === fb) return 0;
+      if(!fa) return 1;
+      if(!fb) return -1;
+      return fb.localeCompare(fa);
+    });
+
+    balanceCache = {lista: items, regH, ingH, proj};
+
+    // Stats del card: ingresos incluyen fondo apertura sumado.
+    const totalFac = facturas.length;
+    const montoFac = facturas.reduce((s, f) => s + f.monto, 0);
+    const totalIng = ingresos.length + (fondoApertura > 0 ? 1 : 0);
+    const montoIng = ingresos.reduce((s, i) => s + i.monto, 0) + fondoApertura;
+
+    document.getElementById('bal-cnt-fac').textContent = totalFac;
+    document.getElementById('bal-mon-fac').textContent = fmt(montoFac);
+    document.getElementById('bal-cnt-ing').textContent = totalIng;
+    document.getElementById('bal-mon-ing').textContent = fmt(montoIng);
+    document.getElementById('bal-sub').textContent = `${proj.cod} · ${items.length} movimiento${items.length === 1 ? '' : 's'}`;
+
+    renderBalanceLista();
+    loading(false);
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+function renderBalanceLista(){
+  const filtro = document.getElementById('bal-filtro-tipo').value;
+  const box = document.getElementById('bal-lista');
+  const items = balanceCache.lista.filter(it => {
+    if(filtro === 'ingresos') return it.tipo === 'ingreso' || it.tipo === 'fondo';
+    if(filtro === 'facturas') return it.tipo === 'factura';
+    return true;
+  });
+
+  if(items.length === 0){
+    box.innerHTML = '<div class="alert alert-amber" style="margin-top:14px">Sin movimientos para este filtro</div>';
+    return;
+  }
+
+  // Pre-mapear índice del item al índice de balanceCache.lista para que los onclick
+  // (editar/eliminar) sigan funcionando incluso cuando el filtro cambia.
+  box.innerHTML = items.map(it => {
+    const realIdx = balanceCache.lista.indexOf(it);
+    return _renderBalanceCard(it, realIdx);
+  }).join('');
+}
+
+function _renderBalanceCard(it, idx){
+  if(it.tipo === 'fondo'){
+    // Read-only — vive en PROYECTOS, no en INGRESOS. Editar = ir a Editar empresa.
+    return `
+    <div class="card" style="border:1px dashed var(--border);background:rgba(34,197,94,0.04)">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="width:56px;height:56px;border-radius:10px;background:rgba(34,197,94,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:24px">🏦</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:500;color:var(--green)">Fondo de apertura</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">Definido al crear la obra</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:2px">Editable en Configuración → Empresas</div>
+            </div>
+            <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--green);white-space:nowrap">+ ${fmt(it.monto)}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if(it.tipo === 'ingreso'){
+    // Miniatura del comprobante (si tiene URL) — mismo patrón que facturas.
+    let thumb;
+    if(it.urlFoto){
+      const m = it.urlFoto.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(m){
+        const fileId = m[1];
+        thumb = `<div style="width:56px;height:56px;border-radius:10px;overflow:hidden;background:var(--bg3);flex-shrink:0;cursor:pointer;position:relative" onclick="verFotoDrive('${it.urlFoto}')" title="Ver comprobante">
+          <img src="https://drive.google.com/thumbnail?id=${fileId}&sz=w200" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+          <div style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:18px;color:var(--text2)">📄</div>
+        </div>`;
+      } else {
+        thumb = `<div style="width:56px;height:56px;border-radius:10px;background:rgba(34,197,94,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:22px">📥</div>`;
+      }
+    } else {
+      thumb = `<div style="width:56px;height:56px;border-radius:10px;background:rgba(34,197,94,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:22px">📥</div>`;
+    }
+    const tipoLabel = ({REPOSICION:'Reposición', FONDO_INICIAL:'Fondo inicial', DEVOLUCION:'Devolución'})[it.tipoIng] || it.tipoIng || 'Ingreso';
+    return `
+    <div class="card">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        ${thumb}
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:500;color:var(--green)">${tipoLabel}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">${it.fecha || '—'}</div>
+              ${it.referencia ? `<div style="font-size:11px;color:var(--text2);margin-top:2px">Ref: <span style="font-family:var(--mono)">${_esc(it.referencia)}</span></div>` : ''}
+            </div>
+            <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--green);white-space:nowrap">+ ${fmt(it.monto)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:10px">
+        <button class="btn btn-amber" style="padding:8px;font-size:12px" onclick="editarIngresoBalance(${idx})">Editar</button>
+        <button class="btn btn-red" style="padding:8px;font-size:12px" onclick="eliminarIngresoBalance(${idx})">Eliminar</button>
+      </div>
+    </div>`;
+  }
+
+  // Factura — mismo patrón visual que renderFacturas.
+  const r = it.row;
+  const H = balanceCache.regH;
+  const necesitaRevisar = it.aprobado === 'REVISAR' || it.aprobado === 'PENDIENTE';
+  const catName = (masters.categories.find(c => c.cod === it.catCod) || {nombre: it.catCod || ''}).nombre;
+  const borderStyle = necesitaRevisar ? 'border:2px solid var(--amber)' : '';
+
+  let thumb;
+  if(it.urlFoto){
+    const m = it.urlFoto.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if(m && it.consolidado){
+      const fileId = m[1];
+      thumb = `<div style="width:56px;height:56px;border-radius:10px;overflow:hidden;background:var(--bg3);flex-shrink:0;cursor:pointer;position:relative" onclick="verFotoDrive('${it.urlFoto}')" title="Ver foto">
+        <img src="https://drive.google.com/thumbnail?id=${fileId}&sz=w200" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:18px;color:var(--text2)">📄</div>
+      </div>`;
+    } else {
+      const tooltip = it.consolidado ? 'Ver foto' : 'Sincronizando…';
+      thumb = `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;color:var(--text2);cursor:pointer" onclick="verFotoDrive('${it.urlFoto}')" title="${tooltip}">📄</div>`;
+    }
+  } else {
+    thumb = `<div style="width:56px;height:56px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">−</div>`;
+  }
+
+  return `
+  <div class="card" style="${borderStyle}">
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:500">${_esc(it.suplidor) || '(sin suplidor)'}</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:3px">
+              ${it.fecha || ''}${it.no_reporte ? ' · <span style="font-family:var(--mono);color:var(--amber)">'+_esc(it.no_reporte)+'</span>' : ''}
+            </div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">
+              ${_esc(catName)}${it.ncf ? ' · <span style="font-family:var(--mono)">'+_esc(it.ncf)+'</span>' : ''}
+            </div>
+            ${necesitaRevisar ? '<div style="margin-top:6px"><span class="badge" style="background:rgba(245,158,11,0.15);color:var(--amber);border:1px solid var(--amber)">POR REVISAR</span></div>' : ''}
+          </div>
+          <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--red);white-space:nowrap">− ${fmt(it.monto)}</div>
+        </div>
+      </div>
+    </div>
+    <div class="grid2" style="margin-top:10px">
+      <button class="btn btn-amber" style="padding:8px;font-size:12px" onclick="editarFacturaBalance(${idx})">Editar</button>
+      <button class="btn btn-red" style="padding:8px;font-size:12px" onclick="eliminarFacturaBalance(${idx})">Eliminar</button>
+    </div>
+  </div>`;
+}
+
+// Helper de escape HTML local — pg-balance no usa _escHTML del bloque PDF.
+function _esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+// Wrappers que delegan a los handlers existentes de pg-facturas, ajustando el cache
+// global y el returnTo para que el flujo regrese a pg-balance.
+function editarFacturaBalance(idx){
+  const it = balanceCache.lista[idx];
+  if(!it || it.tipo !== 'factura') return;
+  facturasCache = [{row: it.row, sheetRow: it.sheetRow}];
+  facturasHeaders = balanceCache.regH;
+  editarFactura(0, 'pg-balance');
+}
+
+async function eliminarFacturaBalance(idx){
+  const it = balanceCache.lista[idx];
+  if(!it || it.tipo !== 'factura') return;
+  facturasCache = [{row: it.row, sheetRow: it.sheetRow}];
+  facturasHeaders = balanceCache.regH;
+  await eliminarFactura(0);
+  // Si seguimos en pg-balance (no se navegó a otro lado), refrescar lista.
+  if(document.getElementById('pg-balance').classList.contains('on')){
+    initBalance();
+  }
+}
+
+// Editar ingreso del sheet — abre pg-abono en modo edit-sheet (foto read-only).
+function editarIngresoBalance(idx){
+  const it = balanceCache.lista[idx];
+  if(!it || it.tipo !== 'ingreso') return;
+
+  abonoEditingId = null;
+  abonoCapture = null;
+  abonoEditingSheet = {
+    row: it.sheetRow,
+    id: it.id,
+    urlComprobante: it.urlFoto || '',
+    returnTo: 'pg-balance'
+  };
+
+  document.getElementById('ab-tipo').value = it.tipoIng || 'REPOSICION';
+  document.getElementById('ab-fecha').value = it.fecha || today();
+  document.getElementById('ab-monto').value = it.monto || '';
+  document.getElementById('ab-ref').value = it.referencia || '';
+  document.getElementById('ab-err').style.display = 'none';
+  document.getElementById('ab-title').innerHTML = 'Editar ingreso <span style="color:var(--amber);font-weight:500;font-size:13px">(sincronizado)</span>';
+  document.getElementById('ab-sub').textContent = 'ID: ' + it.id;
+  document.getElementById('btn-save-abono').textContent = 'Guardar cambios';
+
+  // Foto read-only: si tiene comprobante mostrarla, sino ocultar fila de upload.
+  const wrap = document.getElementById('ab-photo-preview');
+  const img = document.getElementById('ab-photo-img');
+  const row = document.getElementById('ab-photo-row');
+  if(it.urlFoto){
+    const m = it.urlFoto.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if(m){
+      img.src = `https://drive.google.com/thumbnail?id=${m[1]}&sz=w1200`;
+      img.onclick = () => verFotoDrive(it.urlFoto);
+      img.style.cursor = 'pointer';
+      // Ocultar el botón "Quitar foto" — no editable en modo sheet.
+      const removeBtn = wrap.querySelector('button.btn-red');
+      if(removeBtn) removeBtn.style.display = 'none';
+      wrap.style.display = 'block';
+      row.style.display = 'none';
+    } else {
+      wrap.style.display = 'none';
+      row.style.display = 'none';
+    }
+  } else {
+    wrap.style.display = 'none';
+    row.style.display = 'none';
+  }
+
+  show('pg-abono');
+}
+
+// Eliminar ingreso del sheet — confirm doble + mover comprobante a Papelera Drive
+// + deleteDimension. Sin papelera/restore (INGRESOS no tiene columna ELIMINADO).
+async function eliminarIngresoBalance(idx){
+  const it = balanceCache.lista[idx];
+  if(!it || it.tipo !== 'ingreso') return;
+
+  if(!confirm(`Esto ELIMINARÁ permanentemente este ingreso de RD$ ${fmt(it.monto).replace('RD$ ','')} del Sheet y moverá el comprobante a la Papelera. ¿Continuar?`)) return;
+  if(!confirm('Segundo aviso: la fila se borra del sheet INGRESOS. NO hay papelera/restaurar para ingresos. ¿Realmente continuar?')) return;
+
+  loading(true, 'Eliminando ingreso', 'Borrando fila...');
+  try {
+    const token = getToken();
+    const ssid = getActiveSheetId();
+    const proj = balanceCache.proj;
+
+    // 1) Mover comprobante a Papelera Drive (si existe)
+    if(it.urlFoto){
+      loading(true, 'Eliminando ingreso', 'Moviendo comprobante a Papelera...');
+      const m = it.urlFoto.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(m){
+        const fileId = m[1];
+        try {
+          const papeleraId = await getSubfolderObra(proj.cod, 'Papelera');
+          const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
+            headers: {'Authorization': 'Bearer ' + token}
+          });
+          const fm = await fileMeta.json();
+          const currentParents = (fm.parents || []).join(',');
+          await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${papeleraId}&removeParents=${currentParents}`, {
+            method: 'PATCH',
+            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+          });
+        } catch(moveErr){
+          // No bloquear el delete del sheet si no se pudo mover el archivo
+          console.warn('[eliminarIngreso] no se pudo mover el comprobante a Papelera:', moveErr);
+        }
+      }
+    }
+
+    // 2) Borrar fila de INGRESOS — necesita sheetId numérico
+    loading(true, 'Eliminando ingreso', 'Borrando fila del sheet...');
+    const ssRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    const ssData = await ssRes.json();
+    const ingSheet = ssData.sheets.find(s => s.properties.title === 'INGRESOS');
+    if(!ingSheet) throw new Error('Sheet INGRESOS no encontrado');
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        requests: [{
+          deleteDimension: {
+            range: {
+              sheetId: ingSheet.properties.sheetId,
+              dimension: 'ROWS',
+              startIndex: it.sheetRow - 1, // 0-indexed
+              endIndex: it.sheetRow
+            }
+          }
+        }]
+      })
+    });
+
+    loading(false);
+    toast('Ingreso eliminado', 'ok');
+    setTimeout(() => refreshBalance(true), 500);
+    initBalance();
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
