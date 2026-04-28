@@ -1576,7 +1576,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0117</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0118</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1592,7 +1592,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0117';
+const APP_VERSION = '0118';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -6304,9 +6304,26 @@ async function _fetchFotoAsDataURI(urlFactura, token){
   const log = (str, status, size) => console.warn(`[fetchFoto:${str}] fileId=${fileId} status=${status||'?'} size=${size||0}`);
   if(!window._fetchFotoLog) window._fetchFotoLog = [];
 
+  // v.0118: AbortController con timeout 25s por estrategia. Antes los fetches
+  // no tenían timeout — si Drive se colgaba, el await nunca resolvía y
+  // generarPDFFotos quedaba "Generando PDF..." indefinido (Issue #1 del
+  // handover 2026-04-28). Con timeout, en el peor caso se gastan 75s totales
+  // (3 estrategias × 25s) y retorna null, que la llamadora detecta y aborta
+  // la generación con advertencia visible al usuario.
+  const TIMEOUT_MS = 25000;
+  const fetchWithTimeout = async (url, opts) => {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    try {
+      return await fetch(url, {...(opts || {}), signal: ctrl.signal});
+    } finally {
+      clearTimeout(tid);
+    }
+  };
+
   // Estrategia 1: lh3 con auth
   try {
-    const r = await fetch('https://lh3.googleusercontent.com/d/' + fileId + '=w2000', {
+    const r = await fetchWithTimeout('https://lh3.googleusercontent.com/d/' + fileId + '=w2000', {
       headers: {'Authorization': 'Bearer ' + token}
     });
     if(r.ok){
@@ -6314,11 +6331,11 @@ async function _fetchFotoAsDataURI(urlFactura, token){
       if(blob.size > 1000){ window._fetchFotoLog.push({fileId, strategy:'lh3+auth', ok:true, status:r.status, size:blob.size}); return await _blobToDataURI(blob); }
       log('lh3+auth-tinyblob', r.status, blob.size);
     } else log('lh3+auth-fail', r.status);
-  } catch(e){ log('lh3+auth-error', e.message); }
+  } catch(e){ log('lh3+auth-error', e.name === 'AbortError' ? 'timeout >25s' : e.message); }
 
   // Estrategia 2: Drive API con alt=media
   try {
-    const r = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
+    const r = await fetchWithTimeout('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
       headers: {'Authorization': 'Bearer ' + token}
     });
     if(r.ok){
@@ -6326,17 +6343,17 @@ async function _fetchFotoAsDataURI(urlFactura, token){
       if(blob.size > 1000){ window._fetchFotoLog.push({fileId, strategy:'driveAPI', ok:true, status:r.status, size:blob.size}); return await _blobToDataURI(blob); }
       log('driveAPI-tinyblob', r.status, blob.size);
     } else log('driveAPI-fail', r.status);
-  } catch(e){ log('driveAPI-error', e.message); }
+  } catch(e){ log('driveAPI-error', e.name === 'AbortError' ? 'timeout >25s' : e.message); }
 
   // Estrategia 3: lh3 sin auth (requiere anyone-with-link)
   try {
-    const r = await fetch('https://lh3.googleusercontent.com/d/' + fileId + '=w2000');
+    const r = await fetchWithTimeout('https://lh3.googleusercontent.com/d/' + fileId + '=w2000');
     if(r.ok){
       const blob = await r.blob();
       if(blob.size > 1000){ window._fetchFotoLog.push({fileId, strategy:'lh3-noauth', ok:true, status:r.status, size:blob.size}); return await _blobToDataURI(blob); }
       log('lh3-noauth-tinyblob', r.status, blob.size);
     } else log('lh3-noauth-fail', r.status);
-  } catch(e){ log('lh3-noauth-error', e.message); }
+  } catch(e){ log('lh3-noauth-error', e.name === 'AbortError' ? 'timeout >25s' : e.message); }
 
   window._fetchFotoLog.push({fileId, strategy:'all-failed', ok:false});
   return null;
@@ -6462,25 +6479,76 @@ async function generarPDFFotos(params){
     }).sort((a,b) => a.fecha.localeCompare(b.fecha));
 
     // 2. Pre-fetch fotos como data URIs (evita CORS issues)
-    // v.0095: trackear qué facturas quedaron sin foto y por qué (URL vacía vs
-    // fetch falló) para mostrarlo al usuario al final del flow.
-    let fotosOk = 0, sinFoto = 0;
-    const sinFotoDetalle = []; // [{idShort, suplidor, fecha, razon}]
+    // v.0118: filosofía cambiada. Antes (v.0095) se generaba el PDF aún con
+    // facturas sin foto y se listaba al final. Ahora si CUALQUIER factura no
+    // tiene su foto disponible, se ABORTA la generación y se muestra una
+    // advertencia con el detalle — el reporte sirve como soporte documental,
+    // si está incompleto no debe existir. El usuario decide qué hacer
+    // (verificar Drive, reintentar, marcar la factura como sin foto).
+    let fotosOk = 0;
+    const sinFotoDetalle = []; // [{idShort, id, suplidor, fecha, monto, no_reporte, razon}]
     for(let i = 0; i < filas.length; i++){
       setStatus(`Descargando fotos (${i+1}/${filas.length})…`);
       const f = filas[i];
+      const detalle = (razon) => ({
+        idShort: (f.id||'').slice(0,4),
+        id: f.id || '',
+        suplidor: f.suplidor || '(sin suplidor)',
+        fecha: f.fecha || '',
+        monto: f.monto || 0,
+        no_reporte: f.no_reporte || '',
+        razon
+      });
       if(!f.url_factura){
-        sinFoto++;
-        sinFotoDetalle.push({idShort: (f.id||'').slice(0,4), suplidor: f.suplidor || '(sin suplidor)', fecha: f.fecha || '', razon: 'sin URL en sheet'});
+        sinFotoDetalle.push(detalle('sin foto registrada en el sheet'));
         continue;
       }
       f.fotoUrl = await _fetchFotoAsDataURI(f.url_factura, token);
       if(f.fotoUrl){
         fotosOk++;
       } else {
-        sinFoto++;
-        sinFotoDetalle.push({idShort: (f.id||'').slice(0,4), suplidor: f.suplidor || '(sin suplidor)', fecha: f.fecha || '', razon: 'no accesible (eliminada, otro Drive o error de red)'});
+        // Las 3 estrategias de fetch fallaron o timeoutearon (>25s c/u).
+        sinFotoDetalle.push(detalle('foto no accesible (timeout, eliminada de Drive o sin permisos)'));
       }
+    }
+
+    // v.0118: si falta cualquier foto, abortar y mostrar advertencia.
+    // Guardamos los params en window para que el botón "Reintentar" pueda
+    // re-disparar la misma generación sin reconstruir filtros.
+    if(sinFotoDetalle.length > 0){
+      window._lastPDFParams = params;
+      // Cleanup overlay y banner de progreso
+      if(overlay){
+        if(overlay._cleanup) overlay._cleanup();
+        if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }
+      document.body.style.overflow = '';
+      const lista = sinFotoDetalle.map(d => {
+        const reporte = d.no_reporte ? `<span style="font-family:var(--mono);color:var(--amber)">${d.no_reporte}</span> · ` : '';
+        return `<li style="margin-bottom:10px">
+          ${reporte}<strong>${d.suplidor}</strong> · ${d.fecha}<br>
+          <span style="color:var(--text2);font-size:11px">ID: <span style="font-family:var(--mono)">${d.idShort}</span> · RD$ ${fmt(d.monto).replace('RD$ ','')}</span><br>
+          <span style="color:var(--red);font-size:11px">Razón: ${d.razon}</span>
+        </li>`;
+      }).join('');
+      banner.style.cssText = 'background:rgba(239,68,68,0.10);border:1px solid var(--red);border-radius:var(--r);padding:14px 16px;margin-top:14px;font-size:13px;color:var(--text);line-height:1.5';
+      banner.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:18px">⚠️</span>
+          <strong style="color:var(--red);font-size:14px">No se pudo generar el PDF</strong>
+        </div>
+        <div style="margin-bottom:10px">Falta el comprobante físico de <strong>${sinFotoDetalle.length}</strong> factura${sinFotoDetalle.length === 1 ? '' : 's'}. El reporte requiere todas las fotos para servir de soporte documental:</div>
+        <ul style="margin:0 0 12px 18px;padding:0;color:var(--text)">${lista}</ul>
+        <div style="background:rgba(15,23,42,0.4);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--text2);line-height:1.6">
+          <strong style="color:var(--text)">Qué hacer:</strong><br>
+          1. Verifica en Drive que la foto exista (<span style="font-family:var(--mono);font-size:11px">Empresa/Proyectos/Obra/Fotos/</span>).<br>
+          2. Si la red está lenta o Drive responde lento, reintenta en un minuto.<br>
+          3. Si la foto se borró, edita la factura para cargarla de nuevo.
+        </div>
+        <button class="btn btn-blue" onclick="reintentarGenerarPDF()" style="padding:10px;font-size:13px;width:100%">↻ Reintentar generación</button>
+      `;
+      console.warn('[generarPDFFotos] abortado por fotos faltantes:', sinFotoDetalle);
+      return;
     }
 
     // 3. Agrupar por proyecto + categoría
@@ -6678,24 +6746,16 @@ async function generarPDFFotos(params){
     if(overlay._cleanup) overlay._cleanup();
     overlay.remove();
 
-    // 8. Banner de éxito (v.0095: incluye detalle de fotos faltantes si las hay)
+    // 8. Banner de éxito. v.0118: si llegamos aquí, todas las fotos están OK
+    // (el flow aborta antes con advertencia si falta alguna). Banner simplificado.
     banner.style.cssText = 'background:rgba(34,197,94,0.12);border:1px solid var(--green);border-radius:var(--r);padding:14px;margin-top:14px;text-align:center';
-    let detalleSinFoto = '';
-    if(sinFotoDetalle.length > 0){
-      const filas = sinFotoDetalle.map(d => '<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:11px;color:var(--text2);text-align:left">' +
-        '<strong style="color:var(--amber);font-family:var(--mono)">' + escapeHtml(d.idShort) + '</strong> · ' +
-        escapeHtml(d.suplidor) + ' · ' + escapeHtml(d.fecha) +
-        '<br><span style="color:#fcd34d;font-size:10px">↳ ' + escapeHtml(d.razon) + '</span></div>').join('');
-      detalleSinFoto = '<details style="margin-top:10px;text-align:left"><summary style="cursor:pointer;font-size:11px;color:var(--amber);font-weight:600">Ver ' + sinFotoDetalle.length + ' factura(s) sin foto</summary><div style="margin-top:8px">' + filas + '</div></details>';
-    }
     banner.innerHTML = `
       <div style="font-size:14px;font-weight:600;color:var(--green);margin-bottom:4px">✓ PDF de soporte listo</div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${fotosOk} foto(s) incluida(s) · ${sinFoto} sin foto</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${fotosOk} foto(s) incluida(s)</div>
       <a class="btn btn-green" style="padding:10px;font-size:12px;text-decoration:none" href="${driveUrl}" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Abrir PDF con fotos
       </a>
-      ${detalleSinFoto}
     `;
   } catch(e){
     if(renderRoot && renderRoot.parentNode) renderRoot.parentNode.removeChild(renderRoot);
@@ -6708,6 +6768,20 @@ async function generarPDFFotos(params){
     banner.innerHTML = `✗ Error generando PDF de fotos: ${e.message || e}`;
     console.error('[generarPDFFotos]', e);
   }
+}
+
+// v.0118: re-disparar generarPDFFotos con los mismos params que la última
+// invocación. Útil cuando la advertencia "No se pudo generar el PDF" muestra
+// fotos faltantes y el usuario quiere reintentar después de verificar Drive
+// o esperar que la red mejore. Limpia el banner anterior antes de relanzar.
+function reintentarGenerarPDF(){
+  if(!window._lastPDFParams){
+    toast('No hay reporte previo para reintentar', 'err');
+    return;
+  }
+  const oldBanner = document.getElementById('pdf-fotos-banner');
+  if(oldBanner && oldBanner.parentNode) oldBanner.parentNode.removeChild(oldBanner);
+  generarPDFFotos(window._lastPDFParams);
 }
 
 function renderReporte(d){
