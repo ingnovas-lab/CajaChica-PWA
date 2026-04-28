@@ -1215,20 +1215,34 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 1 (NUEVA): Multi-empresa -->
+    <!-- Sección 1: Multi-empresa + datos contables -->
     <div class="card" style="margin-bottom:14px" id="h-empresa">
       <h3 style="color:var(--amber);margin-bottom:10px">1. Seleccionar empresa</h3>
       <div style="font-size:13px;line-height:1.6">
-        La app puede manejar varias empresas. Cada empresa tiene su propio set de obras, suplidores, categorías y balance.
+        La app puede manejar varias empresas. Cada empresa tiene su propio set de obras, suplidores, categorías, sheet y balance — totalmente independientes.
         <ol style="margin:10px 0 0 20px;padding:0">
-          <li style="margin-bottom:6px">En el home, arriba ves un chip "Empresa activa" con el nombre. Tócalo para cambiar.</li>
+          <li style="margin-bottom:6px">En el home, arriba ves un chip "Empresa activa" con el nombre. Tócalo para cambiar (botón "Cambiar").</li>
           <li style="margin-bottom:6px">Aparece la lista de empresas a las que tienes acceso.</li>
           <li>Toca la empresa con la que quieres trabajar.</li>
         </ol>
         <div style="background:rgba(59,130,246,0.08);border-left:3px solid var(--blue);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          <strong>Lo que se actualiza al cambiar empresa:</strong> obras visibles, balance, "Por sincronizar", badge "Por revisar", "Mis facturas", "Registros pendientes". Todo queda scoped a la empresa activa.
+        </div>
+        <div style="background:rgba(245,158,11,0.08);border-left:3px solid var(--amber);padding:10px 12px;margin-top:8px;font-size:12px;border-radius:4px">
           Si solo trabajas con una empresa, no necesitas tocar nada — la app se abre directo en ella.
         </div>
-        <div style="margin-top:10px;font-size:12px;color:var(--text2)"><strong>Crear empresa nueva</strong> (solo SUPER_ADMIN): desde la pantalla de seleccionar empresa → "Nueva empresa".</div>
+
+        <div style="font-weight:600;margin-top:14px;margin-bottom:6px">Crear empresa nueva (solo SUPER_ADMIN)</div>
+        <ol style="margin:0 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">Pantalla "Seleccionar empresa" → "+ Nueva empresa".</li>
+          <li style="margin-bottom:6px">Llena el <strong>nombre</strong> de la empresa (obligatorio — se usa como nombre de carpeta y sheet en Drive).</li>
+          <li style="margin-bottom:6px"><strong>Datos contables (opcionales):</strong> razón social legal, RNC, dirección, "Revisado por" y "Aprobado por" (firmantes). Aparecen en el reporte fiscal. Se pueden dejar vacíos y completar después en "Editar empresa".</li>
+          <li style="margin-bottom:6px">Toca "Crear empresa". La app crea las carpetas y el sheet automáticamente.</li>
+          <li>Último paso: asociar el Apps Script (instrucciones aparecen en pantalla).</li>
+        </ol>
+
+        <div style="font-weight:600;margin-top:14px;margin-bottom:6px">Editar datos de una empresa</div>
+        <div style="color:var(--text2)">Pantalla "Seleccionar empresa" → toca el ícono de lápiz al lado de la empresa. Puedes cambiar el nombre y los datos contables. Los reportes ya generados mantienen el nombre anterior como registro histórico.</div>
       </div>
     </div>
 
@@ -1253,13 +1267,13 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         El flujo principal de la app.
         <ol style="margin:10px 0 0 20px;padding:0">
           <li style="margin-bottom:6px">Verifica que la obra correcta esté seleccionada.</li>
-          <li style="margin-bottom:6px">Toca el botón "+ Registrar gasto".</li>
-          <li style="margin-bottom:6px">Elige "Tomar foto" o "De galería".</li>
-          <li style="margin-bottom:6px">Toma una foto clara: que se vean NCF, monto, suplidor y fecha.</li>
-          <li style="margin-bottom:6px">Espera que la app lea la factura.</li>
-          <li style="margin-bottom:6px">Revisa cada campo. Corrige lo que esté mal.</li>
+          <li style="margin-bottom:6px">En el home, toca <strong>"Fotografiar factura"</strong> (cámara) o <strong>"De galería"</strong> (subir imagen existente).</li>
+          <li style="margin-bottom:6px">Toma o selecciona una foto clara: que se vean NCF, monto, suplidor y fecha.</li>
+          <li style="margin-bottom:6px">Espera que la app lea la factura (OCR automático con IA).</li>
+          <li style="margin-bottom:6px">En la pantalla "Confirmar gasto", revisa cada campo. Corrige lo que esté mal.</li>
+          <li style="margin-bottom:6px">Toca el preview de la foto para ampliarla — pinch-zoom y drag para ver detalles.</li>
           <li style="margin-bottom:6px">Selecciona la Categoría (Materiales, Mano de obra, etc.).</li>
-          <li style="margin-bottom:6px">Escribe el "No. de reporte".</li>
+          <li style="margin-bottom:6px">Escribe el "No. de reporte" si aplica.</li>
           <li>Toca "Guardar".</li>
         </ol>
         <div style="background:rgba(245,158,11,0.08);border-left:3px solid var(--amber);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
@@ -1313,17 +1327,32 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <h3 style="color:var(--amber);margin-bottom:10px">6. Mis facturas</h3>
       <div style="font-size:13px;line-height:1.6">
         <ol style="margin:0 0 0 20px;padding:0">
-          <li style="margin-bottom:6px">Toca "Mis facturas — editar / eliminar" en la pantalla principal.</li>
-          <li style="margin-bottom:6px">Arriba puedes filtrar por Obra, Estado, o buscar por suplidor / NCF.</li>
-          <li>Los filtros se aplican automáticamente.</li>
+          <li style="margin-bottom:6px">Toca "Mis facturas — editar / eliminar" en la pantalla principal. El badge naranja indica cuántas tienes "Por revisar".</li>
+          <li style="margin-bottom:6px">El subtítulo arriba muestra el <strong>total fijo de facturas en la empresa</strong> (no cambia al filtrar).</li>
+          <li>Los filtros se aplican al instante.</li>
         </ol>
-        <div style="margin-top:12px"><strong>Estados:</strong></div>
+
+        <div style="margin-top:12px"><strong>Filtros del card:</strong></div>
         <ul style="margin:6px 0 0 20px;padding:0">
-          <li style="margin-bottom:4px"><strong>Activas:</strong> facturas aprobadas (APROBADO=SI)</li>
-          <li style="margin-bottom:4px"><strong>Por revisar:</strong> facturas sin NCF o que requieren validación del admin (APROBADO=REVISAR). Solo el admin las cambia a SI / NO.</li>
-          <li style="margin-bottom:4px"><strong>Papelera:</strong> eliminadas (recuperables)</li>
-          <li><strong>Todas:</strong> todas juntas</li>
+          <li style="margin-bottom:4px"><strong>Obra:</strong> todas las obras o una específica.</li>
+          <li style="margin-bottom:4px"><strong>Desde / Hasta:</strong> rango de fechas. Default: del 1ero del mes actual a hoy. Vacía Desde para ver histórico completo.</li>
+          <li style="margin-bottom:4px"><strong>Estado:</strong> Activas, Por revisar, Papelera, Todas.</li>
+          <li><strong>Buscar:</strong> por suplidor o NCF.</li>
         </ul>
+
+        <div style="margin-top:12px"><strong>Stats al pie del card:</strong> count + monto total RD$ del filtro actual. Se actualizan al cambiar cualquier filtro.</div>
+
+        <div style="margin-top:12px"><strong>Estados explicados:</strong></div>
+        <ul style="margin:6px 0 0 20px;padding:0">
+          <li style="margin-bottom:4px"><strong>Activas:</strong> facturas aprobadas (APROBADO=SI).</li>
+          <li style="margin-bottom:4px"><strong>Por revisar:</strong> facturas sin NCF o que requieren validación del admin (APROBADO=REVISAR). Solo el admin las cambia a SI / NO.</li>
+          <li style="margin-bottom:4px"><strong>Papelera:</strong> eliminadas (recuperables con "Restaurar").</li>
+          <li><strong>Todas:</strong> todas juntas.</li>
+        </ul>
+
+        <div style="background:rgba(59,130,246,0.08);border-left:3px solid var(--blue);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          <strong>Miniaturas:</strong> cada card muestra la foto en pequeño (si está consolidada). Si ves el icono 📄 es porque la foto aún no se compartió — se actualiza solo después de la próxima consolidación o cuando la abres una vez. Toca la miniatura para ver la foto grande con pinch-zoom.
+        </div>
       </div>
     </div>
 
@@ -1359,7 +1388,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 9 (NUEVA): Generar reporte de balance -->
+    <!-- Sección 9: Generar reporte de balance -->
     <div class="card" style="margin-bottom:14px" id="h-reporte">
       <h3 style="color:var(--amber);margin-bottom:10px">9. Generar reporte de balance</h3>
       <div style="font-size:13px;line-height:1.6">
@@ -1367,14 +1396,23 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <ol style="margin:10px 0 0 20px;padding:0">
           <li style="margin-bottom:6px">En el home, toca el botón morado "Generar reporte de balance".</li>
           <li style="margin-bottom:6px">Filtra por obra, rango de fechas y opcionalmente por número de reporte.</li>
-          <li style="margin-bottom:6px">La app calcula y muestra: balance del periodo, lista de gastos detallados, totales por categoría y por obra.</li>
-          <li style="margin-bottom:6px">Opciones para exportar:
+          <li style="margin-bottom:6px">Elige el <strong>Tipo de informe</strong>:
             <ul style="margin:4px 0 4px 20px;padding:0">
-              <li><strong>Imprimir / PDF:</strong> botón de imprimir genera versión limpia para PDF.</li>
-              <li><strong>PDF de soporte con fotos:</strong> incluye una página por factura con su imagen — pensado para auditorías.</li>
+              <li><strong>Ejecutivo Corporativo:</strong> resumen rápido — KPIs, distribución por categoría y por obra, top suplidores. Para uso interno.</li>
+              <li><strong>Contabilidad / Soporte Fiscal:</strong> reporte formal con razón social, RNC, dirección, ID de lote, hash de integridad y firmantes. Una página por factura con foto y validación NCF. Para entregar al contador o auditoría.</li>
+            </ul>
+          </li>
+          <li style="margin-bottom:6px">La app calcula y muestra el preview en pantalla.</li>
+          <li>Opciones para exportar:
+            <ul style="margin:4px 0 4px 20px;padding:0">
+              <li><strong>Generar / Imprimir PDF:</strong> genera el PDF completo del reporte (incluye fotos en el tipo Fiscal).</li>
+              <li><strong>Abrir PDF con fotos:</strong> link directo al PDF en Drive una vez generado, para compartir.</li>
             </ul>
           </li>
         </ol>
+        <div style="background:rgba(245,158,11,0.08);border-left:3px solid var(--amber);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          <strong>Datos contables vacíos:</strong> si no llenaste razón social, RNC, etc. al crear la empresa, el reporte fiscal saldrá con "—" o líneas en blanco para firmar a mano. Puedes completarlos en Configuración → Cambiar empresa → Editar.
+        </div>
       </div>
     </div>
 
@@ -1390,7 +1428,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <li style="margin-bottom:6px">Toca "Sincronizar con Google Sheets".</li>
           <li>Espera a que termine.</li>
         </ol>
-        <div style="background:rgba(239,68,68,0.12);border-left:3px solid var(--red);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+        <div style="background:rgba(59,130,246,0.08);border-left:3px solid var(--blue);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          <strong>Pendientes y empresas:</strong> tanto el contador "Por sincronizar" del home como la lista de "Registros pendientes" muestran solo los pendientes de la <strong>empresa activa</strong>. Si tienes pendientes capturados en otra empresa, el subtítulo te avisa "(X en otras empresas)" — cambia de empresa para verlos y sincronizarlos.
+        </div>
+        <div style="background:rgba(239,68,68,0.12);border-left:3px solid var(--red);padding:10px 12px;margin-top:8px;font-size:12px;border-radius:4px">
           <strong>¡Importante!</strong> Sincroniza <strong>todos los días</strong>. Si pierdes el celular o se daña, las facturas no sincronizadas se pierden. No acumules varios días.
         </div>
       </div>
@@ -1435,7 +1476,19 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div style="margin-bottom:12px;color:var(--text2)">Configuración → App → "Forzar actualización". Limpia caché y trae la última versión publicada sin perder tu sesión ni datos locales.</div>
 
         <div style="font-weight:600;margin-bottom:4px">Me dice "Sesión expirada"</div>
-        <div style="color:var(--text2)">Toca "Conectar con Google" cuando te lo pida.</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Toca "Conectar con Google" cuando te lo pida.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">El badge naranja en "Mis facturas" no coincide con lo que veo</div>
+        <div style="margin-bottom:12px;color:var(--text2)">El badge cuenta facturas con APROBADO=REVISAR de toda la empresa activa (de cualquier obra). Solo el admin las cambia a SI / NO. Si cambias de empresa, el badge se recalcula al instante.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">No puedo hacer zoom en la foto</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Cualquier foto en modal (Mis facturas, Confirmar gasto, Editar, Pendientes) acepta gestos: <strong>pinch con 2 dedos</strong> para acercar (1x a 5x), <strong>arrastra con 1 dedo</strong> cuando hay zoom para mover, <strong>doble-tap</strong> para resetear. Toca "Cerrar" o el fondo oscuro para salir.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">Una foto vieja muestra "No se pudo cargar"</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Es una foto privada que aún no se ha publicado. Tócala — la app intenta compartirla automáticamente con anyone-with-link y reintenta. La próxima vez que la abras, ya carga directo. Si falla todo, usa el botón "Abrir en Drive".</div>
+
+        <div style="font-weight:600;margin-bottom:4px">"Proyecto no encontrado: OBR-XXXX-XXX" al sincronizar</div>
+        <div style="color:var(--text2)">Significa que un pendiente pertenece a una obra de otra empresa. Cambia de empresa para sincronizar ese pendiente, o edítalo desde "Registros pendientes".</div>
       </div>
     </div>
 
@@ -1467,7 +1520,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0067</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0113</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1483,7 +1536,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0112';
+const APP_VERSION = '0113';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
