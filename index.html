@@ -1576,7 +1576,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0118</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0119</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1592,7 +1592,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0118';
+const APP_VERSION = '0119';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -6671,17 +6671,46 @@ async function generarPDFFotos(params){
       new Promise(res => { img.onload = img.onerror = res; })));
     await new Promise(r => setTimeout(r, 250)); // margen extra para layout final
 
-    // 6. Capturar página por página y armar el PDF
+    // 6. Capturar página por página y armar el PDF.
+    // v.0119: timeout 60s por página vía Promise.race. Antes html2canvas podía
+    // colgarse indefinido (Issue #1 reaparecido tras v.0118 — el timeout de
+    // _fetchFotoAsDataURI cubrió el pre-fetch, pero el render podía atascarse
+    // dentro de html2canvas sin dar feedback). Si una página supera 60s, throw
+    // con mensaje específico que sugiere dividir el reporte. También bajamos
+    // scale 2→1.5 para reducir memoria en iOS PWA (calidad sigue siendo buena
+    // para impresión). Liberamos el canvas tras usarlo para que iOS pueda
+    // hacer GC entre páginas.
     const pages = renderRoot.querySelectorAll('.page');
     const {jsPDF} = window.jspdf;
     const pdf = new jsPDF({unit: 'in', format: 'letter', orientation: 'portrait'});
+    const PAGE_TIMEOUT_MS = 60000;
     for(let i = 0; i < pages.length; i++){
       setStatus(`Generando PDF (página ${i+1}/${pages.length})…`);
       await new Promise(r => setTimeout(r, 0));
-      const canvas = await html2canvas(pages[i], {scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816});
+      const t0 = Date.now();
+      let canvas;
+      try {
+        canvas = await Promise.race([
+          html2canvas(pages[i], {scale: 1.5, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816}),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('PAGE_TIMEOUT')), PAGE_TIMEOUT_MS))
+        ]);
+      } catch(canvasErr){
+        if(canvasErr.message === 'PAGE_TIMEOUT'){
+          throw new Error(`El render de la página ${i+1}/${pages.length} tomó más de ${PAGE_TIMEOUT_MS/1000}s. Suele pasar con muchas fotos en alta resolución o memoria insuficiente. Sugerencia: divide el reporte en rangos de fechas más cortos (ej. una semana en lugar de un mes).`);
+        }
+        throw canvasErr;
+      }
+      const dt = Date.now() - t0;
+      console.log(`[generarPDFFotos] página ${i+1}/${pages.length} renderizada en ${dt}ms (canvas ${canvas.width}×${canvas.height})`);
       const imgData = canvas.toDataURL('image/jpeg', 0.92);
       if(i > 0) pdf.addPage();
       pdf.addImage(imgData, 'JPEG', 0, 0, 8.5, 11);
+      // Liberar canvas — set width/height a 0 fuerza al browser a liberar el
+      // backing buffer GPU. Sin esto, iOS PWA acumula memoria página tras página.
+      canvas.width = 0; canvas.height = 0;
+      canvas = null;
+      // Tick al event loop para permitir GC + actualizar UI
+      await new Promise(r => setTimeout(r, 0));
     }
     const pdfBlob = pdf.output('blob');
 
