@@ -1454,7 +1454,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0109';
+const APP_VERSION = '0110';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2350,7 +2350,7 @@ function editarEmpresa(nombreActual){
 
     <div class="field">
       <div class="lbl">Razón social legal</div>
-      <input type="text" id="edit-emp-razonSocial" value="${escapeHtml(empresa.razonSocial || '')}" placeholder="Ej. CONSTRUCTORA LLODRA, S.R.L." autocapitalize="characters">
+      <input type="text" id="edit-emp-razonSocial" value="${escapeHtml(empresa.razonSocial || '')}" placeholder="Ej. CONSTRUCTORA MABRICK, S.R.L." autocapitalize="characters">
     </div>
     <div class="grid2" style="margin-bottom:14px;gap:8px">
       <div class="field" style="margin-bottom:0">
@@ -8143,16 +8143,28 @@ function handleInvitePaste(){
 // se entrega al .btn ancestor por bubbling natural, lo que SÍ funciona consistente.
 function rewireClickable(root){
   if(!root || !root.querySelectorAll) return;
-  root.querySelectorAll('.btn[onclick],.ibtn[onclick]').forEach(el => {
+  // v.0110: ampliar para procesar CUALQUIER elemento con onclick, no solo
+  // .btn/.ibtn. El bug original (tap sobre texto en mobile no dispara inline
+  // onclick) afecta también divs/cards/chips/stats clickeables (~37 en la
+  // app), por eso algunos botones funcionaban y otros no — los .btn estaban
+  // OK desde v.0055/v.0059 pero las cards seguían rotas.
+  // Excluir form controls (input/select/textarea/etc.) — sus onclick no
+  // tienen el bug y reescribirlos podría romper interacciones.
+  const SKIP = {INPUT:1, SELECT:1, TEXTAREA:1, OPTION:1, FORM:1, LABEL:1};
+  root.querySelectorAll('[onclick]').forEach(el => {
     if(el.dataset.rewired === '1') return;
+    if(SKIP[el.tagName]) return;
     el.dataset.rewired = '1';
     const code = el.getAttribute('onclick');
     el.removeAttribute('onclick');
     el.addEventListener('click', function(ev){
       if(this.disabled) return;
       try { new Function('event', code).call(this, ev); }
-      catch(err){ console.error('[btn-click]', err); }
+      catch(err){ console.error('[click]', err); }
     });
+    // UX en mobile: evitar zoom-on-doubletap y highlight gris al tap.
+    if(!el.style.touchAction) el.style.touchAction = 'manipulation';
+    if(!el.style.webkitTapHighlightColor) el.style.webkitTapHighlightColor = 'rgba(0,0,0,0)';
   });
 }
 
