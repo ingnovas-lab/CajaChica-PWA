@@ -1671,7 +1671,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0131</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0132</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0131';
+const APP_VERSION = '0132';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5891,36 +5891,215 @@ async function _checkForUpdate(){
   }
 }
 
+// v.0132: instrumentación visible + log copiable + cascada de reload techniques.
+// Reportado en Safari Mac: confirm OK → "no pasa nada" — el location.replace post-
+// await no recargaba (causa real desconocida hasta confirmar log; hipótesis: pérdida
+// del user-gesture, async stalls, Safari blocking silencioso). Ahora el usuario ve
+// CADA paso, con timestamps; si la página no se descarga en 1.5s tras replace,
+// reintenta con location.href; en 3s con location.reload. Si nada funciona en 5s,
+// el overlay queda fijo con botón "📋 Copiar log" para diagnosticar.
+window._updateTrace = window._updateTrace || [];
+function _updateLog(msg){
+  const t = new Date().toISOString().slice(11, 23);
+  const line = `[${t}] ${msg}`;
+  window._updateTrace.push(line);
+  console.log('[forceAppUpdate]', line);
+  // Pintar también en el overlay si existe
+  const logEl = document.getElementById('update-log');
+  if(logEl){
+    const div = document.createElement('div');
+    div.textContent = line;
+    div.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text2);line-height:1.5';
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+function _updateOverlayShow(){
+  if(document.getElementById('update-overlay')) return;
+  const ov = document.createElement('div');
+  ov.id = 'update-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;-webkit-overflow-scrolling:touch';
+  ov.innerHTML = `
+    <div style="max-width:420px;width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;max-height:90vh;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div id="update-spin" style="width:22px;height:22px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+        <div id="update-title" style="font-size:15px;font-weight:600;color:var(--text)">Forzando actualización</div>
+      </div>
+      <div id="update-steps" style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text);margin-bottom:12px"></div>
+      <details style="margin-bottom:12px">
+        <summary style="font-size:11px;color:var(--text2);cursor:pointer;user-select:none">Ver log diagnóstico</summary>
+        <div id="update-log" style="margin-top:8px;background:var(--bg);border-radius:8px;padding:10px;max-height:160px;overflow-y:auto"></div>
+      </details>
+      <div id="update-actions" style="display:none;flex-direction:column;gap:8px">
+        <button class="btn btn-blue" onclick="_updateCopyLog()" style="padding:10px;font-size:13px">📋 Copiar log diagnóstico</button>
+        <button class="btn" onclick="location.href = location.pathname + '?_v=' + Date.now()" style="padding:10px;font-size:13px">↻ Recargar manualmente</button>
+        <button class="btn" onclick="_updateOverlayHide()" style="padding:10px;font-size:13px;background:transparent;color:var(--text2)">Cerrar</button>
+      </div>
+    </div>
+  `;
+  // Asegurar que el keyframe spin existe (compartido con el overlay del PDF)
+  if(!document.getElementById('update-spin-kf')){
+    const st = document.createElement('style');
+    st.id = 'update-spin-kf';
+    st.textContent = '@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
+    document.head.appendChild(st);
+  }
+  document.body.appendChild(ov);
+}
+
+function _updateOverlayHide(){
+  const ov = document.getElementById('update-overlay');
+  if(ov) ov.remove();
+}
+
+function _updateAddStep(icon, text, kind){
+  const stepsEl = document.getElementById('update-steps');
+  if(!stepsEl) return null;
+  const div = document.createElement('div');
+  const color = kind === 'error' ? 'var(--red)' : kind === 'warn' ? 'var(--amber)' : kind === 'ok' ? 'var(--green)' : 'var(--text)';
+  div.style.cssText = `display:flex;gap:8px;align-items:flex-start;color:${color}`;
+  div.innerHTML = `<span style="flex-shrink:0">${icon}</span><span>${text}</span>`;
+  stepsEl.appendChild(div);
+  return div;
+}
+
+function _updateShowFailureUI(reason){
+  const titleEl = document.getElementById('update-title');
+  const spinEl = document.getElementById('update-spin');
+  const actionsEl = document.getElementById('update-actions');
+  if(titleEl){ titleEl.textContent = '⚠️ La recarga no se ejecutó'; titleEl.style.color = 'var(--red)'; }
+  if(spinEl){ spinEl.style.display = 'none'; }
+  if(actionsEl){ actionsEl.style.display = 'flex'; }
+  _updateAddStep('✕', reason, 'error');
+}
+
+function _updateCopyLog(){
+  const header = `=== LOG forceAppUpdate — ${new Date().toISOString()} ===\nApp v.${APP_VERSION}\nuserAgent: ${navigator.userAgent}\nstandalone: ${window.matchMedia('(display-mode: standalone)').matches}\nlocation.href: ${location.href}\n\n`;
+  const body = (window._updateTrace || []).join('\n');
+  const txt = header + body;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(
+      () => toast('Log copiado', 'ok'),
+      () => _updateCopyFallback(txt)
+    );
+  } else {
+    _updateCopyFallback(txt);
+  }
+}
+function _updateCopyFallback(txt){
+  const ta = document.createElement('textarea');
+  ta.value = txt;
+  ta.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90vw;height:60vh;z-index:100000;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:10px;font-family:var(--mono);font-size:11px';
+  document.body.appendChild(ta);
+  ta.select();
+  setTimeout(() => { ta.remove(); }, 30000);
+  toast('Selecciona y copia con Cmd+C', 'err');
+}
+
 async function forceAppUpdate(){
   if(!confirm('Limpiar caché y recargar para aplicar la última versión publicada?')) return;
+
+  // Reset del trace y overlay visible inmediato (sync, sin await previo)
+  window._updateTrace = [];
+  _updateOverlayShow();
+  _updateLog(`start | href=${location.href} | standalone=${window.matchMedia('(display-mode: standalone)').matches}`);
+  _updateAddStep('⏳', 'Iniciando…');
+
+  // 1) Desregistrar Service Workers
   try {
-    // 1) Desregistrar Service Workers PRIMERO — para que no respondan
-    // a los fetches durante la limpieza ni se re-llenen los caches.
     if('serviceWorker' in navigator){
+      _updateLog('SW: getRegistrations() start');
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister()));
-    }
-    // 2) Borrar todos los Cache Storage de la app
-    if('caches' in window){
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k)));
+      _updateLog(`SW: getRegistrations() ok — ${regs.length} registro(s)`);
+      const results = await Promise.all(regs.map(r => r.unregister().catch(e => ({err: e.message}))));
+      const failed = results.filter(r => r && r.err);
+      _updateLog(`SW: unregister done — ok=${results.length - failed.length} failed=${failed.length}`);
+      _updateAddStep('✓', `Service Workers desregistrados (${results.length})`, 'ok');
+    } else {
+      _updateLog('SW: API no disponible');
+      _updateAddStep('—', 'serviceWorker API no disponible', 'warn');
     }
   } catch(e){
-    console.warn('[forceAppUpdate] Limpieza parcial:', e.message);
+    _updateLog(`SW: ERROR ${e.message}`);
+    _updateAddStep('✕', `Error desregistrando SWs: ${e.message}`, 'error');
   }
-  // 3) Recargar con query string fresca para forzar bypass del HTTP cache
-  // del navegador. v.0130: el location.reload() simple NO funciona en Safari
-  // Mac — el browser mantiene index.html en su HTTP cache (GitHub Pages
-  // sirve con Cache-Control max-age típicamente). Cambiar la URL fuerza una
-  // request nueva. Preservamos el hash (#invite=...) si existe.
+
+  // 2) Borrar Cache Storage
   try {
-    const url = new URL(location.href);
-    url.searchParams.set('_v', Date.now().toString());
-    location.replace(url.toString());
+    if('caches' in window){
+      _updateLog('Caches: keys() start');
+      const keys = await caches.keys();
+      _updateLog(`Caches: keys() ok — ${keys.length} caches: ${JSON.stringify(keys)}`);
+      await Promise.all(keys.map(k => caches.delete(k).catch(e => false)));
+      _updateLog('Caches: delete done');
+      _updateAddStep('✓', `Caches borrados (${keys.length})`, 'ok');
+    } else {
+      _updateLog('Caches: API no disponible');
+      _updateAddStep('—', 'caches API no disponible', 'warn');
+    }
   } catch(e){
-    // Fallback al reload simple si por alguna razón URL falla
-    location.reload();
+    _updateLog(`Caches: ERROR ${e.message}`);
+    _updateAddStep('✕', `Error borrando caches: ${e.message}`, 'error');
   }
+
+  // 3) Cascada de reload techniques. Cada técnica corre, y si la página
+  // sigue ejecutando JS pasados 1.5s, se intenta la siguiente. Usamos
+  // pathname + ?_v= en lugar de URL().toString() para evitar query strings
+  // viejos que pudieran confundir a Safari ("misma URL → no recarga").
+  let targetUrl;
+  try {
+    targetUrl = location.pathname + '?_v=' + Date.now();
+  } catch(_){
+    targetUrl = '?_v=' + Date.now();
+  }
+  _updateLog(`reload: target=${targetUrl}`);
+
+  // Técnica 1: location.replace (no añade entrada al history)
+  try {
+    _updateLog('reload[1]: location.replace start');
+    _updateAddStep('⏳', 'Intentando location.replace…');
+    location.replace(targetUrl);
+  } catch(e){
+    _updateLog(`reload[1]: ERROR sync ${e.message}`);
+  }
+
+  // Si la página realmente se descargó tras replace, los timers de abajo
+  // NUNCA disparan. Si disparan, significa que replace NO recargó.
+  setTimeout(() => {
+    _updateLog('reload[1]: TIMER aún ejecutando — replace no recargó');
+    _updateAddStep('✕', 'location.replace no recargó', 'error');
+
+    // Técnica 2: location.href (asignación directa)
+    try {
+      _updateLog('reload[2]: location.href start');
+      _updateAddStep('⏳', 'Intentando location.href…');
+      location.href = targetUrl + '&t=2';
+    } catch(e){
+      _updateLog(`reload[2]: ERROR ${e.message}`);
+    }
+
+    setTimeout(() => {
+      _updateLog('reload[2]: TIMER aún ejecutando — href no recargó');
+      _updateAddStep('✕', 'location.href no recargó', 'error');
+
+      // Técnica 3: location.reload (sin query, recarga simple)
+      try {
+        _updateLog('reload[3]: location.reload start');
+        _updateAddStep('⏳', 'Intentando location.reload…');
+        location.reload();
+      } catch(e){
+        _updateLog(`reload[3]: ERROR ${e.message}`);
+      }
+
+      setTimeout(() => {
+        _updateLog('reload[3]: TIMER aún ejecutando — reload tampoco. Render UI de fallo.');
+        _updateShowFailureUI('Las 3 técnicas de reload fallaron silenciosamente. Copia el log y compártelo — tendremos que cambiar de enfoque.');
+      }, 1500);
+
+    }, 1500);
+
+  }, 1500);
 }
 
 // v.0112: bloquear scroll del body+html+wrapper activo cuando hay modal abierto.
