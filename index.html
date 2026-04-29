@@ -257,6 +257,47 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   </div>
 </div>
 
+<!-- ========== PAGE: RECONNECT (v.0121) ========== -->
+<!-- Pantalla bloqueante cuando el silent refresh falla. Le da al usuario un
+     re-auth de "1 tap" usando hint del email guardado, en vez del flujo
+     completo del selector de cuenta. Causa principal: ITP de iOS PWA aísla
+     las cookies third-party de Google → el iframe oculto del silent refresh
+     no tiene sesión. -->
+<div class="page" id="pg-reconnect">
+  <div class="topbar">
+    <div style="flex:1">
+      <div class="topbar-title">Sesión de Google expiró</div>
+      <div class="topbar-sub">Reconectar con un toque</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="alert alert-amber" style="margin-bottom:14px">
+      <strong>Tu sesión expiró tras 1 hora</strong><br>
+      <span style="font-size:12px">Esto pasa porque iOS limita la renovación automática para apps en pantalla completa. Toca abajo para volver — no perderás datos ni configuración.</span>
+    </div>
+
+    <div class="card" style="text-align:center;padding:24px 18px">
+      <div style="font-size:34px;margin-bottom:8px">🔓</div>
+      <div id="reconnect-email" style="font-family:var(--mono);font-size:13px;color:var(--text2);margin-bottom:18px;word-break:break-all">—</div>
+      <button class="btn btn-blue" onclick="doReauthFromUI()" id="btn-reconnect" style="padding:16px;font-size:15px;font-weight:600">
+        Reconectar con Google
+      </button>
+      <div id="reconnect-status" style="font-size:12px;color:var(--text2);margin-top:12px;line-height:1.5">&nbsp;</div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <details>
+        <summary style="cursor:pointer;font-size:12px;color:var(--text2);padding:4px 0">¿Tienes problemas? Más opciones</summary>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+          <button class="btn" onclick="copiarLogAuth()" style="padding:10px;font-size:12px">📋 Copiar log de auth (diagnóstico)</button>
+          <button class="btn" onclick="doReauthChangeAccount()" style="padding:10px;font-size:12px">Cambiar de cuenta Google</button>
+          <button class="btn btn-red" onclick="logoutGoogle()" style="padding:10px;font-size:12px">Cerrar sesión (volver al setup)</button>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
 <!-- ========== PAGE: HOME ========== -->
 <div class="page" id="pg-home">
   <div class="topbar">
@@ -1576,7 +1617,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0120</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0121</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1592,7 +1633,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0120';
+const APP_VERSION = '0121';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1734,6 +1775,10 @@ function getActiveScriptUrl(){
 }
 
 function toast(msg, type){
+  // v.0121: suprimir toast cuando el error es REAUTH_REQUIRED — la pantalla
+  // pg-reconnect ya tiene control y comunica claramente al usuario. Mostrar
+  // el toast adicional duplica el ruido y confunde.
+  if(msg && (msg === 'REAUTH_REQUIRED' || msg === 'Error: REAUTH_REQUIRED')) return;
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'show ' + (type||'');
@@ -1860,6 +1905,51 @@ let tokenClient = null;
 let silentClient = null;          // Cliente separado para renovación silenciosa
 let refreshingPromise = null;     // Evita refresh concurrentes
 
+// v.0121: instrumentación de auth para diagnosticar fallos de silent refresh
+// (típico en iOS PWA standalone con ITP). Se pega al portapapeles desde
+// pg-reconnect → "Copiar log de auth".
+window._authTrace = [];
+function _authLog(msg, data){
+  const t = new Date().toISOString().slice(11, 23);
+  let line = `[${t}] ${msg}`;
+  if(data !== undefined){
+    try { line += ' ' + JSON.stringify(data); } catch(_){ line += ' [non-serializable]'; }
+  }
+  console.log('[AUTH] ' + line);
+  window._authTrace.push(line);
+  // Limitar tamaño — solo guardamos las últimas 200 líneas
+  if(window._authTrace.length > 200) window._authTrace.shift();
+}
+
+async function copiarLogAuth(){
+  const log = (window._authTrace || []).join('\n');
+  if(!log){ toast('No hay log para copiar', 'err'); return; }
+  const tokenInfo = (() => {
+    try {
+      const t = JSON.parse(localStorage.getItem(LS.TOKEN) || 'null');
+      if(!t) return 'no token';
+      const expIn = t.expires_at ? Math.round((t.expires_at - Date.now())/1000) + 's' : '?';
+      return `token presente, expires_in=${expIn}, access_token=${(t.access_token||'').slice(0,12)}...`;
+    } catch { return 'token corrupto'; }
+  })();
+  const header = `=== LOG AUTH — ${new Date().toISOString()} ===\nApp v.${APP_VERSION}\nemail: ${localStorage.getItem(LS.EMAIL) || '(none)'}\n${tokenInfo}\nuserAgent: ${navigator.userAgent}\nstandalone: ${window.matchMedia('(display-mode: standalone)').matches}\ncookieEnabled: ${navigator.cookieEnabled}\n\n`;
+  const fullLog = header + log;
+  try {
+    await navigator.clipboard.writeText(fullLog);
+    toast('Log copiado al portapapeles', 'ok');
+  } catch(e){
+    showModal(`<div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">Log de auth</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">No se pudo copiar automáticamente. Selecciona todo (Cmd+A / Ctrl+A) y copia.</div>
+      <textarea id="auth-log-text" style="width:100%;height:300px;font-family:var(--mono);font-size:10px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);white-space:pre" readonly>${fullLog.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c])}</textarea>
+      <button class="btn" style="margin-top:10px;width:100%;padding:10px" onclick="document.getElementById('auth-log-text').select();document.execCommand('copy');toast('Copiado','ok');closeModal()">Copiar y cerrar</button>
+    </div>`);
+  }
+}
+
+// Estado del flujo de re-auth bloqueante
+let _reconnectFromPage = null;
+
 function getToken(){
   const s = localStorage.getItem(LS.TOKEN);
   if(!s) return null;
@@ -1889,11 +1979,20 @@ async function silentRefresh(){
 
   refreshingPromise = (async () => {
     try {
-      if(!window.google) return null;
+      if(!window.google){ _authLog('silentRefresh: ABORT window.google no cargado'); return null; }
       const email = localStorage.getItem(LS.EMAIL);
-      if(!email) return null;
+      if(!email){ _authLog('silentRefresh: ABORT no hay LS.EMAIL'); return null; }
+      _authLog('silentRefresh: iniciando', {email, standalone: window.matchMedia('(display-mode: standalone)').matches});
 
+      const t0 = Date.now();
       return await new Promise((resolve) => {
+        let resolved = false;
+        const finish = (val, why) => {
+          if(resolved) return;
+          resolved = true;
+          _authLog(`silentRefresh: ${val ? 'OK' : 'FAIL'} (${why}) en ${Date.now()-t0}ms`);
+          resolve(val);
+        };
         // Cliente separado porque este es silencioso (prompt: '')
         const client = google.accounts.oauth2.initTokenClient({
           client_id: OAUTH_CLIENT_ID,
@@ -1901,27 +2000,26 @@ async function silentRefresh(){
           hint: email, // le dice a Google qué cuenta usar sin pedir selector
           callback: (resp) => {
             if(resp.error || !resp.access_token){
-              console.warn('Silent refresh falló:', resp.error);
-              resolve(null);
+              finish(null, `callback error=${resp.error || 'no_access_token'}`);
               return;
             }
             localStorage.setItem(LS.TOKEN, JSON.stringify({
               access_token: resp.access_token,
               expires_at: Date.now() + (resp.expires_in - 60) * 1000
             }));
-            console.log('Token renovado silenciosamente');
-            resolve(resp.access_token);
+            finish(resp.access_token, `expires_in=${resp.expires_in}s`);
           },
           error_callback: (err) => {
-            console.warn('Silent refresh error:', err);
-            resolve(null);
+            finish(null, `error_callback type=${err && err.type} msg=${(err && err.message) || ''}`);
           }
         });
         // prompt: '' = intento silencioso. Si Google no puede, falla sin UI.
         client.requestAccessToken({prompt: ''});
 
-        // Timeout por si el callback nunca se llama (pasa a veces)
-        setTimeout(() => resolve(null), 8000);
+        // Timeout por si el callback nunca se llama (pasa a veces — Google
+        // Identity Services no garantiza el callback en todos los browsers
+        // cuando el iframe oculto queda en limbo). 8s es razonable.
+        setTimeout(() => finish(null, 'timeout 8s'), 8000);
       });
     } finally {
       refreshingPromise = null;
@@ -1940,13 +2038,39 @@ async function ensureFreshToken(){
   return getToken(); // puede ser null — el caller maneja
 }
 
+// v.0121: navega a pg-reconnect en lugar de throw genérico cuando el silent
+// refresh falla. La pantalla bloquea con UI clara + email pre-llenado para
+// que el re-auth sea 1 tap. _reconnectFromPage guarda la página activa para
+// volver a ella después del re-auth exitoso.
+function requireReauth(reason){
+  _authLog(`requireReauth: navegando a pg-reconnect (${reason})`);
+  const activePage = document.querySelector('.page.on');
+  const fromId = activePage ? activePage.id : null;
+  // No volver a pg-reconnect ni a pg-setup ni a páginas internas de OAuth flow
+  if(fromId && fromId !== 'pg-reconnect' && fromId !== 'pg-setup'){
+    _reconnectFromPage = fromId;
+  }
+  // Mostrar email en la card
+  const emailEl = document.getElementById('reconnect-email');
+  if(emailEl){
+    const email = localStorage.getItem(LS.EMAIL);
+    emailEl.textContent = email || 'sin email guardado';
+  }
+  const statusEl = document.getElementById('reconnect-status');
+  if(statusEl) statusEl.textContent = '';
+  show('pg-reconnect');
+}
+
 // Wrapper de fetch que reintenta automáticamente si el token expiró (401/403)
 // Úsalo para TODAS las llamadas a googleapis.com
 async function authFetch(url, options = {}){
   // Pre-chequeo: si el token va a expirar, renovar antes
   await ensureFreshToken();
   let token = getToken();
-  if(!token) throw new Error('Sesión expirada. Reingresa con Google.');
+  if(!token){
+    requireReauth('no token después de ensureFreshToken');
+    throw new Error('REAUTH_REQUIRED');
+  }
 
   // Inyectar el Authorization header
   const doFetch = (tk) => {
@@ -1960,13 +2084,14 @@ async function authFetch(url, options = {}){
 
   // Si falla con 401, intentar silent refresh y reintentar UNA vez
   if(res.status === 401){
-    console.log('401 detectado, intentando silent refresh...');
+    _authLog(`authFetch: 401 detectado en ${url.slice(0,80)}, intentando silent refresh`);
     const newToken = await silentRefresh();
     if(newToken){
       res = await doFetch(newToken);
     } else {
       // Silent refresh falló — necesita login interactivo
-      throw new Error('Sesión expirada. Reingresa con Google.');
+      requireReauth('401 + silent refresh falló');
+      throw new Error('REAUTH_REQUIRED');
     }
   }
   return res;
@@ -2095,28 +2220,91 @@ function initGoogleAuth(){
   tokenClient.requestAccessToken({prompt: 'consent'});
 }
 
-// Reingresar con Google cuando la sesión expiró (sin perder configuración)
+// Reingresar con Google cuando la sesión expiró (sin perder configuración).
+// Backwards-compat: handler legacy que sigue llamando otros lugares del código.
 function reauthGoogle(){
+  doReauthFromUI();
+}
+
+// v.0121: handler del botón "Reconectar" en pg-reconnect. Disparado por
+// click del usuario, así que prompt='consent' está OK (no requiere silent).
+// Vuelve a la página donde el usuario estaba antes del re-auth.
+function doReauthFromUI(){
   if(!window.google){ toast('Recarga la app', 'err'); return; }
   const email = localStorage.getItem(LS.EMAIL);
+  const btn = document.getElementById('btn-reconnect');
+  const statusEl = document.getElementById('reconnect-status');
+  if(btn){ btn.disabled = true; btn.textContent = 'Conectando…'; }
+  if(statusEl) statusEl.innerHTML = '<span style="color:var(--blue)">Esperando confirmación de Google…</span>';
+  _authLog(`doReauthFromUI: iniciando con hint=${email || '(none)'}`);
+
   const client = google.accounts.oauth2.initTokenClient({
     client_id: OAUTH_CLIENT_ID,
     scope: OAUTH_SCOPES,
     hint: email || undefined,
     callback: async (resp) => {
-      if(resp.error || !resp.access_token){ toast('No se pudo reingresar', 'err'); return; }
+      if(resp.error || !resp.access_token){
+        _authLog(`doReauthFromUI: FAIL error=${resp.error || 'no_access_token'}`);
+        if(btn){ btn.disabled = false; btn.textContent = 'Reconectar con Google'; }
+        if(statusEl) statusEl.innerHTML = '<span style="color:var(--red)">No se pudo reconectar. Toca "Más opciones" abajo para diagnóstico.</span>';
+        return;
+      }
       localStorage.setItem(LS.TOKEN, JSON.stringify({
         access_token: resp.access_token,
         expires_at: Date.now() + (resp.expires_in - 60) * 1000
       }));
+      _authLog(`doReauthFromUI: OK expires_in=${resp.expires_in}s`);
+      if(btn){ btn.disabled = false; btn.textContent = 'Reconectar con Google'; }
+      if(statusEl) statusEl.innerHTML = '<span style="color:var(--green)">✓ Sesión renovada</span>';
       toast('Sesión renovada', 'ok');
-      // Recargar datos
-      await loadMasters();
-      refreshBalance(true);
+      // Recargar datos críticos para refrescar la UI
+      try { await loadMasters(); } catch(e){ console.warn('loadMasters tras reauth:', e); }
+      try { refreshBalance(true); } catch(e){ console.warn('refreshBalance tras reauth:', e); }
+      // Volver a la página donde estaba el usuario antes del re-auth
+      const back = _reconnectFromPage || 'pg-home';
+      _reconnectFromPage = null;
+      show(back);
     }
   });
-  client.requestAccessToken({prompt: ''}); // intento silencioso primero
-  // Si el silencioso falla por falta de interacción, Google mostrará popup
+  // prompt: 'consent' es seguro porque ya estamos en respuesta a un click
+  // del usuario. Garantiza que Google muestre algo (no popup vacío).
+  client.requestAccessToken({prompt: 'consent'});
+}
+
+// Cambiar de cuenta: sin hint, abre el selector completo. Útil si el email
+// guardado no es el que el usuario quiere usar.
+function doReauthChangeAccount(){
+  if(!window.google){ toast('Recarga la app', 'err'); return; }
+  _authLog('doReauthChangeAccount: abriendo selector sin hint');
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: OAUTH_CLIENT_ID,
+    scope: OAUTH_SCOPES,
+    callback: async (resp) => {
+      if(resp.error || !resp.access_token){
+        _authLog(`doReauthChangeAccount: FAIL error=${resp.error || 'no_access_token'}`);
+        toast('No se pudo cambiar de cuenta', 'err');
+        return;
+      }
+      localStorage.setItem(LS.TOKEN, JSON.stringify({
+        access_token: resp.access_token,
+        expires_at: Date.now() + (resp.expires_in - 60) * 1000
+      }));
+      // Recuperar email de la cuenta nueva
+      try {
+        const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: {'Authorization': 'Bearer ' + resp.access_token}
+        });
+        const info = await r.json();
+        if(info.email) localStorage.setItem(LS.EMAIL, info.email);
+        if(info.name) localStorage.setItem(LS.NAME, info.name);
+      } catch(e){ _authLog('doReauthChangeAccount: userinfo error: ' + e.message); }
+      _authLog(`doReauthChangeAccount: OK nuevo email=${localStorage.getItem(LS.EMAIL)}`);
+      toast('Cuenta cambiada', 'ok');
+      // Recarga forzada para que toda la app re-lea con la cuenta nueva
+      location.reload();
+    }
+  });
+  client.requestAccessToken({prompt: 'select_account'});
 }
 
 function logoutGoogle(){
@@ -9172,6 +9360,30 @@ function rewireClickable(root){
     }));
   }).observe(document.body, {childList:true, subtree:true});
 
+  // v.0121: auto-refresh del token de Google.
+  // (a) Al volver de background (visibilitychange), si el token está cerca
+  //     de expirar, intentar silentRefresh inmediato. Patrón: usuario abre
+  //     la app después de minutos/horas → muchas veces el token venció pero
+  //     antes de que toque algo podemos renovar.
+  // (b) Timer cada 30 min mientras la app está visible — refresh proactivo
+  //     para que la sesión no caduque durante uso continuo.
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible') return;
+    if(!localStorage.getItem(LS.EMAIL)) return;
+    if(tokenAboutToExpire()){
+      _authLog('visibilitychange: visible + token cerca de expirar → silentRefresh');
+      silentRefresh().catch(e => _authLog('visibilitychange: silentRefresh threw: ' + e.message));
+    }
+  });
+  setInterval(() => {
+    if(document.visibilityState !== 'visible') return;
+    if(!localStorage.getItem(LS.EMAIL)) return;
+    if(tokenAboutToExpire()){
+      _authLog('timer 30min: token cerca de expirar → silentRefresh');
+      silentRefresh().catch(e => _authLog('timer: silentRefresh threw: ' + e.message));
+    }
+  }, 30 * 60 * 1000);
+
   // Aplicar configuración de invitación si aplica
   const fromInvite = processInviteHash();
 
@@ -9189,8 +9401,23 @@ function rewireClickable(root){
   // Si no hay token VÁLIDO pero sí hay email previo → intentar renovar silenciosamente
   if(!hasToken && hasEmail && hasGemini){
     loading(true, 'Iniciando', 'Renovando sesión...');
+    _authLog('boot: token expirado pero hasEmail+hasGemini → intentando silentRefresh');
     const refreshed = await silentRefresh();
-    if(refreshed) hasToken = refreshed;
+    if(refreshed){
+      hasToken = refreshed;
+      _authLog('boot: silentRefresh OK al inicio');
+    } else {
+      // v.0121: si silent refresh falla pero el setup está completo (email +
+      // gemini + empresa), no devolver al usuario al setup. Ir directamente
+      // a pg-reconnect para 1-tap re-auth con el email guardado.
+      _authLog('boot: silentRefresh FAIL al inicio → pg-reconnect');
+      loading(false);
+      const emailEl = document.getElementById('reconnect-email');
+      if(emailEl) emailEl.textContent = hasEmail;
+      _reconnectFromPage = hasCompany ? 'pg-home' : 'pg-select-company';
+      show('pg-reconnect');
+      return;
+    }
   }
 
   // Health-check (v.0088): si hay token vivo pero LS.EMAIL está vacío, recuperarlo
