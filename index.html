@@ -1617,7 +1617,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0125</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0126</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1633,7 +1633,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0125';
+const APP_VERSION = '0126';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7248,112 +7248,48 @@ async function generarPDFFotos(params){
 
     // 6. Capturar página por página y armar el PDF.
     //
-    // v.0124: el `onclone` de v.0122 NO es suficiente con muchas facturas.
-    // html2canvas clona TODO document.body ANTES de que onclone se ejecute.
-    // El proceso de clonar (que es lo que satura la memoria) ya consume los
-    // 20+ MB del documento antes de mi callback de limpieza. iOS PWA WebKit
-    // colapsa en el clone con reportes grandes (21 facturas → 20.8 MB).
+    // v.0126: REVERT al render loop simple de v.0117 (idéntico desde v.0080).
+    // Razón: el aislamiento de v.0124 se atascaba en página 10/31 en Safari Mac
+    // con 21 facturas. El usuario me pidió investigar mejor antes de tirar
+    // más paños tibios — comparé con v.0117 (la última versión sin mis cambios)
+    // y el render loop ahí era simple. Si revertir hace que funcione, mi
+    // aislamiento causó el bug. Si TAMPOCO funciona, el bug es preexistente
+    // y necesitamos otra ruta (probablemente jsPDF nativo sin html2canvas).
     //
-    // Fix raíz: aislamiento real de páginas durante el render.
-    //   1) Después del pre-render (fonts.ready, imgs decode), DETACH renderRoot
-    //      del body. Las imágenes ya cargaron como data URIs en los nodos.
-    //   2) Para cada página: meter SOLO esa página en un wrapper temporal
-    //      con la clase correcta (pdf-fiscal/pdf-report), adjuntar al body.
-    //   3) html2canvas clona el body que ahora tiene SOLO 1 página (~1MB)
-    //      en lugar de 20+ MB.
-    //   4) Tras el render: remover el wrapper temporal del body.
+    // Mantenemos lo independiente al render loop:
+    //   - Instrumentación _pdfLog (no afecta lógica).
+    //   - Thumbnails =w1200 en _fetchFotoAsDataURI (independiente).
+    //   - AbortController 25s en cada estrategia (independiente).
+    //   - Botones "Cancelar" y "Copiar log" en overlay.
     //
-    // Resultado: peak memoria por render ~1MB en lugar de 20+ MB. Mantenemos
-    // scale: 2 (calidad), `onclone` como tercera línea de defensa para
-    // limpiar el resto de la PWA del clone.
-    const pageList = Array.from(renderRoot.querySelectorAll('.page'));
+    // PASADO (NO BORRADO POR REFERENCIA):
+    // v.0124 metió aislamiento de páginas + onclone + Promise.race timeout 300s.
+    // Funcionó en iPhone con 28 facturas (caso 1). Falló en Safari Mac con 21
+    // facturas en página 10/31 (caso 2). Diferencia: hardware o caché HTTP. Si
+    // la simple lógica de v.0117 funciona en ambos casos, fue mi cambio.
+    const pages = renderRoot.querySelectorAll('.page');
     const {jsPDF} = window.jspdf;
     const pdf = new jsPDF({unit: 'in', format: 'letter', orientation: 'portrait'});
-    const PAGE_TIMEOUT_MS = 300000;
-    const wrapperClass = renderRoot.firstChild ? renderRoot.firstChild.className : '';
+    _pdfLog(`render: jsPDF inicializado, ${pages.length} páginas (loop estilo v.0117 — sin aislamiento ni onclone)`);
 
-    // CRÍTICO: detach renderRoot del body. Las páginas ya están como nodos
-    // en pageList. Los data URIs viven en los <img> de cada página.
-    if(renderRoot.parentNode) renderRoot.parentNode.removeChild(renderRoot);
-    const renderRootDetachedSize = renderRoot.outerHTML.length;
-    _pdfLog(`render: jsPDF inicializado, ${pageList.length} páginas, wrapperClass='${wrapperClass}', renderRoot detached del body (era ${(renderRootDetachedSize/1024/1024).toFixed(2)}MB)`);
-
-    for(let i = 0; i < pageList.length; i++){
+    for(let i = 0; i < pages.length; i++){
       // Permitir cancelación manual desde el botón del overlay
       if(window._pdfCancelRequested){
-        _pdfLog(`render: cancelación manual recibida en página ${i+1}/${pageList.length}`);
+        _pdfLog(`render: cancelación manual recibida en página ${i+1}/${pages.length}`);
         throw new Error('CANCELADO_POR_USUARIO');
       }
-      setStatus(`Generando PDF (página ${i+1}/${pageList.length})…`);
+      setStatus(`Generando PDF (página ${i+1}/${pages.length})…`);
       await new Promise(r => setTimeout(r, 0));
-
-      // Crear wrapper temporal con solo la página actual y adjuntar al body.
-      // Después del render, lo removemos. Esto mantiene el body chico durante
-      // cada llamada a html2canvas → clone chico → no satura memoria.
-      const tempWrapper = document.createElement('div');
-      tempWrapper.className = wrapperClass;
-      tempWrapper.style.cssText = 'position:fixed;left:-99999px;top:0;width:8.5in;background:#fff';
-      // Insertar el CSS por id ya está en document.head — el wrapper hereda
-      // los estilos de pdf-fiscal/pdf-report sin necesidad de reinyectar.
-      tempWrapper.appendChild(pageList[i]);
-      document.body.appendChild(tempWrapper);
-      pageList[i].setAttribute('data-pdf-render', 'target');
-
-      const tempBodySize = document.body.outerHTML.length;
-      _pdfLog(`render: página ${i+1}/${pageList.length} html2canvas start (body=${(tempBodySize/1024).toFixed(0)}KB con la página aislada)`);
+      _pdfLog(`render: página ${i+1}/${pages.length} html2canvas start`);
       const t0 = Date.now();
-      let canvas;
-      try {
-        canvas = await Promise.race([
-          html2canvas(pageList[i], {
-            scale: 2,
-            useCORS: true,
-            allowTaint: true,
-            logging: false,
-            backgroundColor: '#ffffff',
-            windowWidth: 816,
-            // Tercera línea de defensa: aunque el body ya es chico, removemos
-            // el resto de la PWA del clone (pg-X divs, banners) para minimizar.
-            onclone: (clonedDoc) => {
-              try {
-                const targetClone = clonedDoc.querySelector('[data-pdf-render="target"]');
-                if(!targetClone) return;
-                const newWrapper = clonedDoc.createElement('div');
-                if(wrapperClass) newWrapper.className = wrapperClass;
-                newWrapper.appendChild(targetClone);
-                clonedDoc.body.innerHTML = '';
-                clonedDoc.body.appendChild(newWrapper);
-              } catch(e){ console.warn('[onclone] error limpiando clone:', e); }
-            }
-          }),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('PAGE_TIMEOUT')), PAGE_TIMEOUT_MS))
-        ]);
-      } catch(canvasErr){
-        pageList[i].removeAttribute('data-pdf-render');
-        if(tempWrapper.parentNode) tempWrapper.parentNode.removeChild(tempWrapper);
-        _pdfLog(`render: página ${i+1} ERROR ${canvasErr.message}`);
-        if(canvasErr.message === 'PAGE_TIMEOUT'){
-          throw new Error(`Render de la página ${i+1}/${pageList.length} excedió ${PAGE_TIMEOUT_MS/1000}s. El log detallado debajo ayudará a diagnosticar.`);
-        }
-        throw canvasErr;
-      }
-      pageList[i].removeAttribute('data-pdf-render');
-      // Remover el wrapper temporal del body antes de procesar el canvas.
-      // La página queda dentro del wrapper (huérfana), GC la limpia después.
-      if(tempWrapper.parentNode) tempWrapper.parentNode.removeChild(tempWrapper);
+      const canvas = await html2canvas(pages[i], {scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816});
 
       const dt = Date.now() - t0;
-      _pdfLog(`render: página ${i+1}/${pageList.length} html2canvas DONE en ${dt}ms (canvas ${canvas.width}×${canvas.height})`);
+      _pdfLog(`render: página ${i+1}/${pages.length} html2canvas DONE en ${dt}ms (canvas ${canvas.width}×${canvas.height})`);
       const imgData = canvas.toDataURL('image/jpeg', 0.92);
-      _pdfLog(`render: página ${i+1} toDataURL en ${Date.now()-t0-dt}ms (jpeg q=0.92)`);
       if(i > 0) pdf.addPage();
       pdf.addImage(imgData, 'JPEG', 0, 0, 8.5, 11);
-      // Liberar canvas — set width/height a 0 fuerza al browser a liberar el
-      // backing buffer GPU. Sin esto, iOS PWA acumula memoria página tras página.
-      canvas.width = 0; canvas.height = 0;
-      canvas = null;
-      // Tick al event loop para permitir GC + actualizar UI
-      await new Promise(r => setTimeout(r, 0));
+      // pasada simple, igual a v.0117. NO liberamos canvas ni hacemos setTimeout extra.
     }
     _pdfLog(`render: todas las páginas listas, generando blob...`);
     const pdfBlob = pdf.output('blob');
