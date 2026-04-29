@@ -1671,7 +1671,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0130</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0131</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0130';
+const APP_VERSION = '0131';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4303,15 +4303,15 @@ function applyRoleUI(){
 function manageCategorias(){
   if(!isAdmin()){ toast('Solo ADMIN', 'err'); return; }
   const rows = (masters.categories || []).map(c => `
-    <div class="cat-row" data-cod="${c.cod}" style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--border);margin-bottom:8px">
+    <div class="cat-row" data-cod="${c.cod}" data-saving="0" data-dirty="0" style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--border);margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-family:var(--mono);font-size:11px;color:var(--text2);background:var(--bg2);padding:3px 7px;border-radius:4px;flex-shrink:0;min-width:50px;text-align:center">${c.cod}</span>
-        <input class="cat-input-nombre" data-original-nombre="${escapeHtml(c.nombre)}" value="${escapeHtml(c.nombre)}" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;padding:0;font-weight:500;outline:none" oninput="markCatDirty(this)">
-        <button class="cat-save" style="display:none;width:28px;height:28px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:18px" onclick="saveCatRow(this)">✓</button>
+        <input class="cat-input-nombre" data-original-nombre="${escapeHtml(c.nombre)}" value="${escapeHtml(c.nombre)}" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;padding:0;font-weight:500;outline:none" oninput="markCatDirty(this)" onblur="autoSaveCatRow(this)">
       </div>
       <div style="display:flex;align-items:center;gap:6px;padding-top:6px;border-top:1px solid var(--border)">
         <span style="font-size:9px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;min-width:50px">Cuenta</span>
-        <input class="cat-input-cuenta" data-original-cuenta="${escapeHtml(c.cuenta || '')}" value="${escapeHtml(c.cuenta || '')}" placeholder="Sin cuenta — saldrá como —" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;padding:0;font-family:var(--mono);outline:none" oninput="markCatDirty(this)">
+        <input class="cat-input-cuenta" data-original-cuenta="${escapeHtml(c.cuenta || '')}" value="${escapeHtml(c.cuenta || '')}" placeholder="Sin cuenta — saldrá como —" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;padding:0;font-family:var(--mono);outline:none" oninput="markCatDirty(this)" onblur="autoSaveCatRow(this)">
+        <span class="cat-status" style="font-size:11px;font-weight:500;white-space:nowrap;min-width:60px;text-align:right;opacity:0;transition:opacity .25s"></span>
       </div>
     </div>
   `).join('');
@@ -4319,10 +4319,10 @@ function manageCategorias(){
   showModal(`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div style="font-size:15px;font-weight:600">Gestionar categorías</div>
-      <div style="font-size:18px;color:var(--text2);cursor:pointer" onclick="closeModal()">✕</div>
+      <div style="font-size:18px;color:var(--text2);cursor:pointer" onclick="closeCategoriasModal()">✕</div>
     </div>
     <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:14px">
-      Tap el nombre o la cuenta para editar. El código (MAT, MOB...) se mantiene en los registros existentes. La cuenta contable es opcional — solo se usa en el reporte "Contabilidad / Soporte Fiscal".
+      Tap el nombre o la cuenta para editar — los cambios se guardan automáticamente al salir del campo. El código (MAT, MOB...) se mantiene en los registros existentes. La cuenta contable es opcional — solo se usa en el reporte "Contabilidad / Soporte Fiscal".
     </div>
     <div id="cat-list">${rows}</div>
     <div id="cat-add-row" style="display:none;margin-top:8px">
@@ -4340,62 +4340,132 @@ function manageCategorias(){
       </div>
     </div>
     <div id="cat-add-btn" style="display:flex;align-items:center;gap:8px;background:#052e16;border:1px dashed #166534;border-radius:10px;padding:12px;margin-top:8px;color:var(--green);font-size:13px;cursor:pointer;font-weight:500;justify-content:center" onclick="showCatAddRow()">+ Agregar nueva categoría</div>
-    <button class="btn" onclick="closeModal()" style="margin-top:14px">Cerrar</button>
+    <button class="btn" onclick="closeCategoriasModal()" style="margin-top:14px">Cerrar</button>
   `);
 }
 
+// v.0131: marca la fila como dirty cuando hay cambio sin guardar. El guardado
+// real ocurre on blur (autoSaveCatRow) — el dirty flag aquí solo sirve para
+// que closeCategoriasModal() sepa hacer un flush antes de cerrar si el usuario
+// nunca hizo blur (ej. pulsó "Cerrar" estando aún dentro del input).
 function markCatDirty(inp){
   const row = inp.closest('.cat-row');
+  if(!row) return;
   const nombreInp = row.querySelector('.cat-input-nombre');
   const cuentaInp = row.querySelector('.cat-input-cuenta');
-  const saveBtn = row.querySelector('.cat-save');
   const dirty =
     nombreInp.value.trim() !== nombreInp.dataset.originalNombre ||
     cuentaInp.value.trim() !== cuentaInp.dataset.originalCuenta;
-  saveBtn.style.display = dirty ? 'flex' : 'none';
+  row.dataset.dirty = dirty ? '1' : '0';
 }
 
-async function saveCatRow(btn){
-  const row = btn.closest('.cat-row');
+// v.0131: pinta el badge "Guardando…" / "✓ Guardado" / error a la derecha de
+// la fila. Status 'saved' se desvanece a los 1500ms.
+function _setCatRowStatus(row, kind, msg){
+  const el = row.querySelector('.cat-status');
+  if(!el) return;
+  if(kind === 'idle'){
+    el.style.opacity = '0';
+    el.textContent = '';
+    return;
+  }
+  el.textContent = msg || '';
+  el.style.opacity = '1';
+  if(kind === 'saving'){ el.style.color = 'var(--text2)'; }
+  else if(kind === 'saved'){ el.style.color = 'var(--green)'; }
+  else if(kind === 'error'){ el.style.color = 'var(--red)'; }
+  if(kind === 'saved'){
+    clearTimeout(row._statusTimer);
+    row._statusTimer = setTimeout(() => {
+      el.style.opacity = '0';
+    }, 1500);
+  }
+}
+
+// v.0131: auto-save al perder foco (blur) en cualquier input de la fila.
+// Reemplaza el botón ✓ ambiguo (que el usuario interpretaba como "guardado"
+// y nunca pulsaba). Si la fila ya está guardando o no hay cambios reales,
+// no hace nada. Re-entrante seguro: si dispara dos blurs solapados, el flag
+// data-saving evita doble PUT.
+async function autoSaveCatRow(inp){
+  const row = inp.closest('.cat-row');
+  if(!row) return;
+  if(row.dataset.saving === '1') return;
   const cod = row.dataset.cod;
   const nombreInp = row.querySelector('.cat-input-nombre');
   const cuentaInp = row.querySelector('.cat-input-cuenta');
   const newName = nombreInp.value.trim();
   const newCuenta = cuentaInp.value.trim();
-  if(!newName){ toast('El nombre no puede quedar vacío', 'err'); return; }
-
   const nombreChanged = newName !== nombreInp.dataset.originalNombre;
   const cuentaChanged = newCuenta !== cuentaInp.dataset.originalCuenta;
-  if(!nombreChanged && !cuentaChanged){ btn.style.display = 'none'; return; }
+  if(!nombreChanged && !cuentaChanged) return;
 
-  loading(true, 'Guardando', 'Actualizando categoría...');
+  if(!newName){
+    // Restaurar nombre original — no permitir vaciar
+    nombreInp.value = nombreInp.dataset.originalNombre;
+    row.dataset.dirty = '0';
+    _setCatRowStatus(row, 'error', 'Nombre vacío');
+    setTimeout(() => _setCatRowStatus(row, 'idle'), 1800);
+    return;
+  }
+
+  row.dataset.saving = '1';
+  _setCatRowStatus(row, 'saving', '⏳ Guardando…');
   try {
-    // Buscar fila en CATEGORIAS sheet
     const all = await sheetsGet('CATEGORIAS!A2:C');
     const idx = (all || []).findIndex(r => r[0] === cod);
     if(idx < 0) throw new Error('Categoría no encontrada en hoja');
     const rowNum = idx + 2;
-    // Escribir B (nombre) y C (cuenta) juntas — un solo PUT a B:C
-    await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${getActiveSheetId()}/values/CATEGORIAS!B${rowNum}:C${rowNum}?valueInputOption=USER_ENTERED`, {
+    const res = await authFetch(`https://sheets.googleapis.com/v4/spreadsheets/${getActiveSheetId()}/values/CATEGORIAS!B${rowNum}:C${rowNum}?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({values: [[newName, newCuenta]]})
     });
+    // v.0131: chequeo de res.ok — el código viejo asumía éxito si authFetch
+    // resolvía sin tirar (silentRefresh solo cubre 401). Un 4xx/5xx silencioso
+    // hacía que el usuario viera "guardado" sin que el sheet se actualizara.
+    if(!res.ok){
+      const txt = await res.text().catch(() => '');
+      throw new Error('HTTP ' + res.status + (txt ? ': ' + txt.slice(0, 120) : ''));
+    }
 
-    // Actualizar masters local + selects abiertos
     const cat = (masters.categories || []).find(c => c.cod === cod);
     if(cat){ cat.nombre = newName; cat.cuenta = newCuenta; }
     nombreInp.dataset.originalNombre = newName;
     cuentaInp.dataset.originalCuenta = newCuenta;
-    btn.style.display = 'none';
+    row.dataset.dirty = '0';
+    // Persistir en cache local — la próxima carga sin red verá el valor nuevo
+    try {
+      const cached = JSON.parse(localStorage.getItem(LS.MASTERS) || '{}');
+      cached.categories = masters.categories;
+      cached.at = Date.now();
+      localStorage.setItem(LS.MASTERS, JSON.stringify(cached));
+    } catch(_){}
     refreshCategoriaSelects();
-    loading(false);
-    toast(`"${newName}" guardado`, 'ok');
+    _setCatRowStatus(row, 'saved', '✓ Guardado');
   } catch(e){
-    loading(false);
-    toast('Error: ' + e.message, 'err');
-    console.error('[saveCatRow]', e);
+    _setCatRowStatus(row, 'error', '✕ Error');
+    toast('Error guardando categoría: ' + e.message, 'err');
+    console.error('[autoSaveCatRow]', e);
+  } finally {
+    row.dataset.saving = '0';
   }
+}
+
+// v.0131: cierre seguro del modal. Si hay filas dirty (el usuario nunca hizo
+// blur — ej. pulsó "Cerrar" o la X estando dentro del input), hacer flush
+// antes de cerrar para no perder cambios.
+async function closeCategoriasModal(){
+  const dirtyRows = document.querySelectorAll('.cat-row[data-dirty="1"]');
+  if(dirtyRows.length > 0){
+    loading(true, 'Guardando', 'Guardando cambios pendientes...');
+    for(const row of dirtyRows){
+      const inp = row.querySelector('.cat-input-cuenta');
+      try { await autoSaveCatRow(inp); } catch(_){}
+    }
+    loading(false);
+  }
+  closeModal();
 }
 
 function showCatAddRow(){
@@ -7897,7 +7967,7 @@ function renderFacturas(){
             <div style="flex:1;min-width:0">
               <div style="font-size:14px;font-weight:500">${r[H.SUPLIDOR] || '(sin suplidor)'}</div>
               <div style="font-size:11px;color:var(--text2);margin-top:3px">
-                ${r[H.PROYECTO]} · ${r[H.FECHA_FACTURA] || ''}
+                ${proj?.nombre || r[H.PROYECTO]} · ${r[H.FECHA_FACTURA] || ''}
                 ${r[H.NO_REPORTE] ? ' · <span style="font-family:var(--mono);color:var(--amber)">'+r[H.NO_REPORTE]+'</span>' : ''}
               </div>
               <div style="font-size:11px;color:var(--text2);margin-top:2px">
