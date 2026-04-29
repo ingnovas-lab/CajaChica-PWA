@@ -1671,7 +1671,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0132</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0133</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0132';
+const APP_VERSION = '0133';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5931,14 +5931,13 @@ function _updateOverlayShow(){
         <summary style="font-size:11px;color:var(--text2);cursor:pointer;user-select:none">Ver log diagnóstico</summary>
         <div id="update-log" style="margin-top:8px;background:var(--bg);border-radius:8px;padding:10px;max-height:160px;overflow-y:auto"></div>
       </details>
-      <div id="update-actions" style="display:none;flex-direction:column;gap:8px">
-        <button class="btn btn-blue" onclick="_updateCopyLog()" style="padding:10px;font-size:13px">📋 Copiar log diagnóstico</button>
-        <button class="btn" onclick="location.href = location.pathname + '?_v=' + Date.now()" style="padding:10px;font-size:13px">↻ Recargar manualmente</button>
-        <button class="btn" onclick="_updateOverlayHide()" style="padding:10px;font-size:13px;background:transparent;color:var(--text2)">Cerrar</button>
+      <div id="update-actions" style="display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border);padding-top:12px">
+        <button class="btn btn-blue" onclick="_updateForceReloadNow()" style="padding:10px;font-size:13px">↻ Recargar ahora</button>
+        <button class="btn" onclick="_updateCopyLog()" style="padding:10px;font-size:13px;background:transparent;color:var(--text2);border:1px solid var(--border)">📋 Copiar log</button>
+        <button class="btn" onclick="_updateOverlayHide()" style="padding:8px;font-size:12px;background:transparent;color:var(--text2);border:none">Cancelar</button>
       </div>
     </div>
   `;
-  // Asegurar que el keyframe spin existe (compartido con el overlay del PDF)
   if(!document.getElementById('update-spin-kf')){
     const st = document.createElement('style');
     st.id = 'update-spin-kf';
@@ -5946,6 +5945,19 @@ function _updateOverlayShow(){
     document.head.appendChild(st);
   }
   document.body.appendChild(ov);
+}
+
+// v.0133: reload directo desde click handler (user-gesture fresco, sin awaits
+// previos que puedan haber colgado). Es la salida garantizada para el usuario
+// en cualquier estado del overlay.
+function _updateForceReloadNow(){
+  _updateLog('manual: user clicked "Recargar ahora"');
+  const target = location.pathname + '?_v=' + Date.now();
+  try {
+    location.replace(target);
+  } catch(_){
+    location.href = target;
+  }
 }
 
 function _updateOverlayHide(){
@@ -5967,11 +5979,18 @@ function _updateAddStep(icon, text, kind){
 function _updateShowFailureUI(reason){
   const titleEl = document.getElementById('update-title');
   const spinEl = document.getElementById('update-spin');
-  const actionsEl = document.getElementById('update-actions');
   if(titleEl){ titleEl.textContent = '⚠️ La recarga no se ejecutó'; titleEl.style.color = 'var(--red)'; }
   if(spinEl){ spinEl.style.display = 'none'; }
-  if(actionsEl){ actionsEl.style.display = 'flex'; }
   _updateAddStep('✕', reason, 'error');
+}
+
+// v.0133: wrap awaits que pueden colgar para siempre (Safari Mac:
+// r.unregister() confirmado colgado en log diagnóstico v.0132).
+function _withTimeout(promise, ms, label){
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('TIMEOUT ' + label + ' ' + ms + 'ms')), ms))
+  ]);
 }
 
 function _updateCopyLog(){
@@ -6006,41 +6025,62 @@ async function forceAppUpdate(){
   _updateLog(`start | href=${location.href} | standalone=${window.matchMedia('(display-mode: standalone)').matches}`);
   _updateAddStep('⏳', 'Iniciando…');
 
-  // 1) Desregistrar Service Workers
+  // 1) Desregistrar Service Workers — v.0133: cada unregister con timeout 2s.
+  // Bug confirmado en Safari Mac: r.unregister() puede no resolver la promesa
+  // (log v.0132 mostró que getRegistrations() retornó OK pero unregister() colgó
+  // indefinidamente). Si timeout, dejamos al SW desregistrarse en background y
+  // seguimos con el reload — el SW network-first servirá el HTML nuevo igual.
   try {
     if('serviceWorker' in navigator){
       _updateLog('SW: getRegistrations() start');
-      const regs = await navigator.serviceWorker.getRegistrations();
+      const regs = await _withTimeout(navigator.serviceWorker.getRegistrations(), 2000, 'getRegistrations');
       _updateLog(`SW: getRegistrations() ok — ${regs.length} registro(s)`);
-      const results = await Promise.all(regs.map(r => r.unregister().catch(e => ({err: e.message}))));
+      const results = await Promise.all(regs.map((r, i) =>
+        _withTimeout(r.unregister(), 2000, 'unregister[' + i + ']')
+          .then(ok => ({ok}))
+          .catch(e => ({err: e.message}))
+      ));
       const failed = results.filter(r => r && r.err);
-      _updateLog(`SW: unregister done — ok=${results.length - failed.length} failed=${failed.length}`);
-      _updateAddStep('✓', `Service Workers desregistrados (${results.length})`, 'ok');
+      _updateLog(`SW: unregister done — ok=${results.length - failed.length} failed=${failed.length}${failed.length ? ' [' + failed.map(f => f.err).join(',') + ']' : ''}`);
+      if(failed.length === 0){
+        _updateAddStep('✓', `Service Workers desregistrados (${results.length})`, 'ok');
+      } else {
+        _updateAddStep('⚠', `SWs: ${results.length - failed.length}/${results.length} OK (${failed.length} timeout)`, 'warn');
+      }
     } else {
       _updateLog('SW: API no disponible');
       _updateAddStep('—', 'serviceWorker API no disponible', 'warn');
     }
   } catch(e){
     _updateLog(`SW: ERROR ${e.message}`);
-    _updateAddStep('✕', `Error desregistrando SWs: ${e.message}`, 'error');
+    _updateAddStep('⚠', `SWs: ${e.message} — continuando`, 'warn');
   }
 
-  // 2) Borrar Cache Storage
+  // 2) Borrar Cache Storage — mismos timeouts defensivos
   try {
     if('caches' in window){
       _updateLog('Caches: keys() start');
-      const keys = await caches.keys();
+      const keys = await _withTimeout(caches.keys(), 2000, 'caches.keys');
       _updateLog(`Caches: keys() ok — ${keys.length} caches: ${JSON.stringify(keys)}`);
-      await Promise.all(keys.map(k => caches.delete(k).catch(e => false)));
-      _updateLog('Caches: delete done');
-      _updateAddStep('✓', `Caches borrados (${keys.length})`, 'ok');
+      const delResults = await Promise.all(keys.map((k, i) =>
+        _withTimeout(caches.delete(k), 2000, 'caches.delete[' + i + ']')
+          .then(ok => ({ok}))
+          .catch(e => ({err: e.message}))
+      ));
+      const delFailed = delResults.filter(r => r && r.err);
+      _updateLog(`Caches: delete done — ok=${delResults.length - delFailed.length} failed=${delFailed.length}`);
+      if(delFailed.length === 0){
+        _updateAddStep('✓', `Caches borrados (${keys.length})`, 'ok');
+      } else {
+        _updateAddStep('⚠', `Caches: ${delResults.length - delFailed.length}/${delResults.length} OK`, 'warn');
+      }
     } else {
       _updateLog('Caches: API no disponible');
       _updateAddStep('—', 'caches API no disponible', 'warn');
     }
   } catch(e){
     _updateLog(`Caches: ERROR ${e.message}`);
-    _updateAddStep('✕', `Error borrando caches: ${e.message}`, 'error');
+    _updateAddStep('⚠', `Caches: ${e.message} — continuando`, 'warn');
   }
 
   // 3) Cascada de reload techniques. Cada técnica corre, y si la página
