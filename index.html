@@ -1671,7 +1671,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0129</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0130</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0129';
+const APP_VERSION = '0130';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5824,21 +5824,33 @@ async function _checkForUpdate(){
 async function forceAppUpdate(){
   if(!confirm('Limpiar caché y recargar para aplicar la última versión publicada?')) return;
   try {
-    // 1) Borrar todos los Cache Storage de la app
-    if('caches' in window){
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k)));
-    }
-    // 2) Desregistrar Service Workers (forzará re-registro fresco al recargar)
+    // 1) Desregistrar Service Workers PRIMERO — para que no respondan
+    // a los fetches durante la limpieza ni se re-llenen los caches.
     if('serviceWorker' in navigator){
       const regs = await navigator.serviceWorker.getRegistrations();
       await Promise.all(regs.map(r => r.unregister()));
     }
+    // 2) Borrar todos los Cache Storage de la app
+    if('caches' in window){
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
   } catch(e){
     console.warn('[forceAppUpdate] Limpieza parcial:', e.message);
   }
-  // 3) Recargar bypassing el caché del navegador
-  location.reload();
+  // 3) Recargar con query string fresca para forzar bypass del HTTP cache
+  // del navegador. v.0130: el location.reload() simple NO funciona en Safari
+  // Mac — el browser mantiene index.html en su HTTP cache (GitHub Pages
+  // sirve con Cache-Control max-age típicamente). Cambiar la URL fuerza una
+  // request nueva. Preservamos el hash (#invite=...) si existe.
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('_v', Date.now().toString());
+    location.replace(url.toString());
+  } catch(e){
+    // Fallback al reload simple si por alguna razón URL falla
+    location.reload();
+  }
 }
 
 // v.0112: bloquear scroll del body+html+wrapper activo cuando hay modal abierto.
