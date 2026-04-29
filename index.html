@@ -1291,13 +1291,14 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <a href="#h-informal" style="color:var(--blue);text-decoration:none;padding:6px 0">4. Facturas sin NCF</a>
         <a href="#h-ingreso" style="color:var(--blue);text-decoration:none;padding:6px 0">5. Registrar ingreso (abono)</a>
         <a href="#h-revisar" style="color:var(--blue);text-decoration:none;padding:6px 0">6. Mis facturas</a>
-        <a href="#h-editar" style="color:var(--blue);text-decoration:none;padding:6px 0">7. Editar registros</a>
-        <a href="#h-eliminar" style="color:var(--blue);text-decoration:none;padding:6px 0">8. Eliminar registros</a>
-        <a href="#h-reporte" style="color:var(--blue);text-decoration:none;padding:6px 0">9. Generar reporte de balance</a>
-        <a href="#h-sincronizar" style="color:var(--blue);text-decoration:none;padding:6px 0">10. Sincronizar al final del día</a>
-        <a href="#h-offline" style="color:var(--blue);text-decoration:none;padding:6px 0">11. Trabajar sin internet</a>
-        <a href="#h-problemas" style="color:var(--blue);text-decoration:none;padding:6px 0">12. Problemas comunes</a>
-        <a href="#h-reglas" style="color:var(--blue);text-decoration:none;padding:6px 0">13. Las 5 reglas de oro</a>
+        <a href="#h-historial" style="color:var(--blue);text-decoration:none;padding:6px 0">7. Historial de movimientos (balance)</a>
+        <a href="#h-editar" style="color:var(--blue);text-decoration:none;padding:6px 0">8. Editar registros</a>
+        <a href="#h-eliminar" style="color:var(--blue);text-decoration:none;padding:6px 0">9. Eliminar registros</a>
+        <a href="#h-reporte" style="color:var(--blue);text-decoration:none;padding:6px 0">10. Generar reporte de balance</a>
+        <a href="#h-sincronizar" style="color:var(--blue);text-decoration:none;padding:6px 0">11. Sincronizar al final del día</a>
+        <a href="#h-offline" style="color:var(--blue);text-decoration:none;padding:6px 0">12. Trabajar sin internet</a>
+        <a href="#h-problemas" style="color:var(--blue);text-decoration:none;padding:6px 0">13. Problemas comunes</a>
+        <a href="#h-reglas" style="color:var(--blue);text-decoration:none;padding:6px 0">14. Las 5 reglas de oro</a>
       </div>
     </div>
 
@@ -1453,9 +1454,42 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 7 -->
+    <!-- Sección 7: Historial de movimientos (pg-balance, v.0115+) -->
+    <div class="card" style="margin-bottom:14px" id="h-historial">
+      <h3 style="color:var(--amber);margin-bottom:10px">7. Historial de movimientos (balance)</h3>
+      <div style="font-size:13px;line-height:1.6">
+        Vista única del proyecto activo: muestra TODO lo que entró y salió de la caja chica — ingresos, facturas y el fondo de apertura — con balance actualizado y filtros.
+        <ol style="margin:10px 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">En el home, toca el card <strong>"Balance de obra"</strong> (la zona azul con el monto en grande). Se abre la pantalla de Historial.</li>
+          <li style="margin-bottom:6px">Arriba ves el balance grande + breakdown:
+            <ul style="margin:4px 0 4px 20px;padding:0">
+              <li><strong>📥 Ingresos:</strong> cantidad y monto total (incluye fondo de apertura).</li>
+              <li><strong>📤 Facturas:</strong> cantidad y monto total.</li>
+            </ul>
+          </li>
+          <li style="margin-bottom:6px">El listado abajo muestra todo cronológicamente, mezclando ingresos (verde, prefijo +) y facturas (rojo, prefijo −).</li>
+          <li>Al final aparece el <strong>🏦 Fondo de apertura</strong> de la obra (read-only, definido al crear la empresa).</li>
+        </ol>
+
+        <div style="margin-top:12px"><strong>Filtros:</strong> uno solo — <em>Tipo</em> (Todos / Solo ingresos / Solo facturas). El historial siempre es del proyecto activo, no necesitas filtrar por obra.</div>
+
+        <div style="margin-top:12px"><strong>Editar / eliminar desde aquí:</strong></div>
+        <ul style="margin:6px 0 0 20px;padding:0">
+          <li style="margin-bottom:4px">Cada item de factura o ingreso tiene botones <strong>Editar</strong> y <strong>Eliminar</strong>.</li>
+          <li style="margin-bottom:4px">Al editar/eliminar y guardar, vuelves directo al Historial (no a Mis facturas).</li>
+          <li style="margin-bottom:4px"><strong>Eliminar ingreso</strong> es definitivo: borra la fila de INGRESOS y mueve el comprobante a Papelera de Drive. NO hay restaurar (a diferencia de las facturas que sí tienen Papelera). Pide doble confirmación.</li>
+          <li>Editar ingreso modifica fecha, tipo, monto y referencia. La foto del comprobante queda como está (read-only en este modo). Si necesitas cambiar la foto, elimina el ingreso y crea uno nuevo.</li>
+        </ul>
+
+        <div style="background:rgba(59,130,246,0.08);border-left:3px solid var(--blue);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          <strong>Botón ↻ del card de balance:</strong> sigue funcionando (toca solo el ícono — no el resto del card). Refresca el balance contra el sheet sin abrir el historial.
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección 8 -->
     <div class="card" style="margin-bottom:14px" id="h-editar">
-      <h3 style="color:var(--amber);margin-bottom:10px">7. Editar registros (factura o ingreso)</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">8. Editar registros (factura o ingreso)</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;margin-bottom:6px">Pendiente (no sincronizado):</div>
         <ol style="margin:0 0 0 20px;padding:0">
@@ -1474,9 +1508,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 8 -->
+    <!-- Sección 9 -->
     <div class="card" style="margin-bottom:14px" id="h-eliminar">
-      <h3 style="color:var(--amber);margin-bottom:10px">8. Eliminar registros</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">9. Eliminar registros</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;margin-bottom:6px">Pendiente:</div>
         <div style="margin-bottom:12px">Ve a "Registros pendientes" (toca "Por sincronizar" en el home) → toca "Eliminar" en la fila. Se borra del celular.</div>
@@ -1485,9 +1519,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 9: Generar reporte de balance -->
+    <!-- Sección 10: Generar reporte de balance -->
     <div class="card" style="margin-bottom:14px" id="h-reporte">
-      <h3 style="color:var(--amber);margin-bottom:10px">9. Generar reporte de balance</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">10. Generar reporte de balance</h3>
       <div style="font-size:13px;line-height:1.6">
         Reporte consolidado de gastos y abonos para una obra y rango de fechas. Útil para soportar pagos al contador o para liquidar caja chica.
         <ol style="margin:10px 0 0 20px;padding:0">
@@ -1510,12 +1544,27 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div style="background:rgba(245,158,11,0.08);border-left:3px solid var(--amber);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
           <strong>Datos contables vacíos:</strong> si no llenaste razón social, RNC, etc. al crear la empresa, el reporte fiscal saldrá con "—" o líneas en blanco para firmar a mano. Puedes completarlos en Configuración → Cambiar empresa → Editar.
         </div>
+
+        <div style="font-weight:600;margin-top:14px;margin-bottom:6px">Mientras se genera el PDF</div>
+        <div style="color:var(--text2);font-size:12px;margin-bottom:8px">Aparece un overlay de pantalla completa con un spinner indicando "Generando PDF (página X/N)…". Tiene 2 botones útiles abajo:</div>
+        <ul style="margin:0 0 12px 20px;padding:0;font-size:12px">
+          <li style="margin-bottom:4px"><strong>📋 Copiar log:</strong> copia un log diagnóstico al portapapeles. Útil si el reporte tarda mucho — pásalo al soporte para diagnosticar.</li>
+          <li><strong>✕ Cancelar generación:</strong> corta el proceso limpiamente. Mejor que cerrar la app si quieres hacer otra cosa.</li>
+        </ul>
+
+        <div style="background:rgba(239,68,68,0.10);border-left:3px solid var(--red);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
+          <strong>⚠️ Limitación de iPhone (PWA en pantalla completa):</strong> después de generar UN reporte, la memoria interna del navegador queda saturada. Si intentas generar un segundo reporte sin cerrar la app, puede atascarse en una página. <strong>Solución:</strong> cierra completamente la app entre reportes (deslízala hacia arriba en el selector de apps del iPhone) y vuelve a abrirla. Después del primer reporte verás un recordatorio en el banner verde.
+        </div>
+
+        <div style="background:rgba(59,130,246,0.08);border-left:3px solid var(--blue);padding:10px 12px;margin-top:8px;font-size:12px;border-radius:4px">
+          <strong>Si una factura no tiene foto en Drive:</strong> la app aborta el reporte con una advertencia roja listando las facturas faltantes con razón. El PDF de soporte documental NO se genera incompleto a propósito — pulsa "Reintentar generación" tras verificar que la foto exista en Drive.
+        </div>
       </div>
     </div>
 
-    <!-- Sección 10 -->
+    <!-- Sección 11 -->
     <div class="card" style="margin-bottom:14px" id="h-sincronizar">
-      <h3 style="color:var(--amber);margin-bottom:10px">10. Sincronizar al final del día</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">11. Sincronizar al final del día</h3>
       <div style="font-size:13px;line-height:1.6">
         Todas las facturas que capturas quedan primero en tu celular. Al final del día, con buena señal, las subes al sistema.
         <ol style="margin:10px 0 0 20px;padding:0">
@@ -1534,9 +1583,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 11 -->
+    <!-- Sección 12 -->
     <div class="card" style="margin-bottom:14px" id="h-offline">
-      <h3 style="color:var(--amber);margin-bottom:10px">11. Trabajar sin internet</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">12. Trabajar sin internet</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;color:var(--green);margin-bottom:6px">SÍ funciona sin internet:</div>
         <ul style="margin:0 0 14px 20px;padding:0">
@@ -1553,12 +1602,18 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Sección 12 -->
+    <!-- Sección 13 -->
     <div class="card" style="margin-bottom:14px" id="h-problemas">
-      <h3 style="color:var(--amber);margin-bottom:10px">12. Problemas comunes</h3>
+      <h3 style="color:var(--amber);margin-bottom:10px">13. Problemas comunes</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;margin-bottom:4px">La app me pide iniciar sesión otra vez</div>
-        <div style="margin-bottom:12px;color:var(--text2)">Normal por seguridad. Toca "Conectar con Google" y selecciona tu correo. No pierdes nada.</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Pasa cuando expira el acceso (típicamente cada 7 días en iPhone, o si revocas permisos manualmente). Aparece la pantalla "Sesión expirada" con tu email pre-llenado. Toca <strong>"Reconectar con Google"</strong> — un solo toque, sin selector de cuentas — y vuelves a donde estabas. NO pierdes datos ni configuración.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">El reporte se queda generando indefinido (iPhone)</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Pasa cuando intentas generar un segundo reporte sin cerrar la app entre uno y otro. iOS satura la memoria interna del navegador. <strong>Solución:</strong> toca "✕ Cancelar generación" en el overlay, cierra la app por completo (selector de apps → desliza la app hacia arriba), reabre y reintenta. El reporte sale en segundos.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">Inviti a alguien y aparece "El Sheet NO se compartió automáticamente"</div>
+        <div style="margin-bottom:12px;color:var(--text2)">El usuario sí quedó creado en USUARIOS pero el endpoint de Apps Script falló al darle acceso al Sheet. Sin acceso al Sheet, el invitado verá "Sin obras". <strong>Solución:</strong> sigue las instrucciones del modal — abre el Sheet, click "Compartir" arriba a la derecha, pega el email con permiso Editor, listo.</div>
 
         <div style="font-weight:600;margin-bottom:4px">Lee mal los datos de la factura</div>
         <div style="margin-bottom:12px;color:var(--text2)">Corrígelos tú mismo antes de guardar. Si pasa seguido, mejora la luz y toma la foto de nuevo.</div>
@@ -1591,7 +1646,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
     <!-- Sección 13 -->
     <div class="card" style="margin-bottom:14px;border:1.5px solid var(--amber)" id="h-reglas">
-      <h3 style="color:var(--amber);margin-bottom:12px">13. Las 5 reglas de oro</h3>
+      <h3 style="color:var(--amber);margin-bottom:12px">14. Las 5 reglas de oro</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="padding:8px 0;border-bottom:1px solid var(--border)">
           <div style="font-weight:600">1. Siempre revisa los datos antes de guardar</div>
@@ -1617,7 +1672,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0127</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0128</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1633,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0127';
+const APP_VERSION = '0128';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7380,17 +7435,20 @@ async function generarPDFFotos(params){
     overlay.remove();
     _pdfLog(`=== FIN OK · total t=${Date.now()-window._pdfTraceStart}ms ===`);
 
-    // 8. Banner de éxito.
+    // 8. Banner de éxito + nota sobre limitación iPhone PWA con reportes consecutivos.
     banner.style.cssText = 'background:rgba(34,197,94,0.12);border:1px solid var(--green);border-radius:var(--r);padding:14px;margin-top:14px;text-align:center';
     banner.innerHTML = `
       <div style="font-size:14px;font-weight:600;color:var(--green);margin-bottom:4px">✓ PDF de soporte listo</div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${fotosOk} foto(s) incluida(s)</div>
-      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:10px">
         <a class="btn btn-green" style="padding:10px;font-size:12px;text-decoration:none" href="${driveUrl}" target="_blank" rel="noopener">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           Abrir PDF con fotos
         </a>
         <button class="btn" style="padding:10px;font-size:12px" onclick="copiarLogPDF()">📋 Copiar log diagnóstico</button>
+      </div>
+      <div style="background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.4);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--text);text-align:left;line-height:1.5">
+        💡 <strong>Si vas a generar otro reporte ahora en iPhone:</strong> cierra y reabre la app primero (deslizar hacia arriba en el selector de apps). Es una limitación de iOS — la memoria se acumula entre reportes y el siguiente puede atascarse.
       </div>
     `;
   } catch(e){
