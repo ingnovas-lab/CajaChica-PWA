@@ -1617,7 +1617,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0122</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0123</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1633,7 +1633,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0122';
+const APP_VERSION = '0123';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1655,6 +1655,7 @@ const LS = {
   LAST_REPORTE: 'cc_last_reporte', // último NO_REPORTE usado, para auto-llenar el siguiente registro
   PENDING_USER_CONFIG_SAVE: 'cc_pending_user_config_save', // flag: hay cambios de config pendientes de subir a Drive
   REPORTE_TIPO: 'cc_reporte_tipo', // 'ejecutivo' | 'contabilidad' — última selección del tipo de informe
+  SESSION_ID: 'cc_session_id',     // v.0123: UUID retornado por Apps Script en exchange_code, requerido para refresh_access_token
 };
 
 // Email del SUPER_ADMIN (pasaporte universal, crea y ve todas las empresas)
@@ -1950,6 +1951,75 @@ async function copiarLogAuth(){
 // Estado del flujo de re-auth bloqueante
 let _reconnectFromPage = null;
 
+// v.0123: helpers para hablar con el endpoint OAuth proxy del Apps Script.
+// Apps Script v.0075+ expone `exchange_code` y `refresh_access_token` que
+// permiten manejar refresh tokens server-side (sin afectar por ITP de iOS PWA).
+//
+// _appsScriptOAuthExchange(code): llamado tras `initCodeClient` con un code
+//   recién emitido por Google. Apps Script intercambia, guarda refresh_token,
+//   retorna {access_token, expires_in, session_id, email}. La PWA guarda en LS.
+//
+// _appsScriptOAuthRefresh(email, sessionId): llamado para renovar el access
+//   token. Apps Script lee el refresh_token guardado bajo email y lo intercambia.
+//   Retorna {access_token, expires_in} o {error: 'reauth_required', ...}.
+//
+// Ambos throw error si la red falla, el Apps Script no responde, o la URL no
+// está configurada. El caller debe atrapar y caer al flujo viejo (silentRefresh
+// directo a Google) como fallback robusto.
+async function _appsScriptOAuthExchange(code){
+  const url = getActiveScriptUrl();
+  if(!url) throw new Error('Apps Script URL no configurada');
+  _authLog(`appsScript: POST exchange_code (code.length=${(code||'').length})`);
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: 'exchange_code', code}),
+    redirect: 'follow'
+  });
+  if(!r.ok) throw new Error('Apps Script HTTP ' + r.status);
+  const data = await r.json();
+  if(data.error){
+    // Si Apps Script viejo (v.0073 o anterior) responde "Acción desconocida",
+    // el caller puede caer al flow viejo de tokenClient como fallback.
+    if(/Acción desconocida/i.test(data.error)) throw new Error('APPS_SCRIPT_OUTDATED');
+    throw new Error(data.error);
+  }
+  if(!data.access_token || !data.session_id || !data.email){
+    throw new Error('Apps Script respondió incompleto: ' + JSON.stringify(data));
+  }
+  _authLog(`appsScript: exchange_code OK email=${data.email} expires_in=${data.expires_in}s`);
+  return data;
+}
+
+async function _appsScriptOAuthRefresh(email, sessionId){
+  const url = getActiveScriptUrl();
+  if(!url) throw new Error('Apps Script URL no configurada');
+  if(!email) throw new Error('email requerido para refresh');
+  if(!sessionId) throw new Error('session_id requerido para refresh');
+  _authLog(`appsScript: POST refresh_access_token email=${email}`);
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: 'refresh_access_token', email, session_id: sessionId}),
+    redirect: 'follow'
+  });
+  if(!r.ok) throw new Error('Apps Script HTTP ' + r.status);
+  const data = await r.json();
+  if(data.error){
+    if(/Acción desconocida/i.test(data.error)) throw new Error('APPS_SCRIPT_OUTDATED');
+    if(data.error === 'reauth_required'){
+      _authLog(`appsScript: reauth_required (${data.reason || 'sin razón'})`);
+      return {reauth: true, reason: data.reason || ''};
+    }
+    throw new Error(data.error);
+  }
+  if(!data.access_token){
+    throw new Error('Apps Script respondió sin access_token: ' + JSON.stringify(data));
+  }
+  _authLog(`appsScript: refresh_access_token OK expires_in=${data.expires_in}s`);
+  return data;
+}
+
 function getToken(){
   const s = localStorage.getItem(LS.TOKEN);
   if(!s) return null;
@@ -1979,10 +2049,50 @@ async function silentRefresh(){
 
   refreshingPromise = (async () => {
     try {
-      if(!window.google){ _authLog('silentRefresh: ABORT window.google no cargado'); return null; }
       const email = localStorage.getItem(LS.EMAIL);
       if(!email){ _authLog('silentRefresh: ABORT no hay LS.EMAIL'); return null; }
       _authLog('silentRefresh: iniciando', {email, standalone: window.matchMedia('(display-mode: standalone)').matches});
+
+      // v.0123: si tenemos session_id (de un exchange_code previo), pedir
+      // refresh al Apps Script. Esto NO falla por ITP en iOS PWA porque el
+      // refresh_token vive server-side. Si el Apps Script no responde o no
+      // tiene endpoint nuevo (APPS_SCRIPT_OUTDATED), caemos al flow viejo de
+      // initTokenClient como fallback para no romper a usuarios existentes.
+      const sessionId = localStorage.getItem(LS.SESSION_ID);
+      if(sessionId){
+        try {
+          const data = await _appsScriptOAuthRefresh(email, sessionId);
+          if(data.reauth){
+            _authLog(`silentRefresh: Apps Script dice reauth_required (${data.reason})`);
+            // Limpiar session_id local — está invalidado
+            localStorage.removeItem(LS.SESSION_ID);
+            return null;
+          }
+          if(data.access_token){
+            localStorage.setItem(LS.TOKEN, JSON.stringify({
+              access_token: data.access_token,
+              expires_at: Date.now() + ((data.expires_in || 3600) - 60) * 1000
+            }));
+            _authLog('silentRefresh: OK via Apps Script');
+            return data.access_token;
+          }
+        } catch(e){
+          if(e.message === 'APPS_SCRIPT_OUTDATED'){
+            _authLog('silentRefresh: Apps Script viejo (sin endpoint refresh_access_token), cayendo a flow viejo');
+          } else {
+            _authLog(`silentRefresh: error con Apps Script: ${e.message} — cayendo a flow viejo`);
+          }
+          // Continúa al flow viejo de Google directo
+        }
+      } else {
+        _authLog('silentRefresh: no hay session_id en LS — usando flow viejo de Google directo');
+      }
+
+      // Fallback (o flujo viejo si la PWA no ha hecho exchange aún): pedir
+      // a Google directamente con prompt: ''. Falla en iOS PWA standalone por
+      // ITP — pero al menos cubre escenarios donde el Apps Script no está
+      // configurado o cuando v.0123 todavía no hizo el primer exchange.
+      if(!window.google){ _authLog('silentRefresh: ABORT window.google no cargado'); return null; }
 
       const t0 = Date.now();
       return await new Promise((resolve) => {
@@ -2115,109 +2225,159 @@ function initGoogleAuth(){
     return;
   }
 
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: OAUTH_CLIENT_ID,
-    scope: OAUTH_SCOPES,
-    callback: async (resp) => {
-      if(resp.error){ toast('Error OAuth: '+resp.error, 'err'); return; }
-      localStorage.setItem(LS.TOKEN, JSON.stringify({
-        access_token: resp.access_token,
-        expires_at: Date.now() + (resp.expires_in - 60) * 1000
-      }));
-      // Check de versión silencioso (v.0093) — relogin es buen momento para detectar update.
-      _checkForUpdate();
-      // Obtener email del usuario
+  // v.0123: handler común para procesar el access_token (de cualquier flow).
+  // Llamado tras `initCodeClient` (vía Apps Script) o tras `initTokenClient`
+  // (fallback). Centraliza el guardado en LS y la sincronización con Drive.
+  const _onAuthSuccess = async (accessToken, emailFromExchange, nameFromExchange) => {
+    _checkForUpdate();
+    let email = emailFromExchange || '';
+    let name = nameFromExchange || '';
+    // Si Apps Script no nos dio email (flow legacy), pedirlo a userinfo
+    if(!email){
       try {
         const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: {'Authorization': 'Bearer ' + resp.access_token}
+          headers: {'Authorization': 'Bearer ' + accessToken}
         });
         const info = await r.json();
-        localStorage.setItem(LS.EMAIL, info.email);
-        // info.name viene cuando el scope userinfo.profile fue otorgado.
-        // Si no, dejamos en blanco — refreshHome cae al email como fallback.
-        if(info.name) localStorage.setItem(LS.NAME, info.name);
-        document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
-        document.getElementById('gauth-status').style.color = 'var(--green)';
+        email = info.email || '';
+        name = info.name || '';
+      } catch(e){ _authLog(`initGoogleAuth: userinfo fallback error: ${e.message}`); }
+    }
+    if(email) localStorage.setItem(LS.EMAIL, email);
+    if(name) localStorage.setItem(LS.NAME, name);
+    document.getElementById('gauth-status').textContent = '✓ Conectado: ' + (email || '(email pendiente)');
+    document.getElementById('gauth-status').style.color = 'var(--green)';
 
-        // Si es SUPER_ADMIN, intentar sync desde Drive (trae empresas + Gemini key automáticamente)
-        if(isSuperAdmin()){
-          document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
-          try {
-            const synced = await syncFromAdminIndex();
-            if(synced && synced.length > 0){
-              document.getElementById('gauth-status').textContent = `✓ Conectado: ${info.email} · ${synced.length} empresa(s) sincronizadas`;
-              // Actualizar UI indicando que ya tiene Gemini y empresa
-              const geminiStatus = document.getElementById('gemini-status');
-              if(geminiStatus && localStorage.getItem(LS.GEMINI)){
-                geminiStatus.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada desde Drive</span>';
-              }
-              const ssidStatus = document.getElementById('ssid-status');
-              if(ssidStatus){
-                ssidStatus.innerHTML = `<span style="color:var(--green)">✓ ${synced.length} empresa(s) disponibles</span>`;
-              }
-              // Activar la primera
-              if(!getCurrentCompany()){
-                setCurrentCompany(synced[0].nombre);
-              }
-            } else {
-              document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
-            }
-          } catch(e){
-            console.warn('[login] Sync falló:', e.message);
-            document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
+    // Sincronizar con Drive (admin index o user config) — lógica original
+    if(isSuperAdmin()){
+      document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
+      try {
+        const synced = await syncFromAdminIndex();
+        if(synced && synced.length > 0){
+          document.getElementById('gauth-status').textContent = `✓ Conectado: ${email} · ${synced.length} empresa(s) sincronizadas`;
+          const geminiStatus = document.getElementById('gemini-status');
+          if(geminiStatus && localStorage.getItem(LS.GEMINI)){
+            geminiStatus.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada desde Drive</span>';
           }
+          const ssidStatus = document.getElementById('ssid-status');
+          if(ssidStatus){
+            ssidStatus.innerHTML = `<span style="color:var(--green)">✓ ${synced.length} empresa(s) disponibles</span>`;
+          }
+          if(!getCurrentCompany()){ setCurrentCompany(synced[0].nombre); }
         } else {
-          // Usuario regular: sincronizar con su User Config personal
-          // Caso 1: hay pendiente de guardar (acaba de usar link de invitación)
-          //   → guardar configuración actual al User Config
-          // Caso 2: no hay pendiente, pero puede haber User Config existente
-          //   → leer configuración de Drive y aplicar
-          document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
-          try {
-            const pending = localStorage.getItem(LS.PENDING_USER_CONFIG_SAVE) === '1';
-
-            if(pending){
-              // Guardar configuración actual al User Config
-              const gemini = localStorage.getItem(LS.GEMINI) || '';
-              const current = getCurrentCompany();
-              const toSave = {GEMINI_KEY: gemini};
-              if(current){
-                toSave.EMPRESA_NOMBRE = current.nombre;
-                toSave.EMPRESA_SHEET_ID = current.sheetId;
-                toSave.EMPRESA_SCRIPT_URL = current.scriptUrl || '';
-                toSave.EMPRESA_CREATED_AT = current.createdAt || new Date().toISOString();
-              }
-              await saveToUserConfig(toSave);
-              localStorage.removeItem(LS.PENDING_USER_CONFIG_SAVE);
-              document.getElementById('gauth-status').textContent = `✓ Conectado: ${info.email} · Configuración guardada en Drive`;
-            } else {
-              // Intentar leer User Config existente
-              const cfg = await syncFromUserConfig();
-              if(cfg && cfg.EMPRESA_NOMBRE){
-                document.getElementById('gauth-status').textContent = `✓ Conectado: ${info.email} · ${cfg.EMPRESA_NOMBRE}`;
-                const geminiStatus = document.getElementById('gemini-status');
-                if(geminiStatus && localStorage.getItem(LS.GEMINI)){
-                  geminiStatus.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada desde Drive</span>';
-                }
-                const ssidStatus = document.getElementById('ssid-status');
-                if(ssidStatus){
-                  ssidStatus.innerHTML = '<span style="color:var(--green)">✓ Empresa sincronizada desde Drive</span>';
-                }
-              } else {
-                document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
-              }
+          document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
+        }
+      } catch(e){
+        console.warn('[login] Sync admin index falló:', e.message);
+        document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
+      }
+    } else {
+      document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
+      try {
+        const pending = localStorage.getItem(LS.PENDING_USER_CONFIG_SAVE) === '1';
+        if(pending){
+          const gemini = localStorage.getItem(LS.GEMINI) || '';
+          const current = getCurrentCompany();
+          const toSave = {GEMINI_KEY: gemini};
+          if(current){
+            toSave.EMPRESA_NOMBRE = current.nombre;
+            toSave.EMPRESA_SHEET_ID = current.sheetId;
+            toSave.EMPRESA_SCRIPT_URL = current.scriptUrl || '';
+            toSave.EMPRESA_CREATED_AT = current.createdAt || new Date().toISOString();
+          }
+          await saveToUserConfig(toSave);
+          localStorage.removeItem(LS.PENDING_USER_CONFIG_SAVE);
+          document.getElementById('gauth-status').textContent = `✓ Conectado: ${email} · Configuración guardada en Drive`;
+        } else {
+          const cfg = await syncFromUserConfig();
+          if(cfg && cfg.EMPRESA_NOMBRE){
+            document.getElementById('gauth-status').textContent = `✓ Conectado: ${email} · ${cfg.EMPRESA_NOMBRE}`;
+            const geminiStatus = document.getElementById('gemini-status');
+            if(geminiStatus && localStorage.getItem(LS.GEMINI)){
+              geminiStatus.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada desde Drive</span>';
             }
-          } catch(e){
-            console.warn('[login] User Config sync falló:', e.message);
-            document.getElementById('gauth-status').textContent = '✓ Conectado: ' + info.email;
+            const ssidStatus = document.getElementById('ssid-status');
+            if(ssidStatus){
+              ssidStatus.innerHTML = '<span style="color:var(--green)">✓ Empresa sincronizada desde Drive</span>';
+            }
+          } else {
+            document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
           }
         }
-
-        checkSetupReady();
-      } catch(e) { toast('No se pudo obtener email', 'err'); }
+      } catch(e){
+        console.warn('[login] User Config sync falló:', e.message);
+        document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
+      }
     }
-  });
-  tokenClient.requestAccessToken({prompt: 'consent'});
+    checkSetupReady();
+  };
+
+  // v.0123: intentar primero el flow nuevo (initCodeClient → Apps Script
+  // exchange → refresh_token guardado server-side). Si falla por cualquier
+  // razón (Apps Script no configurado, no actualizado, error de red), caer
+  // al flow viejo (initTokenClient).
+  const tryNewFlow = async () => {
+    if(!getActiveScriptUrl()){
+      _authLog('initGoogleAuth: no hay Apps Script URL — saltando al flow viejo');
+      return false;
+    }
+    return await new Promise((resolve) => {
+      const codeClient = google.accounts.oauth2.initCodeClient({
+        client_id: OAUTH_CLIENT_ID,
+        scope: OAUTH_SCOPES,
+        ux_mode: 'popup',
+        callback: async (resp) => {
+          if(resp.error || !resp.code){
+            _authLog(`initGoogleAuth (codeClient): error=${resp.error || 'no_code'}`);
+            resolve(false);
+            return;
+          }
+          try {
+            const data = await _appsScriptOAuthExchange(resp.code);
+            localStorage.setItem(LS.TOKEN, JSON.stringify({
+              access_token: data.access_token,
+              expires_at: Date.now() + ((data.expires_in || 3600) - 60) * 1000
+            }));
+            localStorage.setItem(LS.SESSION_ID, data.session_id);
+            await _onAuthSuccess(data.access_token, data.email, '');
+            _authLog('initGoogleAuth: flow NUEVO completado OK');
+            resolve(true);
+          } catch(e){
+            _authLog(`initGoogleAuth: exchange con Apps Script falló: ${e.message}`);
+            toast('Error de exchange: ' + e.message, 'err');
+            resolve(false);
+          }
+        },
+        error_callback: (err) => {
+          _authLog(`initGoogleAuth (codeClient) error_callback: ${err && err.type}`);
+          resolve(false);
+        }
+      });
+      codeClient.requestCode();
+    });
+  };
+
+  // Fallback al flow viejo de tokenClient (sin refresh tokens).
+  const useLegacyFlow = () => {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: OAUTH_CLIENT_ID,
+      scope: OAUTH_SCOPES,
+      callback: async (resp) => {
+        if(resp.error){ toast('Error OAuth: '+resp.error, 'err'); return; }
+        localStorage.setItem(LS.TOKEN, JSON.stringify({
+          access_token: resp.access_token,
+          expires_at: Date.now() + (resp.expires_in - 60) * 1000
+        }));
+        // En flow legacy NO tenemos session_id — silentRefresh va a usar Google directo.
+        localStorage.removeItem(LS.SESSION_ID);
+        await _onAuthSuccess(resp.access_token, '', '');
+      }
+    });
+    tokenClient.requestAccessToken({prompt: 'consent'});
+  };
+
+  // Ejecutar: intentar flow nuevo, si no funciona caer al viejo
+  tryNewFlow().then(ok => { if(!ok) useLegacyFlow(); });
 }
 
 // Reingresar con Google cuando la sesión expiró (sin perder configuración).
@@ -2238,37 +2398,85 @@ function doReauthFromUI(){
   if(statusEl) statusEl.innerHTML = '<span style="color:var(--blue)">Esperando confirmación de Google…</span>';
   _authLog(`doReauthFromUI: iniciando con hint=${email || '(none)'}`);
 
-  const client = google.accounts.oauth2.initTokenClient({
-    client_id: OAUTH_CLIENT_ID,
-    scope: OAUTH_SCOPES,
-    hint: email || undefined,
-    callback: async (resp) => {
-      if(resp.error || !resp.access_token){
-        _authLog(`doReauthFromUI: FAIL error=${resp.error || 'no_access_token'}`);
-        if(btn){ btn.disabled = false; btn.textContent = 'Reconectar con Google'; }
-        if(statusEl) statusEl.innerHTML = '<span style="color:var(--red)">No se pudo reconectar. Toca "Más opciones" abajo para diagnóstico.</span>';
-        return;
-      }
-      localStorage.setItem(LS.TOKEN, JSON.stringify({
-        access_token: resp.access_token,
-        expires_at: Date.now() + (resp.expires_in - 60) * 1000
-      }));
-      _authLog(`doReauthFromUI: OK expires_in=${resp.expires_in}s`);
-      if(btn){ btn.disabled = false; btn.textContent = 'Reconectar con Google'; }
-      if(statusEl) statusEl.innerHTML = '<span style="color:var(--green)">✓ Sesión renovada</span>';
-      toast('Sesión renovada', 'ok');
-      // Recargar datos críticos para refrescar la UI
-      try { await loadMasters(); } catch(e){ console.warn('loadMasters tras reauth:', e); }
-      try { refreshBalance(true); } catch(e){ console.warn('refreshBalance tras reauth:', e); }
-      // Volver a la página donde estaba el usuario antes del re-auth
-      const back = _reconnectFromPage || 'pg-home';
-      _reconnectFromPage = null;
-      show(back);
+  // v.0123: helper común tras éxito de cualquier flow (nuevo o legacy)
+  const onSuccess = async (accessToken, expiresIn) => {
+    localStorage.setItem(LS.TOKEN, JSON.stringify({
+      access_token: accessToken,
+      expires_at: Date.now() + ((expiresIn || 3600) - 60) * 1000
+    }));
+    if(btn){ btn.disabled = false; btn.textContent = 'Reconectar con Google'; }
+    if(statusEl) statusEl.innerHTML = '<span style="color:var(--green)">✓ Sesión renovada</span>';
+    toast('Sesión renovada', 'ok');
+    try { await loadMasters(); } catch(e){ console.warn('loadMasters tras reauth:', e); }
+    try { refreshBalance(true); } catch(e){ console.warn('refreshBalance tras reauth:', e); }
+    const back = _reconnectFromPage || 'pg-home';
+    _reconnectFromPage = null;
+    show(back);
+  };
+
+  const onFail = (reason) => {
+    _authLog(`doReauthFromUI: FAIL ${reason}`);
+    if(btn){ btn.disabled = false; btn.textContent = 'Reconectar con Google'; }
+    if(statusEl) statusEl.innerHTML = '<span style="color:var(--red)">No se pudo reconectar. Toca "Más opciones" abajo para diagnóstico.</span>';
+  };
+
+  // Intentar primero el flow nuevo (initCodeClient → exchange via Apps Script).
+  // Si Apps Script URL no está configurada o falla, caer al flow viejo.
+  const tryNewFlow = () => {
+    if(!getActiveScriptUrl()){
+      _authLog('doReauthFromUI: no hay Apps Script URL — flow viejo');
+      return Promise.resolve(false);
     }
-  });
-  // prompt: 'consent' es seguro porque ya estamos en respuesta a un click
-  // del usuario. Garantiza que Google muestre algo (no popup vacío).
-  client.requestAccessToken({prompt: 'consent'});
+    return new Promise((resolve) => {
+      const codeClient = google.accounts.oauth2.initCodeClient({
+        client_id: OAUTH_CLIENT_ID,
+        scope: OAUTH_SCOPES,
+        ux_mode: 'popup',
+        hint: email || undefined,
+        callback: async (resp) => {
+          if(resp.error || !resp.code){
+            _authLog(`doReauthFromUI (codeClient): error=${resp.error || 'no_code'}`);
+            resolve(false);
+            return;
+          }
+          try {
+            const data = await _appsScriptOAuthExchange(resp.code);
+            localStorage.setItem(LS.SESSION_ID, data.session_id);
+            if(data.email) localStorage.setItem(LS.EMAIL, data.email);
+            await onSuccess(data.access_token, data.expires_in);
+            resolve(true);
+          } catch(e){
+            _authLog(`doReauthFromUI: exchange falló: ${e.message}`);
+            onFail(`exchange con Apps Script: ${e.message}`);
+            resolve(true); // ya manejamos el error en onFail, no caer al legacy
+          }
+        },
+        error_callback: (err) => { resolve(false); }
+      });
+      codeClient.requestCode();
+    });
+  };
+
+  // Fallback al flow viejo (initTokenClient sin refresh).
+  const useLegacyFlow = () => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: OAUTH_CLIENT_ID,
+      scope: OAUTH_SCOPES,
+      hint: email || undefined,
+      callback: async (resp) => {
+        if(resp.error || !resp.access_token){
+          onFail(resp.error || 'no_access_token');
+          return;
+        }
+        // Sin Apps Script no hay session_id — limpiar para no usar refresh proxy roto
+        localStorage.removeItem(LS.SESSION_ID);
+        await onSuccess(resp.access_token, resp.expires_in);
+      }
+    });
+    client.requestAccessToken({prompt: 'consent'});
+  };
+
+  tryNewFlow().then(handled => { if(!handled) useLegacyFlow(); });
 }
 
 // Cambiar de cuenta: sin hint, abre el selector completo. Útil si el email
@@ -2276,40 +2484,77 @@ function doReauthFromUI(){
 function doReauthChangeAccount(){
   if(!window.google){ toast('Recarga la app', 'err'); return; }
   _authLog('doReauthChangeAccount: abriendo selector sin hint');
-  const client = google.accounts.oauth2.initTokenClient({
-    client_id: OAUTH_CLIENT_ID,
-    scope: OAUTH_SCOPES,
-    callback: async (resp) => {
-      if(resp.error || !resp.access_token){
-        _authLog(`doReauthChangeAccount: FAIL error=${resp.error || 'no_access_token'}`);
-        toast('No se pudo cambiar de cuenta', 'err');
-        return;
+
+  const tryNewFlow = () => {
+    if(!getActiveScriptUrl()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const codeClient = google.accounts.oauth2.initCodeClient({
+        client_id: OAUTH_CLIENT_ID,
+        scope: OAUTH_SCOPES,
+        ux_mode: 'popup',
+        callback: async (resp) => {
+          if(resp.error || !resp.code){ resolve(false); return; }
+          try {
+            const data = await _appsScriptOAuthExchange(resp.code);
+            localStorage.setItem(LS.TOKEN, JSON.stringify({
+              access_token: data.access_token,
+              expires_at: Date.now() + ((data.expires_in || 3600) - 60) * 1000
+            }));
+            localStorage.setItem(LS.SESSION_ID, data.session_id);
+            if(data.email) localStorage.setItem(LS.EMAIL, data.email);
+            _authLog(`doReauthChangeAccount: OK nuevo email=${data.email}`);
+            toast('Cuenta cambiada', 'ok');
+            location.reload();
+            resolve(true);
+          } catch(e){
+            _authLog(`doReauthChangeAccount: exchange falló: ${e.message}`);
+            toast('Error: ' + e.message, 'err');
+            resolve(true);
+          }
+        },
+        error_callback: () => { resolve(false); }
+      });
+      codeClient.requestCode();
+    });
+  };
+
+  const useLegacyFlow = () => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: OAUTH_CLIENT_ID,
+      scope: OAUTH_SCOPES,
+      callback: async (resp) => {
+        if(resp.error || !resp.access_token){
+          _authLog(`doReauthChangeAccount (legacy): FAIL ${resp.error || 'no_access_token'}`);
+          toast('No se pudo cambiar de cuenta', 'err');
+          return;
+        }
+        localStorage.setItem(LS.TOKEN, JSON.stringify({
+          access_token: resp.access_token,
+          expires_at: Date.now() + (resp.expires_in - 60) * 1000
+        }));
+        localStorage.removeItem(LS.SESSION_ID);
+        try {
+          const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: {'Authorization': 'Bearer ' + resp.access_token}
+          });
+          const info = await r.json();
+          if(info.email) localStorage.setItem(LS.EMAIL, info.email);
+          if(info.name) localStorage.setItem(LS.NAME, info.name);
+        } catch(e){ _authLog('doReauthChangeAccount (legacy): userinfo error: ' + e.message); }
+        toast('Cuenta cambiada', 'ok');
+        location.reload();
       }
-      localStorage.setItem(LS.TOKEN, JSON.stringify({
-        access_token: resp.access_token,
-        expires_at: Date.now() + (resp.expires_in - 60) * 1000
-      }));
-      // Recuperar email de la cuenta nueva
-      try {
-        const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: {'Authorization': 'Bearer ' + resp.access_token}
-        });
-        const info = await r.json();
-        if(info.email) localStorage.setItem(LS.EMAIL, info.email);
-        if(info.name) localStorage.setItem(LS.NAME, info.name);
-      } catch(e){ _authLog('doReauthChangeAccount: userinfo error: ' + e.message); }
-      _authLog(`doReauthChangeAccount: OK nuevo email=${localStorage.getItem(LS.EMAIL)}`);
-      toast('Cuenta cambiada', 'ok');
-      // Recarga forzada para que toda la app re-lea con la cuenta nueva
-      location.reload();
-    }
-  });
-  client.requestAccessToken({prompt: 'select_account'});
+    });
+    client.requestAccessToken({prompt: 'select_account'});
+  };
+
+  tryNewFlow().then(handled => { if(!handled) useLegacyFlow(); });
 }
 
 function logoutGoogle(){
   localStorage.removeItem(LS.TOKEN);
   localStorage.removeItem(LS.EMAIL);
+  localStorage.removeItem(LS.SESSION_ID); // v.0123: limpiar session del proxy OAuth
   location.reload();
 }
 
