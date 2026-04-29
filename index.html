@@ -1617,7 +1617,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0126</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0127</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1633,7 +1633,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0126';
+const APP_VERSION = '0127';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -6793,15 +6793,43 @@ async function _fetchFotoAsDataURI(urlFactura, token){
     }
   };
 
-  // Estrategia 1: lh3 con auth
+  // v.0127: estrategias reordenadas. Antes lh3+auth iba primero, pero los logs
+  // confirmaron que en Safari Mac todas las llamadas con OAuth (lh3+auth y
+  // driveAPI) fallan con "Load failed" / 404 (probablemente cookies third-party
+  // de Drive o algo del exchange OAuth nuevo). Solo lh3-noauth (sin auth, vía
+  // anyone-with-link CDN) funciona consistentemente en ambas plataformas.
+  // Ponerla primero ahorra ~150ms × N fotos en Safari Mac. En iPhone PWA donde
+  // lh3+auth funciona, el cambio es transparente (lh3-noauth funciona igual).
+  // Las fotos consolidadas con sharing anyone-with-link (Apps Script v.0072+)
+  // siempre cargan por esta vía. lh3+auth y driveAPI quedan como fallback para
+  // fotos no consolidadas (caso raro tras v.0104).
+
+  // Estrategia 1: lh3 sin auth (CDN público, requiere anyone-with-link).
+  // Funciona en Safari Mac y iPhone PWA — la más compatible.
   let t0 = Date.now();
   try {
+    _pdfLog(`fetchFoto[${fileIdShort}]: estrategia lh3-noauth start`);
+    const r = await fetchWithTimeout('https://lh3.googleusercontent.com/d/' + fileId + '=w1200');
+    if(r.ok){
+      const blob = await r.blob();
+      _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth status=${r.status} size=${blob.size}B en ${Date.now()-t0}ms`);
+      if(blob.size > 1000){
+        window._fetchFotoLog.push({fileId, strategy:'lh3-noauth', ok:true, status:r.status, size:blob.size});
+        const tConv = Date.now();
+        const uri = await _blobToDataURI(blob);
+        _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI en ${Date.now()-tConv}ms (resultado ${uri.length}B)`);
+        return uri;
+      }
+      _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth tinyblob (size=${blob.size}<1000), pasando a estrategia 2`);
+    } else _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth fail status=${r.status} en ${Date.now()-t0}ms`);
+  } catch(e){
+    _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth error: ${e.name === 'AbortError' ? 'timeout>25s' : e.message} en ${Date.now()-t0}ms`);
+  }
+
+  // Estrategia 2: lh3 con OAuth — fallback si la foto no es anyone-with-link.
+  t0 = Date.now();
+  try {
     _pdfLog(`fetchFoto[${fileIdShort}]: estrategia lh3+auth start`);
-    // v.0124: thumbnail size 2000→1200. Reduce ~50% el data URI sin pérdida
-    // visual notable (canvas final del PDF a scale 2 rara vez supera 1800px
-    // de ancho útil para fotos en fichas). 21 fotos × ~500KB = 10MB en
-    // memoria vs 21MB anterior — impacta directamente el cuelgue de
-    // html2canvas en iOS PWA con muchos comprobantes.
     const r = await fetchWithTimeout('https://lh3.googleusercontent.com/d/' + fileId + '=w1200', {
       headers: {'Authorization': 'Bearer ' + token}
     });
@@ -6815,13 +6843,13 @@ async function _fetchFotoAsDataURI(urlFactura, token){
         _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI en ${Date.now()-tConv}ms (resultado ${uri.length}B)`);
         return uri;
       }
-      _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth tinyblob (size=${blob.size}<1000), pasando a estrategia 2`);
+      _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth tinyblob (size=${blob.size}<1000), pasando a estrategia 3`);
     } else _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth fail status=${r.status} en ${Date.now()-t0}ms`);
   } catch(e){
     _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth error: ${e.name === 'AbortError' ? 'timeout>25s' : e.message} en ${Date.now()-t0}ms`);
   }
 
-  // Estrategia 2: Drive API con alt=media
+  // Estrategia 3: Drive API con alt=media — último fallback.
   t0 = Date.now();
   try {
     _pdfLog(`fetchFoto[${fileIdShort}]: estrategia driveAPI start`);
@@ -6838,31 +6866,10 @@ async function _fetchFotoAsDataURI(urlFactura, token){
         _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI en ${Date.now()-tConv}ms (resultado ${uri.length}B)`);
         return uri;
       }
-      _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI tinyblob (size=${blob.size}<1000), pasando a estrategia 3`);
+      _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI tinyblob (size=${blob.size}<1000)`);
     } else _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI fail status=${r.status} en ${Date.now()-t0}ms`);
   } catch(e){
     _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI error: ${e.name === 'AbortError' ? 'timeout>25s' : e.message} en ${Date.now()-t0}ms`);
-  }
-
-  // Estrategia 3: lh3 sin auth (requiere anyone-with-link)
-  t0 = Date.now();
-  try {
-    _pdfLog(`fetchFoto[${fileIdShort}]: estrategia lh3-noauth start`);
-    const r = await fetchWithTimeout('https://lh3.googleusercontent.com/d/' + fileId + '=w1200');
-    if(r.ok){
-      const blob = await r.blob();
-      _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth status=${r.status} size=${blob.size}B en ${Date.now()-t0}ms`);
-      if(blob.size > 1000){
-        window._fetchFotoLog.push({fileId, strategy:'lh3-noauth', ok:true, status:r.status, size:blob.size});
-        const tConv = Date.now();
-        const uri = await _blobToDataURI(blob);
-        _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI en ${Date.now()-tConv}ms (resultado ${uri.length}B)`);
-        return uri;
-      }
-      _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth tinyblob (size=${blob.size}<1000)`);
-    } else _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth fail status=${r.status} en ${Date.now()-t0}ms`);
-  } catch(e){
-    _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth error: ${e.name === 'AbortError' ? 'timeout>25s' : e.message} en ${Date.now()-t0}ms`);
   }
 
   _pdfLog(`fetchFoto[${fileIdShort}]: TODAS las estrategias fallaron`);
@@ -9308,10 +9315,37 @@ async function guardarInvitacion(){
       // Compartir automáticamente el Sheet con el nuevo usuario (vía Apps Script)
       // Esto evita tener que hacerlo manualmente después.
       const shareResult = await compartirSheetConUsuario(email);
+      let shareWarningShown = false;
       if(shareResult && shareResult.shared){
         console.log(`[invitar] Sheet compartido con ${email}`);
       } else if(shareResult && shareResult.error){
+        // v.0127: antes solo console.warn — el admin no se enteraba de que el
+        // share falló y el invitado quedaba sin acceso (hasta que reportara).
+        // Ahora mostramos modal visible al admin con instrucciones claras de
+        // cómo compartir manualmente el sheet. Issue #2 del handover original.
         console.warn(`[invitar] No se pudo compartir el Sheet: ${shareResult.error}`);
+        shareWarningShown = true;
+        const ssidDisplay = ssid ? `…${ssid.slice(-12)}` : '?';
+        showModal(`<div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <span style="font-size:24px">⚠️</span>
+            <strong style="color:var(--amber);font-size:15px">El usuario fue creado, pero el Sheet NO se compartió automáticamente</strong>
+          </div>
+          <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:12px">
+            <strong>${nombre}</strong> (<span style="font-family:var(--mono);font-size:11px">${email}</span>) ya está en USUARIOS, pero el endpoint de Apps Script falló al darle acceso al Sheet. Sin acceso al Sheet, el invitado verá <em>"Sin obras"</em> aunque le pases el link.
+          </div>
+          <div style="background:rgba(15,23,42,0.4);border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);line-height:1.6">
+            <strong style="color:var(--text)">Compártelo a mano (1 minuto):</strong><br>
+            1. Abre el Sheet de la empresa (Configuración → Abrir Sheet).<br>
+            2. Click <strong>Compartir</strong> arriba a la derecha.<br>
+            3. Pega <span style="font-family:var(--mono);font-size:11px;color:var(--amber)">${email}</span> con permiso <strong>Editor</strong>.<br>
+            4. Listo. El invitado puede usar el link que copies abajo.
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:14px">
+            <strong>Razón técnica:</strong> ${shareResult.error}
+          </div>
+          <button class="btn btn-amber" onclick="closeModal()" style="padding:12px;width:100%">Entendido — comparto a mano</button>
+        </div>`);
       }
 
       // Pequeño delay para dar tiempo a Google Sheets a propagar la escritura
