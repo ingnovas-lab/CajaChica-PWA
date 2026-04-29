@@ -419,8 +419,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 <!-- ========== PAGE: SELECT COMPANY (multi-empresa) ========== -->
 <div class="page" id="pg-select-company">
   <div class="topbar">
-    <div class="ibtn" onclick="exitToLogin()">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    <div class="ibtn" onclick="show('pg-home')" title="Regresar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="15 18 9 12 15 6"/></svg>
     </div>
     <div>
       <div class="topbar-title">Seleccionar empresa</div>
@@ -1256,7 +1256,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         ✉️ <a href="mailto:ingnovas@gmail.com" style="color:var(--amber);text-decoration:none;font-weight:600">ingnovas@gmail.com</a>
       </div>
       <button class="btn btn-blue" onclick="show('pg-help')" style="padding:8px;font-size:12px">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         Ver guía de uso
       </button>
     </div>
@@ -1672,7 +1671,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     </div>
 
     <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:20px;padding-bottom:20px;line-height:1.6">
-      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0128</span><br>
+      Control de Caja Chica · <span id="help-version" style="color:var(--text)">v.0129</span><br>
       <span style="color:var(--text2)">por Ing. Joel Novas</span>
     </div>
   </div>
@@ -1688,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0128';
+const APP_VERSION = '0129';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
