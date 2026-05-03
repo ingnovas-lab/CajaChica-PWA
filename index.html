@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0133';
+const APP_VERSION = '0134';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7690,28 +7690,99 @@ async function generarPDFFotos(params){
     const loteStr = (tipoInforme === 'contabilidad' && reportData.loteId) ? ' _ ' + reportData.loteId : '';
     const filename = `${prefix} _ ${obraLimpia}${numStr}${loteStr} _ ${fechaGenDot} _ ${desdeDot} - ${hastaDot}.pdf`;
 
+    // === Subir a Drive — RESUMABLE UPLOAD (v.0134) ===
+    // Antes (v.0133): single multipart fetch con Blob ~14MB. En Safari iOS la
+    // promise se cuelga sin resolver ni rechazar para archivos grandes (bug
+    // confirmado en log 2026-05-03 21:34, fetch quedó indefinido al subir 14.3MB).
+    // Ahora (v.0134): resumable upload de Drive API en chunks de 1MB con reintento
+    // por chunk. Cada chunk es chico → Safari no se cuelga; si un chunk falla
+    // (timeout, conexión cellular intermitente), reintentamos solo ese chunk
+    // sin perder el progreso anterior. PDF resultante 100% idéntico al anterior.
     const metadata = {name: filename, mimeType: 'application/pdf', parents: [reportesId]};
-    const boundary = '-------314159265358979323846';
-    const body = new Blob([
-      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
-      JSON.stringify(metadata),
-      `\r\n--${boundary}\r\nContent-Type: application/pdf\r\n\r\n`,
-      pdfBlob,
-      `\r\n--${boundary}--`
-    ]);
-    _pdfLog(`upload: enviando ${(pdfBlob.size/1024).toFixed(1)}KB a Drive como '${filename}'`);
+    _pdfLog(`upload: enviando ${(pdfBlob.size/1024).toFixed(1)}KB a Drive como '${filename}' (resumable, chunks 1MB)`);
     const tUp = Date.now();
-    const upRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+
+    // Paso 1: iniciar sesión resumable
+    _pdfLog('upload: paso 1 init session resumable');
+    const tInit = Date.now();
+    const initRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
       method: 'POST',
-      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}`},
-      body: body
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': 'application/pdf',
+        'X-Upload-Content-Length': String(pdfBlob.size)
+      },
+      body: JSON.stringify(metadata)
     });
-    if(!upRes.ok){
-      _pdfLog(`upload: ERROR status=${upRes.status} en ${Date.now()-tUp}ms`);
-      throw new Error('Upload Drive falló: ' + upRes.status);
+    if(!initRes.ok){
+      const errText = await initRes.text().catch(()=>('?'));
+      _pdfLog(`upload: init ERROR status=${initRes.status} en ${Date.now()-tInit}ms — ${errText.slice(0,200)}`);
+      throw new Error('Upload Drive init falló: ' + initRes.status);
     }
-    const upData = await upRes.json();
-    _pdfLog(`upload: OK fileId=${upData.id} en ${Date.now()-tUp}ms`);
+    const sessionUri = initRes.headers.get('Location');
+    if(!sessionUri){
+      _pdfLog(`upload: init OK pero falta header Location (CORS bloqueado?)`);
+      throw new Error('Upload Drive init: falta Location header');
+    }
+    _pdfLog(`upload: paso 1 init OK en ${Date.now()-tInit}ms, sessionUri len=${sessionUri.length}`);
+
+    // Paso 2: subir chunks de 1MB con reintento por chunk (3 intentos, backoff 1s/2s)
+    const CHUNK_SIZE = 1024 * 1024; // 1 MB (múltiplo de 256KB requerido por Drive)
+    const totalSize = pdfBlob.size;
+    const totalChunks = Math.ceil(totalSize / CHUNK_SIZE);
+    _pdfLog(`upload: paso 2 chunks ${totalChunks} × ${CHUNK_SIZE}B (último puede ser menor)`);
+    let upData = null;
+
+    for(let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++){
+      const start = chunkIdx * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, totalSize);
+      const chunkSize = end - start;
+      const chunk = pdfBlob.slice(start, end);
+      const pct = Math.floor((end / totalSize) * 100);
+      setStatus(`Subiendo a Drive… ${chunkIdx+1}/${totalChunks} (${pct}%)`);
+
+      let attempt = 0;
+      let success = false;
+      while(attempt < 3 && !success){
+        const tChunk = Date.now();
+        try {
+          const chunkRes = await fetch(sessionUri, {
+            method: 'PUT',
+            headers: {'Content-Range': `bytes ${start}-${end-1}/${totalSize}`},
+            body: chunk
+          });
+          if(chunkRes.status === 308){
+            // Chunk OK, esperando próximo (no es el último)
+            _pdfLog(`upload: chunk ${chunkIdx+1}/${totalChunks} (${chunkSize}B) OK 308 en ${Date.now()-tChunk}ms`);
+            success = true;
+          } else if(chunkRes.status === 200 || chunkRes.status === 201){
+            // Upload completo (debe ser el último chunk)
+            upData = await chunkRes.json();
+            _pdfLog(`upload: chunk ${chunkIdx+1}/${totalChunks} (${chunkSize}B) FINAL ${chunkRes.status} en ${Date.now()-tChunk}ms`);
+            success = true;
+          } else {
+            const errText = await chunkRes.text().catch(()=>('?'));
+            _pdfLog(`upload: chunk ${chunkIdx+1}/${totalChunks} ERROR status=${chunkRes.status} attempt=${attempt+1}/3 en ${Date.now()-tChunk}ms — ${errText.slice(0,150)}`);
+            attempt++;
+            if(attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+          }
+        } catch(e){
+          _pdfLog(`upload: chunk ${chunkIdx+1}/${totalChunks} EXCEPTION attempt=${attempt+1}/3 en ${Date.now()-tChunk}ms: ${e.message}`);
+          attempt++;
+          if(attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
+      }
+      if(!success){
+        throw new Error(`Upload Drive: chunk ${chunkIdx+1}/${totalChunks} falló tras 3 intentos`);
+      }
+    }
+
+    if(!upData || !upData.id){
+      _pdfLog(`upload: ERROR - no se recibió fileId al finalizar`);
+      throw new Error('Upload Drive: no se recibió fileId al finalizar');
+    }
+    _pdfLog(`upload: OK fileId=${upData.id} en ${Date.now()-tUp}ms (${totalChunks} chunks subidos)`);
 
     // Compartir con anyone-with-link (igual que Apps Script)
     try {
