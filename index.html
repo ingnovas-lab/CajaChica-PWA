@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0134';
+const APP_VERSION = '0135';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7740,7 +7740,7 @@ async function generarPDFFotos(params){
       const chunkSize = end - start;
       const chunk = pdfBlob.slice(start, end);
       const pct = Math.floor((end / totalSize) * 100);
-      setStatus(`Subiendo a Drive… ${chunkIdx+1}/${totalChunks} (${pct}%)`);
+      setStatus(`Subiendo a Drive… ${pct}%`);
 
       let attempt = 0;
       let success = false;
