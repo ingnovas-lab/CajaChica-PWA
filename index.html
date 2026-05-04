@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0136';
+const APP_VERSION = '0137';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7613,6 +7613,50 @@ async function generarPDFFotos(params){
       });
     }));
     _pdfLog(`imgs decode wait DONE en ${Date.now()-tImgs}ms`);
+
+    // === Canvasify v.0137: convertir <img> a <canvas> con la imagen ya pintada ===
+    // Por qué: html2canvas tiene un bug en Safari iOS donde no puede leer
+    // <img src="blob:..."> desde su iframe interno (clone document) y el render
+    // se cuelga indefinidamente (log 2026-05-04 17:39, página 1/18 sin DONE).
+    // Reemplazando los <img> por <canvas> ya pintados via drawImage, html2canvas
+    // ve nodos con bitmap estático y no necesita cargar URLs internamente.
+    // PDF resultante bit-a-bit idéntico (canvas pinta los mismos pixels que <img>).
+    // Costo: ~10-30ms por imagen (~700ms para 35 fotos, +3% del flow total).
+    const tCanvasify = Date.now();
+    let canvasified = 0;
+    let canvasifyErr = 0;
+    for(const img of allImgs){
+      if(!img.complete || !img.naturalWidth) continue;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.alt = img.alt || '';
+        if(img.className) canvas.className = img.className;
+        // Copiar estilos computados para que el canvas ocupe exactamente el mismo
+        // box visual que el <img> original (max-width, border, etc. del CSS .pdf-report
+        // .factura-photo-wrap img y .pdf-fiscal .ficha-photo img).
+        const cs = window.getComputedStyle(img);
+        canvas.style.maxWidth = cs.maxWidth;
+        canvas.style.maxHeight = cs.maxHeight;
+        canvas.style.width = cs.width;
+        canvas.style.height = cs.height;
+        canvas.style.border = cs.border;
+        canvas.style.borderRadius = cs.borderRadius;
+        canvas.style.objectFit = cs.objectFit; // ignorado por canvas pero no rompe
+        canvas.style.display = cs.display === 'inline' ? 'block' : cs.display;
+        // Pintar la imagen al canvas (drawImage lee del buffer interno del <img>,
+        // funciona con data:, blob: y http: URLs por igual).
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        img.parentNode.replaceChild(canvas, img);
+        canvasified++;
+      } catch(e){
+        canvasifyErr++;
+        _pdfLog(`canvasify: ERROR en una img: ${e.message}`);
+      }
+    }
+    _pdfLog(`canvasify: ${canvasified}/${allImgs.length} imgs → canvas en ${Date.now()-tCanvasify}ms${canvasifyErr ? ' (' + canvasifyErr + ' errores)' : ''}`);
+
     await new Promise(r => setTimeout(r, 250)); // margen extra para layout final
     _pdfLog(`pre-render layout settle DONE`);
 
