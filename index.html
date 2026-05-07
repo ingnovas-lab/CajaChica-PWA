@@ -1201,6 +1201,13 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div class="lbl">URL del Apps Script Web App</div>
         <input type="text" id="set-scripturl" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="none" autocomplete="off" style="font-family:var(--mono);font-size:11px">
       </div>
+      <label data-admin-only style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer">
+        <input type="checkbox" id="set-script-central" style="width:18px;height:18px;flex-shrink:0;margin-top:1px;accent-color:var(--amber)">
+        <div style="flex:1;font-size:12px;line-height:1.4">
+          <div style="color:var(--text);font-weight:600">Usar como Apps Script central</div>
+          <div style="color:var(--text2);font-size:11px;margin-top:2px">Empresas nuevas heredarán esta URL automáticamente — no tendrás que pegar Apps Script por empresa.</div>
+        </div>
+      </label>
       <div class="grid2" style="margin-top:8px">
         <button class="btn btn-amber" onclick="updateScriptUrl()" style="padding:10px;font-size:12px">Guardar URL</button>
         <button class="btn" onclick="probarScript()" style="padding:10px;font-size:12px">Probar conexión</button>
@@ -1687,7 +1694,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0145';
+const APP_VERSION = '0146';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1706,6 +1713,7 @@ const LS = {
   FOLDERS: 'cc_folders',
   COMPANIES: 'cc_companies',    // JSON array de empresas conocidas por la app
   CURRENT_COMPANY: 'cc_current_company', // código de empresa activa
+  CENTRAL_SCRIPT_URL: 'cc_central_script_url', // v.0146: URL del Apps Script central del admin (1 script para todas sus empresas)
   LAST_REPORTE: 'cc_last_reporte', // último NO_REPORTE usado, para auto-llenar el siguiente registro
   PENDING_USER_CONFIG_SAVE: 'cc_pending_user_config_save', // flag: hay cambios de config pendientes de subir a Drive
   REPORTE_TIPO: 'cc_reporte_tipo', // 'ejecutivo' | 'contabilidad' — última selección del tipo de informe
@@ -1865,10 +1873,49 @@ function getActiveSheetId(){
 }
 
 // Obtiene la URL del Apps Script de la empresa activa
-// Retorna null si no hay empresa activa o si no tiene script
+// v.0146: si la empresa no tiene scriptUrl propio, hace fallback a la URL
+// "central" del admin (un solo script para todas sus empresas — feature 2).
+// Retorna null si no hay ni propio ni central.
 function getActiveScriptUrl(){
   const c = getCurrentCompany();
-  return c ? (c.scriptUrl || null) : null;
+  return getEffectiveScriptUrl(c);
+}
+
+// v.0146: URL del Apps Script central del admin (1 script standalone que
+// atiende todas sus empresas vía openById(body.sheetId), introducido en
+// Apps Script v.0076). Vive en localStorage + sync a User Config Drive
+// para que el admin no tenga que pegarla en cada dispositivo.
+function getCentralScriptUrl(){
+  return localStorage.getItem(LS.CENTRAL_SCRIPT_URL) || null;
+}
+
+// v.0146: setea la URL central, guarda local + sync a User Config Drive
+// (background, no bloqueante). Si url es vacío/null, limpia el flag.
+async function setCentralScriptUrl(url){
+  const u = (url || '').trim();
+  if(u){
+    localStorage.setItem(LS.CENTRAL_SCRIPT_URL, u);
+  } else {
+    localStorage.removeItem(LS.CENTRAL_SCRIPT_URL);
+  }
+  // Persistir a Drive en background — el admin verá la URL central en sus
+  // otros dispositivos al hacer login (vía syncFromUserConfig).
+  if(getToken() && typeof saveToUserConfig === 'function'){
+    saveToUserConfig({SCRIPT_CENTRAL_URL: u || ''}).catch(e => {
+      console.warn('[setCentralScriptUrl] saveToUserConfig falló:', e.message);
+    });
+  }
+}
+
+// v.0146: URL "efectiva" del Apps Script para una empresa. Si la empresa
+// tiene scriptUrl propio (legacy o configurado manualmente), gana. Si no,
+// usa la URL central del admin. Es el helper que cualquier call al Apps
+// Script debe usar — `getActiveScriptUrl()` ya lo aplica vía la empresa
+// activa. Para llamadas dirigidas a otra empresa específica, pasarle la
+// empresa explícita.
+function getEffectiveScriptUrl(empresa){
+  if(empresa && empresa.scriptUrl) return empresa.scriptUrl;
+  return getCentralScriptUrl();
 }
 
 function toast(msg, type){
@@ -1901,6 +1948,16 @@ function show(id){
     document.getElementById('set-rol').textContent = masters.myRole || 'USUARIO';
     const scriptInput = document.getElementById('set-scripturl');
     if(scriptInput) scriptInput.value = getActiveScriptUrl() || '';
+    // v.0146: marcar checkbox "central" si la URL coincide con la central
+    // del admin. Si la empresa activa NO tiene scriptUrl propio pero la
+    // central sí está configurada, también marcar (porque el input muestra
+    // la central via getActiveScriptUrl).
+    const centralChk = document.getElementById('set-script-central');
+    if(centralChk){
+      const central = getCentralScriptUrl();
+      const inputUrl = (scriptInput && scriptInput.value || '').trim();
+      centralChk.checked = !!(central && inputUrl && central === inputUrl);
+    }
     // Estado Gemini (Configurada / No configurada)
     const gStatus = document.getElementById('set-gemini-status');
     if(gStatus){
@@ -2816,6 +2873,10 @@ async function updateScriptUrl(){
   const u = document.getElementById('set-scripturl').value.trim();
   const current = getCurrentCompany();
   if(!current){ toast('No hay empresa activa', 'err'); return; }
+  // v.0146: el checkbox "central" controla si esta URL aplica a TODAS las
+  // empresas del admin (sin scriptUrl propio) o solo a la activa.
+  const centralChk = document.getElementById('set-script-central');
+  const useAsCentral = !!(centralChk && centralChk.checked);
 
   if(!u){
     // Limpiar URL de la empresa activa
@@ -2824,6 +2885,8 @@ async function updateScriptUrl(){
     if(isSuperAdmin()){
       try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
     }
+    // Si el checkbox está marcado y vaciaron URL, también limpiar la central.
+    if(useAsCentral) await setCentralScriptUrl('');
     toast('URL eliminada', 'ok');
     return;
   }
@@ -2831,13 +2894,26 @@ async function updateScriptUrl(){
     toast('URL inválida. Debe comenzar con https://script.google.com/', 'err');
     return;
   }
-  // Guardar la URL en la empresa activa
-  current.scriptUrl = u;
-  upsertCompany(current);
-  if(isSuperAdmin()){
-    try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
+  if(useAsCentral){
+    // Modo central: la URL se guarda como central del admin y NO se asocia
+    // como scriptUrl propio de la empresa activa (sino getActiveScriptUrl
+    // devolvería la propia y nunca caería al fallback central).
+    current.scriptUrl = '';
+    upsertCompany(current);
+    if(isSuperAdmin()){
+      try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
+    }
+    await setCentralScriptUrl(u);
+    toast('URL guardada como central — todas tus empresas la usarán', 'ok');
+  } else {
+    // Modo por-empresa: solo aplica a la empresa activa.
+    current.scriptUrl = u;
+    upsertCompany(current);
+    if(isSuperAdmin()){
+      try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
+    }
+    toast('URL guardada para la empresa activa', 'ok');
   }
-  toast('URL guardada y sincronizada', 'ok');
 }
 
 async function probarScript(){
@@ -3626,6 +3702,13 @@ async function syncFromUserConfig(){
     // Aplicar Gemini key
     if(cfg.GEMINI_KEY){
       localStorage.setItem(LS.GEMINI, cfg.GEMINI_KEY);
+    }
+
+    // v.0146: aplicar URL central del Apps Script si está en el config.
+    // Permite que el admin tenga 1 setup en cualquier device y lo herede
+    // automáticamente en otros (multi-device sync).
+    if(cfg.SCRIPT_CENTRAL_URL && cfg.SCRIPT_CENTRAL_URL.startsWith('https://script.google.com/')){
+      localStorage.setItem(LS.CENTRAL_SCRIPT_URL, cfg.SCRIPT_CENTRAL_URL);
     }
 
     // Aplicar empresa activa (preferencia del usuario, si no hay activa local)
