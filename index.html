@@ -1198,16 +1198,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.4">Las fotos subidas por otros usuarios viven en sus Drives. El Apps Script las copia a tu Drive automáticamente todos los días a las 10 PM, y puedes ejecutarlo manualmente aquí.<br><strong style="color:var(--amber)">Nota:</strong> consolida todos los proyectos de la <strong style="color:var(--text)">empresa activa</strong>. Para otra empresa, cámbiala primero.</div>
 
       <div class="field">
-        <div class="lbl">URL del Apps Script Web App</div>
+        <div class="lbl">URL del Apps Script central</div>
         <input type="text" id="set-scripturl" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="none" autocomplete="off" style="font-family:var(--mono);font-size:11px">
+        <div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.4">Esta URL se usa para todas tus empresas. Las nuevas heredan automáticamente.</div>
       </div>
-      <label data-admin-only style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer">
-        <input type="checkbox" id="set-script-central" style="width:18px;height:18px;flex-shrink:0;margin-top:1px;accent-color:var(--amber)">
-        <div style="flex:1;font-size:12px;line-height:1.4">
-          <div style="color:var(--text);font-weight:600">Usar como Apps Script central</div>
-          <div style="color:var(--text2);font-size:11px;margin-top:2px">Empresas nuevas heredarán esta URL automáticamente — no tendrás que pegar Apps Script por empresa.</div>
-        </div>
-      </label>
       <div class="grid2" style="margin-top:8px">
         <button class="btn btn-amber" onclick="updateScriptUrl()" style="padding:10px;font-size:12px">Guardar URL</button>
         <button class="btn" onclick="probarScript()" style="padding:10px;font-size:12px">Probar conexión</button>
@@ -1694,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0149';
+const APP_VERSION = '0150';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1946,18 +1940,10 @@ function show(id){
     const ssidEl = document.getElementById('set-ssid');
     if(ssidEl) ssidEl.textContent = activeSheetId ? '…' + activeSheetId.slice(-12) : '—';
     document.getElementById('set-rol').textContent = masters.myRole || 'USUARIO';
+    // v.0150: el input siempre muestra la URL central (ya no por empresa).
+    // Si el admin no la ha configurado, queda vacío y el placeholder guía.
     const scriptInput = document.getElementById('set-scripturl');
-    if(scriptInput) scriptInput.value = getActiveScriptUrl() || '';
-    // v.0146: marcar checkbox "central" si la URL coincide con la central
-    // del admin. Si la empresa activa NO tiene scriptUrl propio pero la
-    // central sí está configurada, también marcar (porque el input muestra
-    // la central via getActiveScriptUrl).
-    const centralChk = document.getElementById('set-script-central');
-    if(centralChk){
-      const central = getCentralScriptUrl();
-      const inputUrl = (scriptInput && scriptInput.value || '').trim();
-      centralChk.checked = !!(central && inputUrl && central === inputUrl);
-    }
+    if(scriptInput) scriptInput.value = getCentralScriptUrl() || '';
     // Estado Gemini (Configurada / No configurada)
     const gStatus = document.getElementById('set-gemini-status');
     if(gStatus){
@@ -2869,84 +2855,82 @@ function openGeminiUpdater(){
   setTimeout(() => { const i = document.getElementById('set-gemini-modal'); if(i) i.focus(); }, 100);
 }
 
+// v.0150: Apps Script central como única fuente de verdad. Eliminado el
+// checkbox "Usar como central" y el modo "URL por empresa" (legacy). El
+// input siempre representa la URL central del admin. Si admin guarda URL
+// distinta a la actual, confirm pregunta antes de reemplazar.
 async function updateScriptUrl(){
   const u = document.getElementById('set-scripturl').value.trim();
-  const current = getCurrentCompany();
-  if(!current){ toast('No hay empresa activa', 'err'); return; }
-  // v.0146: el checkbox "central" controla si esta URL aplica a TODAS las
-  // empresas del admin (sin scriptUrl propio) o solo a la activa.
-  const centralChk = document.getElementById('set-script-central');
-  const useAsCentral = !!(centralChk && centralChk.checked);
 
   if(!u){
-    // Limpiar URL de la empresa activa
-    current.scriptUrl = '';
-    upsertCompany(current);
-    if(isSuperAdmin()){
-      try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
+    // Vacío → limpiar la URL central. Empresas que dependan de ella
+    // quedarán "Sin Apps Script" hasta que admin pegue una nueva.
+    const current = getCentralScriptUrl();
+    if(current){
+      const ok = confirm('Vas a eliminar la URL central. Las empresas que dependen de ella quedarán sin Apps Script. ¿Continuar?');
+      if(!ok) return;
     }
-    // Si el checkbox está marcado y vaciaron URL, también limpiar la central.
-    if(useAsCentral) await setCentralScriptUrl('');
-    toast('URL eliminada', 'ok');
+    await setCentralScriptUrl('');
+    toast('URL central eliminada', 'ok');
     return;
   }
+
   if(!u.startsWith('https://script.google.com/')){
     toast('URL inválida. Debe comenzar con https://script.google.com/', 'err');
     return;
   }
-  if(useAsCentral){
-    // Modo central: la URL se guarda como central del admin y NO se asocia
-    // como scriptUrl propio de la empresa activa (sino getActiveScriptUrl
-    // devolvería la propia y nunca caería al fallback central).
+
+  // Si ya hay URL central distinta → confirmar reemplazo.
+  const previous = getCentralScriptUrl();
+  if(previous && previous !== u){
+    const ok = confirm('Ya tenías una URL central guardada. ¿Reemplazarla con la nueva?\n\nLa nueva URL aplicará para todas tus empresas.');
+    if(!ok) return;
+  }
+
+  // Persistir como URL central
+  await setCentralScriptUrl(u);
+
+  // Si la empresa activa tenía scriptUrl propio (legacy), vaciarlo para
+  // que herede la central como las demás.
+  const current = getCurrentCompany();
+  if(current && current.scriptUrl){
     current.scriptUrl = '';
     upsertCompany(current);
     if(isSuperAdmin()){
       try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
     }
-    await setCentralScriptUrl(u);
+  }
 
-    // v.0149: ofrecer migrar OTRAS empresas con scriptUrl legacy a modo
-    // central. Sin esto, las empresas existentes seguían con sus URLs
-    // propias y los invites generados desde ellas llevaban el script viejo.
-    // Confirm nativo (no UI nueva). Solo cambia el campo scriptUrl —
-    // facturas y datos del Sheet intactos.
-    const others = getCompanies().filter(c => c.nombre !== current.nombre && c.scriptUrl);
-    if(others.length > 0){
-      const lista = others.map(c => '   • ' + c.nombre).join('\n');
-      const ok = confirm(
-        `Tienes ${others.length} empresa${others.length === 1 ? '' : 's'} más con su propio Apps Script:\n\n${lista}\n\n¿Migrar${others.length === 1 ? 'la' : 'las'} también a la URL central?\n\n(No afecta facturas ni datos — solo cambia qué script se usa.)`
-      );
-      if(ok){
-        let migradas = 0;
-        for(const c of others){
-          c.scriptUrl = '';
-          upsertCompany(c);
-          if(isSuperAdmin()){
-            try { await addCompanyToIndex(c); migradas++; }
-            catch(e){ console.warn('[migrate]', c.nombre, e.message); }
-          } else {
-            migradas++;
-          }
+  // Migrar empresas con scriptUrl propio (legacy) a modo central.
+  // Confirm nativo lista las empresas afectadas. Solo cambia el campo
+  // scriptUrl — facturas y datos del Sheet intactos.
+  const others = getCompanies().filter(c => c.scriptUrl);
+  if(others.length > 0){
+    const lista = others.map(c => '   • ' + c.nombre).join('\n');
+    const ok = confirm(
+      `Tienes ${others.length} empresa${others.length === 1 ? '' : 's'} con su propio Apps Script (legacy):\n\n${lista}\n\n¿Migrar${others.length === 1 ? 'la' : 'las'} también a la URL central?\n\n(No afecta facturas ni datos — solo cambia qué script se usa.)`
+    );
+    if(ok){
+      let migradas = 0;
+      for(const c of others){
+        c.scriptUrl = '';
+        upsertCompany(c);
+        if(isSuperAdmin()){
+          try { await addCompanyToIndex(c); migradas++; }
+          catch(e){ console.warn('[migrate]', c.nombre, e.message); }
+        } else {
+          migradas++;
         }
-        // Persistir cambios al User Config Drive (lista actualizada)
-        if(typeof saveCompaniesToUserConfig === 'function'){
-          saveCompaniesToUserConfig(getCompanies()).catch(e => console.warn(e));
-        }
-        toast(`URL guardada como central + ${migradas} empresa${migradas === 1 ? '' : 's'} migrada${migradas === 1 ? '' : 's'}`, 'ok');
-      } else {
-        toast('URL guardada como central — empresas existentes mantienen su URL propia', 'ok');
       }
+      if(typeof saveCompaniesToUserConfig === 'function'){
+        saveCompaniesToUserConfig(getCompanies()).catch(e => console.warn(e));
+      }
+      toast(`URL central guardada + ${migradas} empresa${migradas === 1 ? '' : 's'} migrada${migradas === 1 ? '' : 's'}`, 'ok');
     } else {
-      toast('URL guardada como central — todas tus empresas la usarán', 'ok');
+      toast('URL central guardada — las empresas legacy mantienen su URL propia', 'ok');
     }
   } else {
-    // Modo por-empresa: solo aplica a la empresa activa.
-    current.scriptUrl = u;
-    upsertCompany(current);
-    if(isSuperAdmin()){
-      try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
-    }
-    toast('URL guardada para la empresa activa', 'ok');
+    toast('URL central guardada — todas tus empresas la usarán', 'ok');
   }
 }
 
