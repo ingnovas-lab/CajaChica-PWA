@@ -1694,7 +1694,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0148';
+const APP_VERSION = '0149';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2904,7 +2904,41 @@ async function updateScriptUrl(){
       try { await addCompanyToIndex(current); } catch(e){ console.warn(e); }
     }
     await setCentralScriptUrl(u);
-    toast('URL guardada como central — todas tus empresas la usarán', 'ok');
+
+    // v.0149: ofrecer migrar OTRAS empresas con scriptUrl legacy a modo
+    // central. Sin esto, las empresas existentes seguían con sus URLs
+    // propias y los invites generados desde ellas llevaban el script viejo.
+    // Confirm nativo (no UI nueva). Solo cambia el campo scriptUrl —
+    // facturas y datos del Sheet intactos.
+    const others = getCompanies().filter(c => c.nombre !== current.nombre && c.scriptUrl);
+    if(others.length > 0){
+      const lista = others.map(c => '   • ' + c.nombre).join('\n');
+      const ok = confirm(
+        `Tienes ${others.length} empresa${others.length === 1 ? '' : 's'} más con su propio Apps Script:\n\n${lista}\n\n¿Migrar${others.length === 1 ? 'la' : 'las'} también a la URL central?\n\n(No afecta facturas ni datos — solo cambia qué script se usa.)`
+      );
+      if(ok){
+        let migradas = 0;
+        for(const c of others){
+          c.scriptUrl = '';
+          upsertCompany(c);
+          if(isSuperAdmin()){
+            try { await addCompanyToIndex(c); migradas++; }
+            catch(e){ console.warn('[migrate]', c.nombre, e.message); }
+          } else {
+            migradas++;
+          }
+        }
+        // Persistir cambios al User Config Drive (lista actualizada)
+        if(typeof saveCompaniesToUserConfig === 'function'){
+          saveCompaniesToUserConfig(getCompanies()).catch(e => console.warn(e));
+        }
+        toast(`URL guardada como central + ${migradas} empresa${migradas === 1 ? '' : 's'} migrada${migradas === 1 ? '' : 's'}`, 'ok');
+      } else {
+        toast('URL guardada como central — empresas existentes mantienen su URL propia', 'ok');
+      }
+    } else {
+      toast('URL guardada como central — todas tus empresas la usarán', 'ok');
+    }
   } else {
     // Modo por-empresa: solo aplica a la empresa activa.
     current.scriptUrl = u;
@@ -10311,13 +10345,16 @@ async function guardarInvitacion(){
     }
 
     // Generar link de invitación (se muestra tanto al invitar como al editar)
-    // Incluye nombre de empresa + URL del script para configuración completa del usuario
+    // Incluye nombre de empresa + URL del script para configuración completa del usuario.
+    // v.0149: usa getEffectiveScriptUrl — si la empresa está en modo central
+    // (scriptUrl=''), propaga la URL central del admin. Antes el invitado
+    // recibía u='' y su empresa quedaba "Sin Apps Script".
     const currentCompany = getCurrentCompany();
     const payload = {
       k: localStorage.getItem(LS.GEMINI),
       s: ssid,
       n: currentCompany ? currentCompany.nombre : 'Empresa',  // nombre empresa
-      u: currentCompany ? (currentCompany.scriptUrl || '') : ''  // URL Apps Script
+      u: getEffectiveScriptUrl(currentCompany) || ''  // URL Apps Script (propia o central)
     };
     const encoded = btoa(JSON.stringify(payload));
     const baseUrl = window.location.origin + window.location.pathname;
