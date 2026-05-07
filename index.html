@@ -1694,7 +1694,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0146';
+const APP_VERSION = '0147';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4260,6 +4260,33 @@ async function crearEmpresa(){
     // Sincronizar al Admin Index (otros dispositivos lo verán automáticamente)
     await addCompanyToIndex(empresaData);
 
+    // v.0147: si el admin tiene URL del Apps Script central configurada,
+    // saltarse el card "Último paso" — la empresa nueva queda activa al
+    // instante heredando la URL central. Cierra la feature 2 que el
+    // usuario pidió en el inicio: "que solo cree la empresa por la app
+    // y asignar usuario, sin colocar el script manualmente".
+    const centralUrl = getCentralScriptUrl();
+    if(centralUrl){
+      progressEl.innerHTML = '✓ Empresa creada y heredando Apps Script central.';
+      setCurrentCompany(nombre);
+      newCompanyContext = null;
+      document.getElementById('newcomp-nombre').value = '';
+      document.getElementById('newcomp-razonSocial').value = '';
+      document.getElementById('newcomp-rnc').value = '';
+      document.getElementById('newcomp-direccion').value = '';
+      document.getElementById('newcomp-revisadoPor').value = '';
+      document.getElementById('newcomp-aprobadoPor').value = '';
+      btn.disabled = false;
+      btn.style.display = '';
+      progressEl.style.display = 'none';
+      toast(`Empresa "${nombre}" creada y activada con tu Apps Script central`, 'ok');
+      loadMasters().catch(e => console.warn(e));
+      show('pg-home');
+      return;
+    }
+
+    // Sin URL central → flujo legacy: pedir al admin que pegue Apps Script
+    // manualmente. Soporta admins que aún no han configurado central.
     progressEl.innerHTML = '✓ Estructura creada. Continúa con el paso final abajo.';
     btn.style.display = 'none';
     document.getElementById('newcomp-script-card').style.display = 'block';
