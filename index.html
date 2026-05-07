@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0141';
+const APP_VERSION = '0142';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3165,8 +3165,6 @@ async function guardarEdicionEmpresa(nombreAnterior){
 
 // Muestra modal con confirmación tipo B (escribir nombre exacto)
 function confirmarEliminarEmpresa(nombre){
-  if(!isSuperAdmin()){ toast('Solo SUPER_ADMIN puede eliminar empresas', 'err'); return; }
-
   // Verificar que no sea la empresa activa
   const current = getCurrentCompany();
   if(current && current.nombre === nombre){
@@ -3179,28 +3177,51 @@ function confirmarEliminarEmpresa(nombre){
 
   const nombreEsc = nombre.replace(/'/g, "\\'");
 
-  showModal(`
-    <h3 style="color:var(--red)">Eliminar empresa</h3>
-    <div style="font-size:13px;color:var(--text);margin:10px 0 14px;line-height:1.6">
-      Estás a punto de eliminar <strong>"${nombre}"</strong>.
-    </div>
-    <div style="background:rgba(239,68,68,0.08);border:1px solid var(--red);border-radius:8px;padding:12px;margin-bottom:14px">
-      <div style="font-size:12px;color:#FCA5A5;line-height:1.6">
-        • La carpeta completa se moverá a la <strong>Papelera de Google Drive</strong><br>
-        • Tienes <strong>30 días</strong> para recuperarla desde Drive antes de borrado permanente<br>
-        • La empresa se removerá del sistema en todos los dispositivos<br>
-        • Los usuarios invitados perderán acceso
+  // v.0142: super_admin elimina permanente (mueve carpeta a Papelera +
+  // Admin Index + locales). Invitado solo SALE de la empresa (cleanup
+  // local + User Config — no toca Drive del admin). Antes el botón estaba
+  // bloqueado para invitados con un toast — quedaban atrapados con
+  // empresas fantasma o con sheetIds revueltos sin poder limpiar su lista.
+  if(isSuperAdmin()){
+    showModal(`
+      <h3 style="color:var(--red)">Eliminar empresa</h3>
+      <div style="font-size:13px;color:var(--text);margin:10px 0 14px;line-height:1.6">
+        Estás a punto de eliminar <strong>"${nombre}"</strong>.
       </div>
-    </div>
-    <div class="field">
-      <div class="lbl" style="color:var(--red)">Para confirmar, escribe el nombre exacto de la empresa:</div>
-      <input type="text" id="del-emp-confirm" placeholder="${nombre}" autocomplete="off" oninput="actualizarBotonEliminar('${nombreEsc}')">
-    </div>
-    <div class="grid2" style="margin-top:12px;gap:8px">
-      <button class="btn btn-red" id="btn-confirm-delete" disabled onclick="eliminarEmpresaConfirmada('${nombreEsc}')" style="opacity:0.4;pointer-events:none">Eliminar permanentemente</button>
-      <button class="btn" onclick="closeModal()">Cancelar</button>
-    </div>
-  `);
+      <div style="background:rgba(239,68,68,0.08);border:1px solid var(--red);border-radius:8px;padding:12px;margin-bottom:14px">
+        <div style="font-size:12px;color:#FCA5A5;line-height:1.6">
+          • La carpeta completa se moverá a la <strong>Papelera de Google Drive</strong><br>
+          • Tienes <strong>30 días</strong> para recuperarla desde Drive antes de borrado permanente<br>
+          • La empresa se removerá del sistema en todos los dispositivos<br>
+          • Los usuarios invitados perderán acceso
+        </div>
+      </div>
+      <div class="field">
+        <div class="lbl" style="color:var(--red)">Para confirmar, escribe el nombre exacto de la empresa:</div>
+        <input type="text" id="del-emp-confirm" placeholder="${nombre}" autocomplete="off" oninput="actualizarBotonEliminar('${nombreEsc}')">
+      </div>
+      <div class="grid2" style="margin-top:12px;gap:8px">
+        <button class="btn btn-red" id="btn-confirm-delete" disabled onclick="eliminarEmpresaConfirmada('${nombreEsc}')" style="opacity:0.4;pointer-events:none">Eliminar permanentemente</button>
+        <button class="btn" onclick="closeModal()">Cancelar</button>
+      </div>
+    `);
+  } else {
+    showModal(`
+      <h3>Salir de "${nombre}"</h3>
+      <div style="font-size:13px;color:var(--text);margin:10px 0 14px;line-height:1.6">
+        Esta empresa se removerá de <strong>tu lista</strong>, pero los datos en Drive del admin se conservan.
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">
+        <div style="font-size:12px;color:var(--text2);line-height:1.6">
+          Si necesitas regresar, pídele al admin que te invite de nuevo con un link nuevo.
+        </div>
+      </div>
+      <div class="grid2" style="gap:8px">
+        <button class="btn btn-red" onclick="eliminarEmpresaConfirmada('${nombreEsc}')">Salir</button>
+        <button class="btn" onclick="closeModal()">Cancelar</button>
+      </div>
+    `);
+  }
 }
 
 // Habilita/deshabilita el botón de eliminar según lo que el usuario escriba
@@ -3220,27 +3241,33 @@ async function eliminarEmpresaConfirmada(nombre){
   if(!empresa){ toast('Empresa no encontrada', 'err'); closeModal(); return; }
 
   closeModal();
-  loading(true, 'Eliminando', 'Moviendo carpeta a Papelera de Drive...');
+  const superAdmin = isSuperAdmin();
+  loading(true, superAdmin ? 'Eliminando' : 'Saliendo', superAdmin ? 'Moviendo carpeta a Papelera de Drive...' : 'Limpiando tu lista...');
 
   try {
-    const token = getToken();
+    // v.0142: super_admin borra todo (Drive + Admin Index + locales).
+    // Invitado solo limpia SU lista (locales + User Config) — no toca Drive
+    // ni Admin Index del admin.
+    if(superAdmin){
+      const token = getToken();
 
-    // 1. Mover carpeta de la empresa a Papelera de Drive
-    if(empresa.folderId){
-      await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.folderId}`, {
-        method: 'PATCH',
-        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-        body: JSON.stringify({trashed: true})
-      });
+      // 1. Mover carpeta de la empresa a Papelera de Drive
+      if(empresa.folderId){
+        await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.folderId}`, {
+          method: 'PATCH',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({trashed: true})
+        });
+      }
+
+      // 2. Remover del Admin Index (Drive)
+      await removeCompanyFromIndex(nombre);
     }
 
-    // 2. Remover del Admin Index (Drive)
-    await removeCompanyFromIndex(nombre);
-
-    // 3. Remover de localStorage
+    // 3. Remover de localStorage (ambos roles)
     removeCompany(nombre);
 
-    // 4. v.0141: limpiar también User Config Drive — sino el próximo sync la
+    // 4. Limpiar User Config Drive (ambos roles) — sino el próximo sync la
     // trae de vuelta vía mergeCompanies (la empresa "fantasma" reaparece).
     if(localStorage.getItem('cc_last_saved_active_company') === nombre){
       localStorage.removeItem('cc_last_saved_active_company');
@@ -3251,7 +3278,7 @@ async function eliminarEmpresaConfirmada(nombre){
     localStorage.removeItem(LS.FOLDERS);
 
     loading(false);
-    toast(`Empresa "${nombre}" eliminada`, 'ok');
+    toast(superAdmin ? `Empresa "${nombre}" eliminada` : `Saliste de "${nombre}"`, 'ok');
     await renderCompanyList();
   } catch(e){
     loading(false);
