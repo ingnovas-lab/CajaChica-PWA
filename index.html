@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0151';
+const APP_VERSION = '0152';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -6959,8 +6959,15 @@ function _renderPDFCSS(){
     '.pdf-report .bar-chart .bar-row{margin-bottom:9px;font-size:10px}',
     '.pdf-report .bar-chart .bar-name{display:flex;justify-content:space-between;margin-bottom:3px;color:#1e293b;font-weight:600}',
     '.pdf-report .bar-chart .bar-track{height:10px;background:#f1f5f9;border-radius:3px;overflow:hidden}',
-    '.pdf-report .bar-chart .bar-fill{height:100%;background:linear-gradient(90deg,#1e3a5f,#3b5f8c)}',
-    '.pdf-report .bar-chart .bar-fill.amber{background:linear-gradient(90deg,#d97706,#f59e0b)}',
+    // v.0152: bar-fill con color sólido (NO linear-gradient). Causa raíz del
+    // bug PDF Safari 26: bar-fill tiene `style="width:X%"` con X computado a
+    // 1 decimal. Para categorías chicas, X puede ser 0.1% → ~0.25px sub-pixel
+    // → JS trunca canvas.width a 0 internamente en html2canvas → en Safari 26,
+    // `createPattern(canvas_0xN, 'repeat')` lanza InvalidStateError.
+    // Cover-band (sharp stops, dimensiones enteras 816×14) sigue con gradient
+    // sin problema. Pérdida visual aceptable: barras sólidas en lugar de degradé.
+    '.pdf-report .bar-chart .bar-fill{height:100%;background:#1e3a5f}',
+    '.pdf-report .bar-chart .bar-fill.amber{background:#d97706}',
     '.pdf-report .proj-band{height:8px;background:#1e3a5f}',
     '.pdf-report .proj-divider-header{padding:50px 56px 24px;border-bottom:1px solid #e2e8f0}',
     '.pdf-report .proj-eyebrow{color:#d97706;font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;margin-bottom:8px}',
