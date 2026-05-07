@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0140';
+const APP_VERSION = '0141';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3240,7 +3240,14 @@ async function eliminarEmpresaConfirmada(nombre){
     // 3. Remover de localStorage
     removeCompany(nombre);
 
-    // 4. Limpiar caches relacionados
+    // 4. v.0141: limpiar también User Config Drive — sino el próximo sync la
+    // trae de vuelta vía mergeCompanies (la empresa "fantasma" reaparece).
+    if(localStorage.getItem('cc_last_saved_active_company') === nombre){
+      localStorage.removeItem('cc_last_saved_active_company');
+    }
+    await saveCompaniesToUserConfig(getCompanies());
+
+    // 5. Limpiar caches relacionados
     localStorage.removeItem(LS.FOLDERS);
 
     loading(false);
@@ -10027,6 +10034,27 @@ async function guardarInvitacion(){
   }
   if(rol === 'USUARIO' && obras.length === 0){
     err.textContent = 'Debes asignar al menos una obra al usuario'; err.style.display = 'block'; return;
+  }
+
+  // v.0141: en modo invitar nuevo, confirmar la empresa activa antes de
+  // generar el link. El sheetId del invite viene de getActiveSheetId() — si
+  // el admin tiene activa la empresa equivocada, los invitados terminan con
+  // sheetIds revueltos (causa de "veo proyectos de otra empresa"). Sin UI
+  // nueva, solo el confirm nativo. Skip en modo editar (la empresa ya está
+  // fijada en la fila USUARIOS existente, no se mueve).
+  if(editingUserIdx === null){
+    const empresaActiva = (getCurrentCompany() || {}).nombre || 'Empresa';
+    const ok = confirm(
+      `Vas a invitar a "${nombre}" a la empresa:\n\n` +
+      `   ${empresaActiva}\n\n` +
+      `¿Es correcto?\n\n` +
+      `Si querías invitar a otra empresa, cancela y cambia primero desde el chip "Empresa activa → Cambiar".`
+    );
+    if(!ok){
+      err.textContent = 'Invitación cancelada — cambia de empresa antes de continuar';
+      err.style.display = 'block';
+      return;
+    }
   }
 
   loading(true, 'Guardando', 'Actualizando USUARIOS...');
