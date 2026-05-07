@@ -1694,7 +1694,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0147';
+const APP_VERSION = '0148';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3028,9 +3028,22 @@ async function renderCompanyList(){
     return;
   }
 
+  // v.0148: hasOwnScript = la empresa tiene scriptUrl propio (legacy);
+  // hasCentral = el admin tiene URL central → la empresa la hereda.
+  // Texto distinto para cada caso así el usuario sabe de dónde sale el script.
+  const hasCentral = !!getCentralScriptUrl();
   container.innerHTML = companies.map(c => {
     const isActive = current && current.nombre === c.nombre;
-    const hasScript = !!c.scriptUrl;
+    const hasOwnScript = !!c.scriptUrl;
+    const hasEffective = hasOwnScript || hasCentral;
+    let scriptStatusHtml;
+    if(hasOwnScript){
+      scriptStatusHtml = 'Apps Script configurado';
+    } else if(hasCentral){
+      scriptStatusHtml = '<span style="color:var(--green)">Hereda Apps Script central</span>';
+    } else {
+      scriptStatusHtml = '<span style="color:var(--red)">Sin Apps Script</span>';
+    }
     const nombreEsc = c.nombre.replace(/'/g, "\\'");
     return `
       <div class="card" style="padding:14px;${isActive ? 'border-color:var(--amber)' : ''}">
@@ -3042,7 +3055,7 @@ async function renderCompanyList(){
             <div style="font-size:15px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nombre}</div>
             <div style="font-size:11px;color:var(--text2);margin-top:2px">
               ${isActive ? '<span style="color:var(--amber)">● Activa · </span>' : ''}
-              ${hasScript ? 'Apps Script configurado' : '<span style="color:var(--red)">Sin Apps Script</span>'}
+              ${scriptStatusHtml}
             </div>
           </div>
           <div style="color:var(--text2)">
