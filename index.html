@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0142';
+const APP_VERSION = '0143';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -10069,11 +10069,16 @@ async function guardarInvitacion(){
   // sheetIds revueltos (causa de "veo proyectos de otra empresa"). Sin UI
   // nueva, solo el confirm nativo. Skip en modo editar (la empresa ya está
   // fijada en la fila USUARIOS existente, no se mueve).
+  // v.0143: agregar sheetId truncado para que el admin pueda verificar
+  // visualmente que el ID es el correcto antes de mandar el link.
   if(editingUserIdx === null){
-    const empresaActiva = (getCurrentCompany() || {}).nombre || 'Empresa';
+    const cur = getCurrentCompany() || {};
+    const empresaActiva = cur.nombre || 'Empresa';
+    const sheetIdShort = cur.sheetId ? '...' + cur.sheetId.slice(-12) : '(sin ID)';
     const ok = confirm(
       `Vas a invitar a "${nombre}" a la empresa:\n\n` +
-      `   ${empresaActiva}\n\n` +
+      `   ${empresaActiva}\n` +
+      `   Sheet: ${sheetIdShort}\n\n` +
       `¿Es correcto?\n\n` +
       `Si querías invitar a otra empresa, cancela y cambia primero desde el chip "Empresa activa → Cambiar".`
     );
@@ -10324,6 +10329,25 @@ function _applyInvitePayload(payload){
   if(payload.k) localStorage.setItem(LS.GEMINI, payload.k);
   if(payload.s){
     const companyName = payload.n || 'Empresa';
+
+    // v.0143: detectar conflicto de sheetId. Si ya hay una empresa local con
+    // este sheetId pero distinto nombre, el admin probablemente generó el
+    // invite desde la empresa equivocada (el sheetId no corresponde con el
+    // nombre que dice el link). Rechazar y avisar al usuario — sino mi
+    // mergeCompanies fusionaría las dos empresas en una sola entrada con
+    // datos cruzados.
+    const existing = getCompanies().find(c => c.sheetId === payload.s);
+    if(existing && existing.nombre !== companyName){
+      if(typeof toast === 'function'){
+        toast(
+          `Invite rechazado: este link dice "${companyName}" pero el ID del Sheet ya pertenece a "${existing.nombre}" en tu app. El admin generó el link desde la empresa equivocada — pídele que lo regenere.`,
+          'err'
+        );
+      }
+      console.warn(`[invite] Conflicto sheetId: payload.n="${companyName}" pero local="${existing.nombre}" comparten sheetId`);
+      return false;
+    }
+
     upsertCompany({
       nombre: companyName,
       sheetId: payload.s,
