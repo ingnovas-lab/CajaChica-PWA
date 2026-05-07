@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0143';
+const APP_VERSION = '0144';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7985,7 +7985,34 @@ async function generarPDFFotos(params){
       await new Promise(r => setTimeout(r, 0));
       _pdfLog(`render: página ${i+1}/${pages.length} html2canvas start`);
       const t0 = Date.now();
-      const canvas = await html2canvas(pages[i], {scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816});
+      // v.0144: timeout + retry para Safari iOS. La memoria
+      // cajachica_safari_promise_hangs.md documenta que html2canvas
+      // ocasionalmente queda colgada en cold start — el primer intento se
+      // cuelga, el segundo funciona. 20s cubre renders pesados (~280ms ×
+      // páginas) con margen amplio. Si timeout, abortamos y reintentamos.
+      const HTML2CANVAS_TIMEOUT_MS = 20000;
+      const html2canvasOpts = {scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816};
+      let canvas;
+      const maxAttempts = 2;
+      for(let attempt = 1; attempt <= maxAttempts; attempt++){
+        try {
+          canvas = await Promise.race([
+            html2canvas(pages[i], html2canvasOpts),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('HTML2CANVAS_TIMEOUT')), HTML2CANVAS_TIMEOUT_MS)
+            )
+          ]);
+          if(attempt > 1) _pdfLog(`render: página ${i+1}/${pages.length} retry exitoso en intento ${attempt}`);
+          break; // éxito
+        } catch(err){
+          if(err.message === 'HTML2CANVAS_TIMEOUT' && attempt < maxAttempts){
+            _pdfLog(`render: página ${i+1}/${pages.length} html2canvas TIMEOUT ${HTML2CANVAS_TIMEOUT_MS}ms (intento ${attempt}/${maxAttempts}) — reintentando`);
+            await new Promise(r => setTimeout(r, 250)); // breve respiro antes del retry
+            continue;
+          }
+          throw err; // otro tipo de error, o último intento timeout
+        }
+      }
 
       const dt = Date.now() - t0;
       _pdfLog(`render: página ${i+1}/${pages.length} html2canvas DONE en ${dt}ms (canvas ${canvas.width}×${canvas.height})`);
