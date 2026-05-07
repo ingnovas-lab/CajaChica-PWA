@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0137';
+const APP_VERSION = '0138';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1763,6 +1763,32 @@ function upsertCompany(company){
   saveCompanies(list);
 }
 
+// v.0138: mergea dos listas de empresas (local + remota) por sheetId.
+// Las remotas pisan campos de las locales si están presentes (datos contables
+// más recientes ganan), pero las locales que NO están en la remota se
+// conservan (ej. empresas recibidas por invite que aún no se persistieron).
+// Esto es el FIX raíz del bug "admin no ve dos empresas":
+//   - Antes: syncFromAdminIndex hacía saveCompanies(remote) → pisaba locales
+//   - Ahora: saveCompanies(mergeCompanies(local, remote)) → conserva ambas
+function mergeCompanies(local, remote){
+  const byId = new Map();
+  // Primero locales (base)
+  (local || []).forEach(c => {
+    if(c && c.sheetId) byId.set(c.sheetId, {...c});
+  });
+  // Después remotas (pisan campos no vacíos)
+  (remote || []).forEach(r => {
+    if(!r || !r.sheetId) return;
+    const existing = byId.get(r.sheetId) || {};
+    const merged = {...existing};
+    Object.entries(r).forEach(([k, v]) => {
+      if(v !== '' && v !== null && v !== undefined) merged[k] = v;
+    });
+    byId.set(r.sheetId, merged);
+  });
+  return Array.from(byId.values());
+}
+
 // Obtiene la empresa activa actualmente (la última seleccionada)
 // Retorna null si no hay ninguna activa
 function getCurrentCompany(){
@@ -1804,6 +1830,14 @@ function setCurrentCompany(nombre){
   if(projName) projName.textContent = 'Cargando...';
   const projCode = document.getElementById('proj-code');
   if(projCode) projCode.textContent = '';
+
+  // v.0138: persistir empresa activa en User Config para que otro device la
+  // restaure como activa al hacer login. Background — no bloquea UI.
+  if(getToken() && typeof saveToUserConfig === 'function'){
+    saveToUserConfig({EMPRESA_ACTIVA: nombre}).catch(e => {
+      console.warn('[setCurrentCompany] saveToUserConfig falló:', e.message);
+    });
+  }
 }
 
 // Elimina una empresa de la lista (no borra datos en Drive)
@@ -2311,66 +2345,57 @@ function initGoogleAuth(){
     document.getElementById('gauth-status').textContent = '✓ Conectado: ' + (email || '(email pendiente)');
     document.getElementById('gauth-status').style.color = 'var(--green)';
 
-    // Sincronizar con Drive (admin index o user config) — lógica original
-    if(isSuperAdmin()){
-      document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
-      try {
-        const synced = await syncFromAdminIndex();
-        if(synced && synced.length > 0){
-          document.getElementById('gauth-status').textContent = `✓ Conectado: ${email} · ${synced.length} empresa(s) sincronizadas`;
+    // Sincronizar con Drive — v.0138: super_admin usa Admin Index (empresas
+    // que él creó) + User Config (empresas a las que fue invitado por otros
+    // admins). Resto de usuarios usa solo User Config. Ambos hacen MERGE en
+    // lugar de pisar la lista local.
+    document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
+    try {
+      const pending = localStorage.getItem(LS.PENDING_USER_CONFIG_SAVE) === '1';
+      if(pending){
+        // Recibimos invite(s) o setup inicial → persistir lista COMPLETA + Gemini
+        const gemini = localStorage.getItem(LS.GEMINI) || '';
+        const allCompanies = getCompanies();
+        const current = getCurrentCompany();
+        await saveCompaniesToUserConfig(allCompanies);
+        const cfgToSave = {GEMINI_KEY: gemini};
+        if(current) cfgToSave.EMPRESA_ACTIVA = current.nombre;
+        await saveToUserConfig(cfgToSave);
+        localStorage.removeItem(LS.PENDING_USER_CONFIG_SAVE);
+        document.getElementById('gauth-status').textContent = `✓ Conectado: ${email} · ${allCompanies.length} empresa(s) guardadas en Drive`;
+      } else {
+        // Login normal — sync (merge) desde las dos fuentes según rol
+        let totalCompanies = 0;
+        if(isSuperAdmin()){
+          const fromIndex = await syncFromAdminIndex();
+          if(fromIndex) totalCompanies = fromIndex.length;
+        }
+        // Todos (incluido super_admin) leen también User Config para invites externos
+        const fromUser = await syncFromUserConfig();
+        if(fromUser && fromUser.empresas) totalCompanies = fromUser.empresas.length;
+
+        const current = getCurrentCompany();
+        if(totalCompanies > 0){
+          const detail = current ? `· ${current.nombre}` : `· ${totalCompanies} empresa(s)`;
+          document.getElementById('gauth-status').textContent = `✓ Conectado: ${email} ${detail}`;
           const geminiStatus = document.getElementById('gemini-status');
           if(geminiStatus && localStorage.getItem(LS.GEMINI)){
             geminiStatus.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada desde Drive</span>';
           }
           const ssidStatus = document.getElementById('ssid-status');
           if(ssidStatus){
-            ssidStatus.innerHTML = `<span style="color:var(--green)">✓ ${synced.length} empresa(s) disponibles</span>`;
+            ssidStatus.innerHTML = `<span style="color:var(--green)">✓ ${totalCompanies} empresa(s) disponibles</span>`;
           }
-          if(!getCurrentCompany()){ setCurrentCompany(synced[0].nombre); }
+          if(!current && totalCompanies > 0){
+            setCurrentCompany(getCompanies()[0].nombre);
+          }
         } else {
           document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
         }
-      } catch(e){
-        console.warn('[login] Sync admin index falló:', e.message);
-        document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
       }
-    } else {
-      document.getElementById('gauth-status').textContent = '⏳ Buscando configuración en Drive...';
-      try {
-        const pending = localStorage.getItem(LS.PENDING_USER_CONFIG_SAVE) === '1';
-        if(pending){
-          const gemini = localStorage.getItem(LS.GEMINI) || '';
-          const current = getCurrentCompany();
-          const toSave = {GEMINI_KEY: gemini};
-          if(current){
-            toSave.EMPRESA_NOMBRE = current.nombre;
-            toSave.EMPRESA_SHEET_ID = current.sheetId;
-            toSave.EMPRESA_SCRIPT_URL = current.scriptUrl || '';
-            toSave.EMPRESA_CREATED_AT = current.createdAt || new Date().toISOString();
-          }
-          await saveToUserConfig(toSave);
-          localStorage.removeItem(LS.PENDING_USER_CONFIG_SAVE);
-          document.getElementById('gauth-status').textContent = `✓ Conectado: ${email} · Configuración guardada en Drive`;
-        } else {
-          const cfg = await syncFromUserConfig();
-          if(cfg && cfg.EMPRESA_NOMBRE){
-            document.getElementById('gauth-status').textContent = `✓ Conectado: ${email} · ${cfg.EMPRESA_NOMBRE}`;
-            const geminiStatus = document.getElementById('gemini-status');
-            if(geminiStatus && localStorage.getItem(LS.GEMINI)){
-              geminiStatus.innerHTML = '<span style="color:var(--green)">✓ Clave sincronizada desde Drive</span>';
-            }
-            const ssidStatus = document.getElementById('ssid-status');
-            if(ssidStatus){
-              ssidStatus.innerHTML = '<span style="color:var(--green)">✓ Empresa sincronizada desde Drive</span>';
-            }
-          } else {
-            document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
-          }
-        }
-      } catch(e){
-        console.warn('[login] User Config sync falló:', e.message);
-        document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
-      }
+    } catch(e){
+      console.warn('[login] Sync falló:', e.message);
+      document.getElementById('gauth-status').textContent = '✓ Conectado: ' + email;
     }
     checkSetupReady();
   };
@@ -2873,11 +2898,15 @@ async function renderCompanyList(){
   const container = document.getElementById('company-list');
   if(!container) return;
 
-  // Si es SUPER_ADMIN, sincronizar desde Drive cada vez que se abre el selector.
-  // Esto permite ver empresas creadas en otros dispositivos.
-  if(isSuperAdmin()){
+  // v.0138: sincronizar desde Drive cada vez que se abre el selector (todos
+  // los usuarios). super_admin lee Admin Index + User Config; resto solo
+  // User Config. Permite ver empresas agregadas/invitadas en otros devices.
+  if(getToken()){
     container.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px">Sincronizando desde Drive...</div>`;
-    try { await syncFromAdminIndex(); } catch(e){ console.warn(e); }
+    try {
+      if(isSuperAdmin()) await syncFromAdminIndex();
+      await syncFromUserConfig();
+    } catch(e){ console.warn(e); }
   }
 
   const companies = getCompanies();
@@ -3276,6 +3305,7 @@ const LS_USER_CONFIG_ID = 'cc_user_config_id'; // cache del ID del Sheet
 // sin tener que pegar Gemini key ni link de invitación de nuevo.
 
 // Busca o crea el Sheet _CC_UserConfig en la raíz del Drive del usuario actual.
+// v.0138: garantiza también que exista la hoja EMPRESAS (multi-tenant).
 async function ensureUserConfig(){
   // Cache para evitar búsqueda repetida
   const cached = localStorage.getItem(LS_USER_CONFIG_ID);
@@ -3286,7 +3316,10 @@ async function ensureUserConfig(){
       });
       if(chk.ok){
         const d = await chk.json();
-        if(!d.trashed) return cached;
+        if(!d.trashed){
+          await _ensureUserConfigEmpresasSheet(cached);
+          return cached;
+        }
       }
     } catch {}
     localStorage.removeItem(LS_USER_CONFIG_ID);
@@ -3303,6 +3336,7 @@ async function ensureUserConfig(){
     const d = await searchRes.json();
     if(d.files && d.files.length > 0){
       localStorage.setItem(LS_USER_CONFIG_ID, d.files[0].id);
+      await _ensureUserConfigEmpresasSheet(d.files[0].id);
       return d.files[0].id;
     }
   }
@@ -3322,86 +3356,251 @@ async function ensureUserConfig(){
   const created = await createRes.json();
   const sheetId = created.id;
 
-  // Inicializar con hoja CONFIG
-  const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}`, {
-    headers: {'Authorization': 'Bearer ' + token}
-  });
-
+  // Inicializar con hojas CONFIG + EMPRESAS (v.0138)
   const metaResSheets = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`, {
     headers: {'Authorization': 'Bearer ' + token}
   });
   const meta = await metaResSheets.json();
   const firstSheetId = meta.sheets[0].properties.sheetId;
 
-  // Renombrar Sheet1 a CONFIG
+  // Renombrar Sheet1 a CONFIG, agregar EMPRESAS
   await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
     method: 'POST',
     headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
     body: JSON.stringify({
-      requests: [{updateSheetProperties: {properties: {sheetId: firstSheetId, title: 'CONFIG'}, fields: 'title'}}]
+      requests: [
+        {updateSheetProperties: {properties: {sheetId: firstSheetId, title: 'CONFIG'}, fields: 'title'}},
+        {addSheet: {properties: {title: 'EMPRESAS'}}}
+      ]
     })
   });
 
-  // Headers
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/CONFIG!A1?valueInputOption=USER_ENTERED`, {
-    method: 'PUT',
+  // Headers en ambas hojas
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
+    method: 'POST',
     headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-    body: JSON.stringify({values: [['KEY', 'VALUE']]})
+    body: JSON.stringify({
+      valueInputOption: 'USER_ENTERED',
+      data: [
+        {range: 'CONFIG!A1', values: [['KEY', 'VALUE']]},
+        {range: 'EMPRESAS!A1', values: [['NOMBRE','SHEET_ID','SCRIPT_URL','FOLDER_ID','CREATED_AT','RAZON_SOCIAL','RNC','DIRECCION','REVISADO_POR','APROBADO_POR']]}
+      ]
+    })
   });
 
   localStorage.setItem(LS_USER_CONFIG_ID, sheetId);
   return sheetId;
 }
 
-// Lee User Config desde Drive y sincroniza con localStorage.
-// Retorna los datos leídos o null si no se pudo.
-async function syncFromUserConfig(){
-  // No ejecutar si es SUPER_ADMIN (ya tiene su propio sistema via Admin Index)
-  if(isSuperAdmin()) return null;
+// v.0138: garantiza que un User Config existente tenga la hoja EMPRESAS
+// (multi-tenant). Si no la tiene, la crea Y migra el formato viejo (single
+// empresa con keys EMPRESA_NOMBRE/SHEET_ID/SCRIPT_URL/CREATED_AT en CONFIG)
+// a una primera fila de EMPRESAS. Idempotente — safe llamar siempre.
+async function _ensureUserConfigEmpresasSheet(configId){
+  const token = getToken();
+  if(!token) return;
+  try {
+    const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}?fields=sheets.properties`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    if(!metaRes.ok) return;
+    const meta = await metaRes.json();
+    const hasEmpresas = meta.sheets.some(s => s.properties.title === 'EMPRESAS');
+    if(hasEmpresas) return;
 
+    // Crear hoja EMPRESAS + headers en una sola pasada
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}:batchUpdate`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        requests: [{addSheet: {properties: {title: 'EMPRESAS'}}}]
+      })
+    });
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/EMPRESAS!A1?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [['NOMBRE','SHEET_ID','SCRIPT_URL','FOLDER_ID','CREATED_AT','RAZON_SOCIAL','RNC','DIRECCION','REVISADO_POR','APROBADO_POR']]})
+    });
+
+    // Migrar formato viejo: si CONFIG tiene EMPRESA_NOMBRE/EMPRESA_SHEET_ID,
+    // copiarlos como primera fila de EMPRESAS.
+    const cfgRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/CONFIG!A2:B`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    if(cfgRes.ok){
+      const cfgData = await cfgRes.json();
+      const rows = cfgData.values || [];
+      const cfg = {};
+      rows.forEach(r => { if(r[0]) cfg[r[0]] = r[1] || ''; });
+      if(cfg.EMPRESA_NOMBRE && cfg.EMPRESA_SHEET_ID){
+        const row = [
+          cfg.EMPRESA_NOMBRE,
+          cfg.EMPRESA_SHEET_ID,
+          cfg.EMPRESA_SCRIPT_URL || '',
+          '', // folderId no se guardaba en formato viejo
+          cfg.EMPRESA_CREATED_AT || new Date().toISOString(),
+          '', '', '', '', ''
+        ];
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/EMPRESAS!A2:append?valueInputOption=USER_ENTERED`, {
+          method: 'POST',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({values: [row]})
+        });
+        // Setear EMPRESA_ACTIVA con el nombre migrado
+        await _writeUserConfigKey(configId, 'EMPRESA_ACTIVA', cfg.EMPRESA_NOMBRE);
+        console.log('[userConfig] Migración v.0138: empresa', cfg.EMPRESA_NOMBRE, 'movida a hoja EMPRESAS');
+      }
+    }
+  } catch(e){
+    console.warn('[ensureUserConfigEmpresasSheet] Error:', e.message);
+  }
+}
+
+// Helper interno: upsert de una key en CONFIG sin tocar el resto.
+async function _writeUserConfigKey(configId, key, value){
+  const token = getToken();
+  if(!token) return;
+  const readRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/CONFIG!A2:B`, {
+    headers: {'Authorization': 'Bearer ' + token}
+  });
+  const data = await readRes.json();
+  const rows = data.values || [];
+  const idx = rows.findIndex(r => r[0] === key);
+  if(idx >= 0){
+    const rowNum = idx + 2;
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/CONFIG!A${rowNum}:B${rowNum}?valueInputOption=USER_ENTERED`, {
+      method: 'PUT',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [[key, value]]})
+    });
+  } else {
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/CONFIG!A2:append?valueInputOption=USER_ENTERED`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({values: [[key, value]]})
+    });
+  }
+}
+
+// Lee User Config desde Drive y sincroniza con localStorage.
+// v.0138: lee hoja EMPRESAS (multi-tenant), mergea con local. SUPER_ADMIN
+// también lo usa para empresas que recibió por invite (no creadas por él).
+// Retorna {GEMINI_KEY, EMPRESA_ACTIVA, empresas} o null si falló.
+async function syncFromUserConfig(){
   try {
     const configId = await ensureUserConfig();
     const token = getToken();
 
+    // Batch: CONFIG (gemini, empresa activa) + EMPRESAS (lista)
     const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/CONFIG!A2:B`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchGet?ranges=CONFIG!A2:B&ranges=EMPRESAS!A2:J`,
       {headers: {'Authorization': 'Bearer ' + token}}
     );
     if(!res.ok) throw new Error('No se pudo leer User Config');
     const data = await res.json();
 
-    const rows = data.values || [];
+    // CONFIG (key/value)
+    const cfgRows = (data.valueRanges[0].values || []);
     const cfg = {};
-    rows.forEach(r => { if(r[0]) cfg[r[0]] = r[1] || ''; });
+    cfgRows.forEach(r => { if(r[0]) cfg[r[0]] = r[1] || ''; });
+
+    // EMPRESAS (tabla)
+    const empRows = (data.valueRanges[1].values || []);
+    const remoteCompanies = empRows.filter(r => r[0] && r[1]).map(r => ({
+      nombre: r[0],
+      sheetId: r[1],
+      scriptUrl: r[2] || '',
+      folderId: r[3] || '',
+      createdAt: r[4] || '',
+      razonSocial: r[5] || '',
+      rnc: r[6] || '',
+      direccion: r[7] || '',
+      revisadoPor: r[8] || '',
+      aprobadoPor: r[9] || ''
+    }));
+
+    // Compat: formato viejo single-empresa (keys EMPRESA_NOMBRE/_SHEET_ID/...)
+    if(remoteCompanies.length === 0 && cfg.EMPRESA_NOMBRE && cfg.EMPRESA_SHEET_ID){
+      remoteCompanies.push({
+        nombre: cfg.EMPRESA_NOMBRE,
+        sheetId: cfg.EMPRESA_SHEET_ID,
+        scriptUrl: cfg.EMPRESA_SCRIPT_URL || '',
+        folderId: '',
+        createdAt: cfg.EMPRESA_CREATED_AT || new Date().toISOString(),
+        razonSocial: '', rnc: '', direccion: '', revisadoPor: '', aprobadoPor: ''
+      });
+    }
+
+    // Merge con local (no pisar — conserva invites no persistidos aún)
+    const merged = mergeCompanies(getCompanies(), remoteCompanies);
+    saveCompanies(merged);
 
     // Aplicar Gemini key
     if(cfg.GEMINI_KEY){
       localStorage.setItem(LS.GEMINI, cfg.GEMINI_KEY);
     }
 
-    // Aplicar empresa (si hay)
-    if(cfg.EMPRESA_NOMBRE && cfg.EMPRESA_SHEET_ID){
-      upsertCompany({
-        nombre: cfg.EMPRESA_NOMBRE,
-        sheetId: cfg.EMPRESA_SHEET_ID,
-        scriptUrl: cfg.EMPRESA_SCRIPT_URL || '',
-        folderId: '',
-        createdAt: cfg.EMPRESA_CREATED_AT || new Date().toISOString()
-      });
-      setCurrentCompany(cfg.EMPRESA_NOMBRE);
+    // Aplicar empresa activa (preferencia del usuario, si no hay activa local)
+    const activeName = cfg.EMPRESA_ACTIVA || cfg.EMPRESA_NOMBRE; // compat
+    if(activeName && !localStorage.getItem(LS.CURRENT_COMPANY)){
+      const found = merged.find(c => c.nombre === activeName);
+      if(found) setCurrentCompany(activeName);
     }
 
-    console.log('[userConfig] Configuración sincronizada');
-    return cfg;
+    console.log(`[userConfig] ${remoteCompanies.length} empresa(s) en remote, ${merged.length} total después de merge`);
+    return {...cfg, empresas: merged};
   } catch(e){
     console.warn('[syncFromUserConfig] Error:', e.message);
     return null;
   }
 }
 
+// v.0138: persiste TODA la lista de empresas en User Config (hoja EMPRESAS).
+// Reemplaza el contenido completo de la hoja con la lista actual. Útil tras
+// recibir un invite o tras editar metadata. Multi-empresa real.
+async function saveCompaniesToUserConfig(companies){
+  try {
+    const configId = await ensureUserConfig();
+    const token = getToken();
+    const list = (companies || []).filter(c => c && c.nombre && c.sheetId);
+
+    // 1. Limpiar EMPRESAS!A2:J (preserva headers en fila 1)
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/EMPRESAS!A2:J:clear`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+
+    // 2. Escribir filas
+    if(list.length > 0){
+      const values = list.map(c => [
+        c.nombre,
+        c.sheetId,
+        c.scriptUrl || '',
+        c.folderId || '',
+        c.createdAt || new Date().toISOString(),
+        c.razonSocial || '',
+        c.rnc || '',
+        c.direccion || '',
+        c.revisadoPor || '',
+        c.aprobadoPor || ''
+      ]);
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/EMPRESAS!A2?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({values})
+      });
+    }
+
+    console.log(`[userConfig] Persistidas ${list.length} empresa(s) en hoja EMPRESAS`);
+  } catch(e){
+    console.warn('[saveCompaniesToUserConfig] Error:', e.message);
+  }
+}
+
 // Guarda una o más claves en User Config (upsert por clave)
+// v.0138: ya NO retorna early para super_admin — éste también persiste su
+// EMPRESA_ACTIVA (preferencia personal por dispositivo) y empresas invitadas.
 async function saveToUserConfig(values){
-  if(isSuperAdmin()) return; // SUPER_ADMIN usa Admin Index
   try {
     const configId = await ensureUserConfig();
     const token = getToken();
@@ -3577,7 +3776,12 @@ async function syncFromAdminIndex(){
       revisadoPor: r[8] || '',
       aprobadoPor: r[9] || ''
     }));
-    saveCompanies(companies);
+    // v.0138: MERGE en lugar de pisar. El Admin Index solo contiene empresas
+    // creadas por este super_admin — pero el super_admin también puede haber
+    // sido invitado a empresas de OTROS admins (vía link), que viven solo en
+    // localStorage hasta este sync. Pisar borraba esas invites.
+    const merged = mergeCompanies(getCompanies(), companies);
+    saveCompanies(merged);
 
     // CONFIG (Gemini key)
     const cfgRows = (data.valueRanges[1].values || []);
@@ -3587,8 +3791,8 @@ async function syncFromAdminIndex(){
       localStorage.setItem(LS.GEMINI, cfg.GEMINI_KEY);
     }
 
-    console.log(`[adminIndex] Sincronizadas ${companies.length} empresa(s) desde Drive`);
-    return companies;
+    console.log(`[adminIndex] ${companies.length} empresa(s) en index, ${merged.length} total después de merge`);
+    return merged;
   } catch(e){
     console.warn('[syncFromAdminIndex] Error:', e.message);
     return null;
@@ -10027,6 +10231,25 @@ function _applyInvitePayload(payload){
   // Invalidar caches para que el usuario invitado lea datos frescos del Sheet
   localStorage.removeItem(LS.MASTERS);
   localStorage.removeItem(LS.BALCACHE);
+
+  // v.0138: si ya hay sesión activa (user pegó link estando logged-in),
+  // persistir AHORA — no esperar al próximo login. Background.
+  if(getToken()){
+    (async () => {
+      try {
+        const gemini = localStorage.getItem(LS.GEMINI) || '';
+        const current = getCurrentCompany();
+        await saveCompaniesToUserConfig(getCompanies());
+        const cfgToSave = {GEMINI_KEY: gemini};
+        if(current) cfgToSave.EMPRESA_ACTIVA = current.nombre;
+        await saveToUserConfig(cfgToSave);
+        localStorage.removeItem(LS.PENDING_USER_CONFIG_SAVE);
+        console.log('[invite] Persistido en User Config inmediato (sesión activa)');
+      } catch(e){
+        console.warn('[invite] Persist inmediato falló:', e.message);
+      }
+    })();
+  }
   return true;
 }
 
@@ -10213,44 +10436,31 @@ function rewireClickable(root){
     await _ensureUserEmail();
   }
 
-  // NUEVO: Si SUPER_ADMIN tiene token válido pero no tiene empresas ni Gemini,
-  // intentar sincronizar desde Admin Index en Drive (primera vez en este dispositivo).
-  // Esto evita pedirle que pegue Gemini key y configure empresas manualmente
-  // en cada dispositivo — todo viene automático del Drive.
-  if(hasToken && isSuperAdmin() && (!hasCompany || !hasGemini)){
+  // v.0138: sync desde Drive si hay token pero falta empresa/Gemini.
+  // - SUPER_ADMIN: Admin Index (empresas creadas por él) + User Config (invites externos).
+  // - Usuario regular: solo User Config.
+  // Ambos hacen MERGE — empresas conocidas en localStorage se conservan.
+  if(hasToken && (!hasCompany || !hasGemini)){
     loading(true, 'Iniciando', 'Buscando configuración en Drive...');
     try {
-      const synced = await syncFromAdminIndex();
-      // Refrescar flags después del sync
-      hasCompany = !!getCurrentCompany();
-      hasGemini = !!localStorage.getItem(LS.GEMINI);
-      if(synced && synced.length > 0){
-        // Activar primera empresa si no hay una activa
-        if(!getCurrentCompany() && synced[0]){
-          setCurrentCompany(synced[0].nombre);
-          hasCompany = true;
-        }
+      if(isSuperAdmin()){
+        await syncFromAdminIndex();
       }
-    } catch(e){
-      console.warn('[init] Sync desde Admin Index falló:', e.message);
-    }
-  }
-
-  // NUEVO: Usuario regular con token pero sin empresa/gemini → leer User Config.
-  // Caso típico: usuario instaló la PWA en Home Screen del iPhone y la abre por primera vez.
-  // Safari y PWA tienen storage separado, entonces la PWA arranca vacía pero
-  // el usuario ya autorizó Google. Buscamos su User Config en Drive.
-  if(hasToken && !isSuperAdmin() && (!hasCompany || !hasGemini)){
-    loading(true, 'Iniciando', 'Buscando configuración en Drive...');
-    try {
       const cfg = await syncFromUserConfig();
+      // Refrescar flags después del merge
       hasCompany = !!getCurrentCompany();
       hasGemini = !!localStorage.getItem(LS.GEMINI);
-      if(cfg && cfg.EMPRESA_NOMBRE){
-        console.log('[init] User Config encontrado:', cfg.EMPRESA_NOMBRE);
+      // Activar primera empresa disponible si no hay una activa
+      const all = getCompanies();
+      if(!getCurrentCompany() && all.length > 0){
+        setCurrentCompany(all[0].nombre);
+        hasCompany = true;
+      }
+      if(cfg && cfg.empresas){
+        console.log(`[init] Sync OK: ${cfg.empresas.length} empresa(s) total`);
       }
     } catch(e){
-      console.warn('[init] Sync desde User Config falló:', e.message);
+      console.warn('[init] Sync desde Drive falló:', e.message);
     }
   }
 
