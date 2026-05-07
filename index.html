@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0139';
+const APP_VERSION = '0140';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1833,10 +1833,18 @@ function setCurrentCompany(nombre){
 
   // v.0138: persistir empresa activa en User Config para que otro device la
   // restaure como activa al hacer login. Background — no bloquea UI.
+  // v.0140: skip si el valor ya está sincronizado (evita 2 calls Sheets API
+  // por cada navegación a home — contribuyó al 429 reportado).
   if(getToken() && typeof saveToUserConfig === 'function'){
-    saveToUserConfig({EMPRESA_ACTIVA: nombre}).catch(e => {
-      console.warn('[setCurrentCompany] saveToUserConfig falló:', e.message);
-    });
+    const lastSaved = localStorage.getItem('cc_last_saved_active_company');
+    if(lastSaved !== nombre){
+      localStorage.setItem('cc_last_saved_active_company', nombre);
+      saveToUserConfig({EMPRESA_ACTIVA: nombre}).catch(e => {
+        console.warn('[setCurrentCompany] saveToUserConfig falló:', e.message);
+        // Si falla, quitar el flag para que reintente la próxima
+        localStorage.removeItem('cc_last_saved_active_company');
+      });
+    }
   }
 }
 
@@ -2301,6 +2309,21 @@ async function authFetch(url, options = {}){
       throw new Error('REAUTH_REQUIRED');
     }
   }
+
+  // v.0140: retry para 429 (rate limit) y 503 (transient) con backoff
+  // exponencial. Sheets API tiene quota ~300 reads/min/user — los syncs
+  // multi-empresa de v.0138/v.0139 pueden disparar este límite. Antes
+  // bubbleaba el error como toast feo "Error Sheets: 429"; ahora absorbe
+  // transparente con 3 reintentos (300ms, 900ms, 2700ms).
+  let retries = 0;
+  while((res.status === 429 || res.status === 503) && retries < 3){
+    const delay = 300 * Math.pow(3, retries); // 300, 900, 2700 ms
+    console.warn(`[authFetch] ${res.status} en ${url.slice(0,80)} — backoff ${delay}ms (intento ${retries+1}/3)`);
+    await new Promise(r => setTimeout(r, delay));
+    res = await doFetch(getToken());
+    retries++;
+  }
+
   return res;
 }
 
@@ -3413,9 +3436,15 @@ async function ensureUserConfig(){
 // (multi-tenant). Si no la tiene, la crea Y migra el formato viejo (single
 // empresa con keys EMPRESA_NOMBRE/SHEET_ID/SCRIPT_URL/CREATED_AT en CONFIG)
 // a una primera fila de EMPRESAS. Idempotente — safe llamar siempre.
+// v.0140: cachea flag local "ya migré este configId" para no quemar quota
+// de Sheets API metadata read en cada ensureUserConfig (era 1 read extra
+// cada vez que se sincronizaba — contribuyó al 429 reportado).
 async function _ensureUserConfigEmpresasSheet(configId){
   const token = getToken();
   if(!token) return;
+  // Cache: si ya verificamos este configId en esta sesión/dispositivo, skip.
+  const migratedKey = 'cc_uc_empresas_ok_' + configId;
+  if(localStorage.getItem(migratedKey) === '1') return;
   try {
     const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}?fields=sheets.properties`, {
       headers: {'Authorization': 'Bearer ' + token}
@@ -3423,7 +3452,10 @@ async function _ensureUserConfigEmpresasSheet(configId){
     if(!metaRes.ok) return;
     const meta = await metaRes.json();
     const hasEmpresas = meta.sheets.some(s => s.properties.title === 'EMPRESAS');
-    if(hasEmpresas) return;
+    if(hasEmpresas){
+      localStorage.setItem(migratedKey, '1');
+      return;
+    }
 
     // Crear hoja EMPRESAS + headers en una sola pasada
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}:batchUpdate`, {
@@ -3468,6 +3500,8 @@ async function _ensureUserConfigEmpresasSheet(configId){
         console.log('[userConfig] Migración v.0138: empresa', cfg.EMPRESA_NOMBRE, 'movida a hoja EMPRESAS');
       }
     }
+    // v.0140: marcar como migrado para no quemar quota en próximos syncs
+    localStorage.setItem(migratedKey, '1');
   } catch(e){
     console.warn('[ensureUserConfigEmpresasSheet] Error:', e.message);
   }
@@ -10416,7 +10450,17 @@ function rewireClickable(root){
     // la empresa nueva en User Config Drive. Al volver a la PWA, sync trae la
     // lista actualizada y refrescamos el chip sin que el usuario tenga que
     // recargar manualmente. Best-effort; no bloquea UI.
+    // v.0140: throttle a 1 sync cada 5 min. iOS PWA va a background con
+    // mucha frecuencia (cambio de app, notificaciones), y disparar 2-4 calls
+    // a Sheets API cada vez fue parte del 429 reportado.
     if(getToken()){
+      const lastSyncKey = 'cc_last_visibility_sync';
+      const lastSync = parseInt(localStorage.getItem(lastSyncKey) || '0', 10);
+      const SYNC_THROTTLE_MS = 5 * 60 * 1000; // 5 minutos
+      if(Date.now() - lastSync < SYNC_THROTTLE_MS){
+        return; // throttle: no resync hasta que pasen 5 min
+      }
+      localStorage.setItem(lastSyncKey, String(Date.now()));
       (async () => {
         try {
           const before = getCompanies().length;
