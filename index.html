@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0150';
+const APP_VERSION = '0151';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7603,10 +7603,15 @@ async function _fetchFotoAsDataURI(urlFactura, token){
       _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth status=${r.status} size=${blob.size}B en ${Date.now()-t0}ms`);
       if(blob.size > 1000){
         window._fetchFotoLog.push({fileId, strategy:'lh3-noauth', ok:true, status:r.status, size:blob.size});
-        // v.0136: cambiar dataURI base64 (~360KB string) → blob URL (~50 chars).
-        // El HTML clonado por html2canvas pasa de ~11MB a ~2KB, evita cuelgue Safari.
-        const uri = URL.createObjectURL(blob);
-        _pdfLog(`fetchFoto[${fileIdShort}]: blob→objectURL (blob ${blob.size}B → URL ${uri.length}B)`);
+        // v.0151: data URI en lugar de blob URL. Safari 26 taint el canvas
+        // cuando drawImage(img) y img.src es blob: de fetch cross-origin →
+        // html2canvas falla con "createPattern: object in invalid state" en
+        // la primera página con foto. Data URIs son same-origin y no taint.
+        // El ahorro de tamaño de v.0136 es obsoleto desde v.0137 (canvasify
+        // reemplaza <img> por <canvas> antes del clone, el data URI no llega
+        // al HTML clonado).
+        const uri = await _blobToDataURI(blob);
+        _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI (blob ${blob.size}B → URI ${uri.length}B)`);
         return uri;
       }
       _pdfLog(`fetchFoto[${fileIdShort}]: lh3-noauth tinyblob (size=${blob.size}<1000), pasando a estrategia 2`);
@@ -7627,9 +7632,9 @@ async function _fetchFotoAsDataURI(urlFactura, token){
       _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth status=${r.status} size=${blob.size}B en ${Date.now()-t0}ms`);
       if(blob.size > 1000){
         window._fetchFotoLog.push({fileId, strategy:'lh3+auth', ok:true, status:r.status, size:blob.size});
-        // v.0136: ver comentario en estrategia 1.
-        const uri = URL.createObjectURL(blob);
-        _pdfLog(`fetchFoto[${fileIdShort}]: blob→objectURL (blob ${blob.size}B → URL ${uri.length}B)`);
+        // v.0151: data URI same-origin (ver comentario en estrategia 1).
+        const uri = await _blobToDataURI(blob);
+        _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI (blob ${blob.size}B → URI ${uri.length}B)`);
         return uri;
       }
       _pdfLog(`fetchFoto[${fileIdShort}]: lh3+auth tinyblob (size=${blob.size}<1000), pasando a estrategia 3`);
@@ -7650,9 +7655,9 @@ async function _fetchFotoAsDataURI(urlFactura, token){
       _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI status=${r.status} size=${blob.size}B en ${Date.now()-t0}ms`);
       if(blob.size > 1000){
         window._fetchFotoLog.push({fileId, strategy:'driveAPI', ok:true, status:r.status, size:blob.size});
-        // v.0136: ver comentario en estrategia 1.
-        const uri = URL.createObjectURL(blob);
-        _pdfLog(`fetchFoto[${fileIdShort}]: blob→objectURL (blob ${blob.size}B → URL ${uri.length}B)`);
+        // v.0151: data URI same-origin (ver comentario en estrategia 1).
+        const uri = await _blobToDataURI(blob);
+        _pdfLog(`fetchFoto[${fileIdShort}]: blob→dataURI (blob ${blob.size}B → URI ${uri.length}B)`);
         return uri;
       }
       _pdfLog(`fetchFoto[${fileIdShort}]: driveAPI tinyblob (size=${blob.size}<1000)`);
@@ -7757,10 +7762,6 @@ async function generarPDFFotos(params){
   };
 
   let renderRoot = null;
-  // v.0136: blob URLs creados por _fetchFotoAsDataURI deben liberarse al final.
-  // Los acumulamos acá fuera del try para que el finally los pueda limpiar
-  // tanto en éxito como en error o cancelación.
-  const blobUrls = [];
   try {
     _pdfLog('check libs');
     if(typeof window.html2canvas !== 'function' || !window.jspdf){
@@ -7843,15 +7844,14 @@ async function generarPDFFotos(params){
       if(f.fotoUrl){
         fotosOk++;
         totalDataUriBytes += f.fotoUrl.length;
-        // v.0136: trackeamos los blob URLs para liberar memoria al final del flow.
-        if(f.fotoUrl.startsWith('blob:')) blobUrls.push(f.fotoUrl);
       } else {
         // Las 3 estrategias de fetch fallaron o timeoutearon (>25s c/u).
         sinFotoDetalle.push(detalle('foto no accesible (timeout, eliminada de Drive o sin permisos)'));
       }
     }
-    // v.0136: ahora son blob URLs (~50B c/u en HTML), los blobs reales viven en memoria del browser.
-    _pdfLog(`prefetch DONE: ${fotosOk}/${filas.length} OK, ${sinFotoDetalle.length} faltantes, HTML refs=${(totalDataUriBytes/1024).toFixed(1)}KB (blobs en memoria), t=${Date.now()-tPrefetchStart}ms`);
+    // v.0151: data URIs (~340KB c/u) en img.src; canvasify los reemplaza por canvas
+    // antes del clone html2canvas, así que no inflan el HTML clonado.
+    _pdfLog(`prefetch DONE: ${fotosOk}/${filas.length} OK, ${sinFotoDetalle.length} faltantes, dataURI total=${(totalDataUriBytes/1024).toFixed(1)}KB en img.src, t=${Date.now()-tPrefetchStart}ms`);
 
     // v.0118: si falta cualquier foto, abortar y mostrar advertencia.
     // Guardamos los params en window para que el botón "Reintentar" pueda
@@ -8357,14 +8357,6 @@ async function generarPDFFotos(params){
       <button class="btn" onclick="copiarLogPDF()" style="padding:10px;font-size:13px;width:100%">📋 Copiar log diagnóstico</button>
     `;
     console.error('[generarPDFFotos]', e);
-  } finally {
-    // v.0136: liberar todos los blob URLs creados durante el prefetch — tanto
-    // en éxito como en error o cancelación. Sin esto los blobs quedarían
-    // ocupando memoria del browser hasta el próximo refresh.
-    if(blobUrls.length){
-      blobUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} });
-      _pdfLog(`cleanup: revocados ${blobUrls.length} blob URLs`);
-    }
   }
 }
 
