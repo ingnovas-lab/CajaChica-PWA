@@ -430,7 +430,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   <div class="body">
     <div id="company-list" style="display:flex;flex-direction:column;gap:10px"></div>
 
-    <button class="btn btn-green" onclick="show('pg-new-company')" style="margin-top:16px">
+    <button class="btn btn-green" id="btn-nueva-empresa-selector" onclick="show('pg-new-company')" style="margin-top:16px">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       Nueva empresa
     </button>
@@ -1687,7 +1687,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0138';
+const APP_VERSION = '0139';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2909,6 +2909,11 @@ async function renderCompanyList(){
     } catch(e){ console.warn(e); }
   }
 
+  // v.0139: ocultar botón "Nueva empresa" para usuarios no-super_admin (no
+  // pueden crear empresas — solo eligen entre las que les invitaron).
+  const btnNueva = document.getElementById('btn-nueva-empresa-selector');
+  if(btnNueva) btnNueva.style.display = isSuperAdmin() ? '' : 'none';
+
   const companies = getCompanies();
   const current = getCurrentCompany();
 
@@ -3232,29 +3237,34 @@ async function recargarEmpresas(){
 }
 
 // Maneja click en chip de empresa en el home
+// v.0139: cualquier usuario con >= 2 empresas puede abrir el selector.
+// Super_admin siempre tiene acceso (puede crear/editar/eliminar empresas).
 function handleCompanyChipClick(){
-  // Solo SUPER_ADMIN puede cambiar de empresa desde el chip
-  if(!isSuperAdmin()){
-    return;
-  }
+  const all = getCompanies();
+  if(all.length < 2 && !isSuperAdmin()) return;
   show('pg-select-company');
 }
 
 // Refresca el chip de empresa en el home
+// v.0139: visible si hay >= 2 empresas (cualquier rol) o si es super_admin.
+// Antes: solo super_admin veía el chip — usuarios regulares con multi-empresa
+// no encontraban cómo cambiar y abrían "dos apps independientes" como workaround.
 function refreshCompanyChip(){
   const chip = document.getElementById('company-chip');
   if(!chip) return;
 
   const current = getCurrentCompany();
+  const all = getCompanies();
   const superAdmin = isSuperAdmin();
 
-  // USUARIO regular: no ve el chip (ya sabe su única empresa)
-  if(!superAdmin){
+  if(!current){
     chip.style.display = 'none';
     return;
   }
 
-  if(!current){
+  // Mostrar si hay >= 2 empresas (puede cambiar) o si super_admin (puede crear/editar)
+  const shouldShow = all.length >= 2 || superAdmin;
+  if(!shouldShow){
     chip.style.display = 'none';
     return;
   }
@@ -3262,6 +3272,13 @@ function refreshCompanyChip(){
   chip.style.display = 'flex';
   const nameEl = document.getElementById('company-chip-name');
   if(nameEl) nameEl.textContent = current.nombre;
+
+  // Texto del botón cambia según contexto: super_admin "Cambiar" (puede crear);
+  // usuario regular "Cambiar" pero implica "elegir entre las que tengo".
+  const actionEl = document.getElementById('company-chip-action');
+  if(actionEl){
+    actionEl.textContent = all.length >= 2 ? 'Cambiar' : (superAdmin ? 'Gestionar' : 'Cambiar');
+  }
 }
 
 // "Salir" para volver a login - solo si SUPER_ADMIN quiere cambiar de Google account
@@ -10250,6 +10267,18 @@ function _applyInvitePayload(payload){
       }
     })();
   }
+
+  // v.0139: refrescar UI inmediato y avisar al usuario que tiene multi-empresa.
+  // Antes el chip "Empresa activa" no aparecía hasta el próximo show('pg-home'),
+  // dejando al usuario sin pista de que ahora puede cambiar entre empresas.
+  try {
+    if(typeof refreshCompanyChip === 'function') refreshCompanyChip();
+    const total = getCompanies().length;
+    if(total >= 2 && typeof toast === 'function'){
+      const activeName = (getCurrentCompany() || {}).nombre || 'Empresa';
+      toast(`Empresa "${activeName}" agregada · Tienes ${total} empresas — toca el chip arriba para cambiar`, 'ok');
+    }
+  } catch(e){ /* refresh es best-effort */ }
   return true;
 }
 
@@ -10381,6 +10410,30 @@ function rewireClickable(root){
     if(tokenAboutToExpire()){
       _authLog('visibilitychange: visible + token cerca de expirar → silentRefresh');
       silentRefresh().catch(e => _authLog('visibilitychange: silentRefresh threw: ' + e.message));
+    }
+    // v.0139: sync silencioso de empresas. Caso típico: el usuario abrió un
+    // 2do invite en Safari (fuera de la PWA standalone) — ese contexto guarda
+    // la empresa nueva en User Config Drive. Al volver a la PWA, sync trae la
+    // lista actualizada y refrescamos el chip sin que el usuario tenga que
+    // recargar manualmente. Best-effort; no bloquea UI.
+    if(getToken()){
+      (async () => {
+        try {
+          const before = getCompanies().length;
+          if(isSuperAdmin()) await syncFromAdminIndex();
+          await syncFromUserConfig();
+          const after = getCompanies().length;
+          if(after > before){
+            console.log(`[visibility] Empresas sincronizadas: ${before} → ${after}`);
+            if(typeof refreshCompanyChip === 'function') refreshCompanyChip();
+            if(typeof toast === 'function'){
+              toast(`Detectada${after - before > 1 ? 's' : ''} ${after - before} empresa${after - before > 1 ? 's' : ''} nueva${after - before > 1 ? 's' : ''} — toca el chip arriba para cambiar`, 'ok');
+            }
+          }
+        } catch(e){
+          console.warn('[visibility] sync empresas falló:', e.message);
+        }
+      })();
     }
   });
   setInterval(() => {
