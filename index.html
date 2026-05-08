@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0162';
+const APP_VERSION = '0163';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3483,11 +3483,12 @@ async function recargarEmpresas(){
 }
 
 // Maneja click en chip de empresa en el home
-// v.0139: cualquier usuario con >= 2 empresas puede abrir el selector.
-// Super_admin siempre tiene acceso (puede crear/editar/eliminar empresas).
+// v.0163: cualquier usuario que tenga al menos 1 empresa activa puede abrir
+// el selector. Eso garantiza acceso al botón "Recargar desde Drive" para
+// forzar sync — útil para invitados con empresas en User Config Drive que
+// aún no aparecen en su localStorage local.
 function handleCompanyChipClick(){
-  const all = getCompanies();
-  if(all.length < 2 && !isSuperAdmin()) return;
+  if(!getCurrentCompany()) return;
   show('pg-select-company');
 }
 
@@ -3500,30 +3501,31 @@ function refreshCompanyChip(){
   if(!chip) return;
 
   const current = getCurrentCompany();
-  const all = getCompanies();
-  const superAdmin = isSuperAdmin();
-
   if(!current){
     chip.style.display = 'none';
     return;
   }
 
-  // Mostrar si hay >= 2 empresas (puede cambiar) o si super_admin (puede crear/editar)
-  const shouldShow = all.length >= 2 || superAdmin;
-  if(!shouldShow){
-    chip.style.display = 'none';
-    return;
-  }
-
+  // v.0163: chip SIEMPRE visible si hay empresa activa, sin importar cuántas
+  // tenga. Esto da al usuario un punto de acceso para forzar sincronización
+  // con Drive aunque solo tenga 1 empresa local. Caso real: invitado con
+  // empresas en User Config Drive pero localStorage local con 1 sola — sin
+  // chip no podía llegar al selector para tocar "Recargar desde Drive".
   chip.style.display = 'flex';
   const nameEl = document.getElementById('company-chip-name');
   if(nameEl) nameEl.textContent = current.nombre;
 
-  // Texto del botón cambia según contexto: super_admin "Cambiar" (puede crear);
-  // usuario regular "Cambiar" pero implica "elegir entre las que tengo".
+  // Texto del botón:
+  //   - >= 2 empresas → "Cambiar" (puede elegir entre varias)
+  //   - super_admin con 1 empresa → "Gestionar" (puede crear más)
+  //   - usuario regular con 1 empresa → "Sincronizar" (para forzar sync con Drive)
+  const all = getCompanies();
+  const superAdmin = isSuperAdmin();
   const actionEl = document.getElementById('company-chip-action');
   if(actionEl){
-    actionEl.textContent = all.length >= 2 ? 'Cambiar' : (superAdmin ? 'Gestionar' : 'Cambiar');
+    if(all.length >= 2) actionEl.textContent = 'Cambiar';
+    else if(superAdmin) actionEl.textContent = 'Gestionar';
+    else actionEl.textContent = 'Sincronizar';
   }
 }
 
