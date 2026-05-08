@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0169';
+const APP_VERSION = '0170';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3766,25 +3766,66 @@ async function _ensureUserConfigEmpresasSheet(configId){
     });
     if(!metaRes.ok) return;
     const meta = await metaRes.json();
-    const hasEmpresas = meta.sheets.some(s => s.properties.title === 'EMPRESAS');
-    if(hasEmpresas){
+    const sheetsList = meta.sheets || [];
+    const hasConfig = sheetsList.some(s => s.properties.title === 'CONFIG');
+    const hasEmpresas = sheetsList.some(s => s.properties.title === 'EMPRESAS');
+
+    // v.0170: garantizar TAMBIÉN la hoja CONFIG. Caso real (kat): el sheet
+    // tenía "Hoja 1" + "EMPRESAS" pero NO "CONFIG" → batchGet fallaba con
+    // HTTP 400 "Unable to parse range: CONFIG!A2:B". Sheets default crea
+    // "Hoja 1" en español o "Sheet1" en inglés cuando se hace API create
+    // sin renombre explícito.
+    const requests = [];
+    if(!hasConfig){
+      // Buscar "Hoja 1" o "Sheet1" para renombrarla a CONFIG (preserva sheetId)
+      const defaultSheet = sheetsList.find(s =>
+        s.properties.title === 'Hoja 1' || s.properties.title === 'Sheet1' || s.properties.title === 'Hoja1'
+      );
+      if(defaultSheet){
+        requests.push({
+          updateSheetProperties: {
+            properties: {sheetId: defaultSheet.properties.sheetId, title: 'CONFIG'},
+            fields: 'title'
+          }
+        });
+      } else {
+        requests.push({addSheet: {properties: {title: 'CONFIG'}}});
+      }
+    }
+    if(!hasEmpresas){
+      requests.push({addSheet: {properties: {title: 'EMPRESAS'}}});
+    }
+
+    if(requests.length === 0){
       localStorage.setItem(migratedKey, '1');
       return;
     }
 
-    // Crear hoja EMPRESAS + headers en una sola pasada
+    // Crear hojas faltantes en una sola pasada
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}:batchUpdate`, {
       method: 'POST',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        requests: [{addSheet: {properties: {title: 'EMPRESAS'}}}]
-      })
+      body: JSON.stringify({requests})
     });
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values/EMPRESAS!A1?valueInputOption=USER_ENTERED`, {
-      method: 'PUT',
-      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-      body: JSON.stringify({values: [['NOMBRE','SHEET_ID','SCRIPT_URL','FOLDER_ID','CREATED_AT','RAZON_SOCIAL','RNC','DIRECCION','REVISADO_POR','APROBADO_POR']]})
-    });
+
+    // Headers en las hojas que se crearon/renombraron
+    const dataPayload = [];
+    if(!hasConfig){
+      dataPayload.push({range: 'CONFIG!A1', values: [['KEY', 'VALUE']]});
+    }
+    if(!hasEmpresas){
+      dataPayload.push({range: 'EMPRESAS!A1', values: [['NOMBRE','SHEET_ID','SCRIPT_URL','FOLDER_ID','CREATED_AT','RAZON_SOCIAL','RNC','DIRECCION','REVISADO_POR','APROBADO_POR']]});
+    }
+    if(dataPayload.length > 0){
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchUpdate`, {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({valueInputOption: 'USER_ENTERED', data: dataPayload})
+      });
+    }
+
+    // Si EMPRESAS se acabó de crear, no hay nada que migrar — pero se sigue
+    // ejecutando la lógica de migración del formato viejo abajo (idempotente).
 
     // Migrar formato viejo: si CONFIG tiene EMPRESA_NOMBRE/EMPRESA_SHEET_ID,
     // copiarlos como primera fila de EMPRESAS.
