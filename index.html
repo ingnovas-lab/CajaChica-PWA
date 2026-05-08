@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0163';
+const APP_VERSION = '0164';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3810,6 +3810,21 @@ async function syncFromUserConfig(){
     // Merge con local (no pisar — conserva invites no persistidos aún)
     const merged = mergeCompanies(getCompanies(), remoteCompanies);
     saveCompanies(merged);
+
+    // v.0164: sync bidireccional. Si hay empresas LOCALES que no están en
+    // remote (caso típico: usuario procesó invite en Safari pero el push al
+    // Drive falló o nunca corrió), pushear el merged al Drive ahora. Esto
+    // garantiza que la próxima vez que el usuario abra la PWA standalone
+    // u otro dispositivo, el sync incondicional traiga la lista completa.
+    const remoteSheetIds = new Set(remoteCompanies.map(c => c.sheetId).filter(Boolean));
+    const localOnly = merged.filter(c => c && c.sheetId && !remoteSheetIds.has(c.sheetId));
+    if(localOnly.length > 0){
+      console.log(`[userConfig] Push de ${localOnly.length} empresa(s) locales al Drive:`, localOnly.map(c => c.nombre));
+      // Background — no bloquea el flow del sync
+      saveCompaniesToUserConfig(merged).catch(e => {
+        console.warn('[userConfig push]', e.message);
+      });
+    }
 
     // Aplicar Gemini key
     if(cfg.GEMINI_KEY){
