@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0177';
+const APP_VERSION = '0178';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3502,9 +3502,14 @@ async function recargarEmpresas(){
       .map(r => ({nombre: r[0] || '', sheetId: r[1] || '', scriptUrl: r[2] || '', folderId: r[3] || '', createdAt: r[4] || '', razonSocial: r[5] || '', rnc: r[6] || '', direccion: r[7] || '', revisadoPor: r[8] || '', aprobadoPor: r[9] || ''}))
       .filter(c => c.sheetId);
 
-    // Mergear con local sin cleanup (para diagnóstico claro)
+    // v.0178: SYNC FULL en lugar de merge. El usuario tocó "Recargar desde
+    // Drive" explícitamente — espera que el localStorage refleje lo que está
+    // en Drive, no que se acumulen empresas viejas de cache.
+    // Antes (mergeCompanies) mantenía locales que NO estaban en remoto, lo
+    // cual generó casos como Kathy con 5 empresas en cache pero solo 2 en
+    // su _CC_UserConfig. Ahora remote pisa local.
     const localBefore = getCompanies();
-    const merged = mergeCompanies(localBefore, remoteCompanies);
+    const merged = remoteCompanies;
     saveCompanies(merged);
     renderCompanyList();
     loading(false);
