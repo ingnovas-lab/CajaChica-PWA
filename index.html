@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0157';
+const APP_VERSION = '0158';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -9302,9 +9302,13 @@ async function renameOrMoveFacturaFile(url, opts){
   const fileId = m[1];
   const token = getToken();
 
-  // Nuevo nombre con formato estándar
-  const safeSup = (opts.suplidor || 'sin-suplidor').replace(/[^a-zA-Z0-9 -]/g, '').substring(0, 40);
-  const newName = `${opts.fecha || today()} ${safeSup} ${opts.id}.jpg`;
+  // Nuevo nombre con formato estándar — mismo que al crear (línea 5953):
+  // `${fechaDot} _ ${safeLabel} _ ${entry.id}.jpg`
+  // v.0158: fix bug donde edit usaba `${fecha} ${sup} ${id}` (guiones en fecha,
+  // espacios en lugar de ` _ `). Resultado: nombres feos tras editar fecha.
+  const safeSup = (opts.suplidor || 'sin-suplidor').replace(/[^a-zA-Z0-9 -]/g, '').trim().substring(0, 40);
+  const fechaDot = (opts.fecha || today()).replace(/-/g, '.');
+  const newName = `${fechaDot} _ ${safeSup} _ ${opts.id}.jpg`;
 
   // Obtener padres actuales para poder removerlos si hay que mover
   let addParents = '';
