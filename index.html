@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0155';
+const APP_VERSION = '0156';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -8155,7 +8155,11 @@ async function generarPDFFotos(params){
       const HTML2CANVAS_TIMEOUT_MS = 8000;
       const html2canvasOpts = {scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816};
       let canvas;
-      const maxAttempts = 2;
+      // v.0156: maxAttempts 2 → 3. Razón: log Llodra 35 fotos / 45 páginas
+      // mostró que página 6 colgó AMBOS intentos (8s × 2 = 16s + abort).
+      // Patrón Safari: cuelga 1-2 veces, recupera 3ra. Con 3 intentos peor
+      // caso = 8s × 3 = 24s, mejor que el cuelgue actual de 16s + abort.
+      const maxAttempts = 3;
       for(let attempt = 1; attempt <= maxAttempts; attempt++){
         try {
           canvas = await Promise.race([
