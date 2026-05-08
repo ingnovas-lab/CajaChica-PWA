@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0173';
+const APP_VERSION = '0174';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5256,6 +5256,10 @@ async function loadMasters(){
     // los manda a Papelera. Throttle: 1 vez por hora.
     if(!isSuperAdmin()){
       _cleanupOrphanedUserFiles().catch(e => console.warn('[cleanup orphaned]', e.message));
+      // v.0174: replica la jerarquía del super_admin en Mi unidad del invitado
+      // vía shortcuts. El invitado ve `Caja Chica Master/[Empresa]/...` en
+      // su Mi unidad y al click entra a la carpeta compartida sincronizada.
+      _ensureUserDriveStructure().catch(e => console.warn('[user structure]', e.message));
     }
   } catch(e){
     // Fallback a cache
@@ -5369,6 +5373,165 @@ async function _cleanupOrphanedUserFiles(){
   } catch(e){
     console.warn('[cleanup orphan] Error general:', e.message);
   }
+}
+
+// v.0174: replica la jerarquía del super_admin en Mi unidad del invitado vía
+// shortcuts. Resuelve el requerimiento del usuario: que cada invitado vea, en
+// SU Mi unidad, la misma estructura `Caja Chica Master/[Empresa]/...` que el
+// super_admin tiene compilada en su Drive.
+//
+// Mecánica:
+//   1. Pide al Apps Script (action obtenerFolderEmpresa) el folder ID de
+//      `[Empresa]/` para cada empresa del invitado. La PWA tiene scope
+//      drive.file que NO permite resolver parents — el Apps Script sí.
+//   2. Asegura `Caja Chica Master/` como carpeta normal en Mi unidad del
+//      invitado (creada si no existe).
+//   3. Por cada empresa, asegura un shortcut dentro de `Caja Chica Master/`
+//      apuntando al folder ID de la empresa compartida. Click en el shortcut
+//      → Drive entra a la carpeta compartida sincronizada en tiempo real.
+//
+// Idempotente: chequea antes de crear. Throttle: 1 vez por hora.
+const LS_USER_STRUCTURE_AT = 'cc_user_structure_at';
+async function _ensureUserDriveStructure(){
+  if(isSuperAdmin()) return;
+  const token = getToken();
+  if(!token) return;
+
+  // Throttle 1h
+  const lastRun = parseInt(localStorage.getItem(LS_USER_STRUCTURE_AT) || '0', 10);
+  if(Date.now() - lastRun < 60*60*1000) return;
+
+  const companies = getCompanies().filter(c => c.sheetId && c.nombre);
+  if(companies.length === 0) return;
+
+  try {
+    // 1. Asegurar `Caja Chica Master/` en Mi unidad del invitado
+    const rootId = await _findOrCreateMyDriveFolder('Caja Chica Master');
+    if(!rootId){
+      console.warn('[user structure] no se pudo crear Caja Chica Master');
+      return;
+    }
+
+    // 2. Para cada empresa, asegurar shortcut
+    let created = 0, existing = 0, errors = 0;
+    for(const company of companies){
+      try {
+        // 2a. Pedir folder ID de [Empresa]/ al Apps Script
+        const empresaFolderId = await _getEmpresaFolderIdViaScript(company.sheetId);
+        if(!empresaFolderId){
+          errors++;
+          continue;
+        }
+        // 2b. Crear shortcut si no existe
+        const r = await _createShortcutIfMissing(rootId, empresaFolderId, company.nombre);
+        if(r === 'created') created++;
+        else if(r === 'existing') existing++;
+        else errors++;
+      } catch(e){
+        errors++;
+        console.warn('[user structure] error en', company.nombre, e.message);
+      }
+    }
+
+    if(created > 0 || errors > 0){
+      console.log(`[user structure] shortcuts: ${created} creados, ${existing} existentes, ${errors} errores`);
+    }
+    localStorage.setItem(LS_USER_STRUCTURE_AT, String(Date.now()));
+  } catch(e){
+    console.warn('[user structure] Error general:', e.message);
+  }
+}
+
+// Helper: encuentra o crea una carpeta por nombre en la raíz de Mi unidad del usuario
+async function _findOrCreateMyDriveFolder(name){
+  const token = getToken();
+  // Buscar carpeta existente con ese nombre (creada por la app — drive.file scope)
+  const q = `mimeType='application/vnd.google-apps.folder' and name='${name.replace(/'/g, "\\'")}' and 'me' in owners and trashed=false`;
+  const listRes = await fetch(
+    'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&fields=files(id,name,parents)&pageSize=10',
+    {headers: {Authorization: 'Bearer ' + token}}
+  );
+  if(listRes.ok){
+    const data = await listRes.json();
+    // Preferir carpeta en la raíz (sin parents distintos a "root")
+    const rootCandidate = (data.files || []).find(f => !f.parents || f.parents.length === 0);
+    if(rootCandidate) return rootCandidate.id;
+    if(data.files && data.files.length > 0) return data.files[0].id;
+  }
+
+  // Crear carpeta nueva en la raíz de Mi unidad
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+    method: 'POST',
+    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      name,
+      mimeType: 'application/vnd.google-apps.folder'
+    })
+  });
+  if(!createRes.ok){
+    const err = await createRes.text().catch(() => '');
+    console.warn('[user structure] falló crear carpeta:', createRes.status, err.slice(0, 200));
+    return null;
+  }
+  const created = await createRes.json();
+  return created.id;
+}
+
+// Helper: pide al Apps Script el folder ID de [Empresa]/ vía sheetId
+async function _getEmpresaFolderIdViaScript(sheetId){
+  const scriptUrl = getActiveScriptUrl();
+  if(!scriptUrl) return null;
+  try {
+    const res = await fetch(scriptUrl, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({action: 'obtenerFolderEmpresa', sheetId})
+    });
+    if(!res.ok) return null;
+    const data = await res.json();
+    return data.ok ? data.folderId : null;
+  } catch(e){
+    console.warn('[user structure] obtenerFolderEmpresa falló:', e.message);
+    return null;
+  }
+}
+
+// Helper: crea shortcut si no existe ya uno apuntando al target en parent
+async function _createShortcutIfMissing(parentId, targetId, name){
+  const token = getToken();
+
+  // Buscar shortcut existente en parent que apunte a targetId
+  const q = `mimeType='application/vnd.google-apps.shortcut' and '${parentId}' in parents and trashed=false`;
+  const listRes = await fetch(
+    'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
+    '&fields=files(id,name,shortcutDetails)&pageSize=100',
+    {headers: {Authorization: 'Bearer ' + token}}
+  );
+  if(listRes.ok){
+    const data = await listRes.json();
+    const existing = (data.files || []).find(f =>
+      f.shortcutDetails && f.shortcutDetails.targetId === targetId
+    );
+    if(existing) return 'existing';
+  }
+
+  // Crear shortcut
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+    method: 'POST',
+    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      name,
+      mimeType: 'application/vnd.google-apps.shortcut',
+      shortcutDetails: {targetId},
+      parents: [parentId]
+    })
+  });
+  if(!createRes.ok){
+    const err = await createRes.text().catch(() => '');
+    console.warn('[user structure] falló crear shortcut:', name, createRes.status, err.slice(0, 200));
+    return 'error';
+  }
+  return 'created';
 }
 
 function populateDropdowns(){
