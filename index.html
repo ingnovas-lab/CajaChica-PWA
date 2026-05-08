@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0165';
+const APP_VERSION = '0166';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3472,12 +3472,48 @@ async function recargarEmpresas(){
     // v.0165: invalidar cache del User Config Sheet ID
     localStorage.removeItem(LS_USER_CONFIG_ID);
     if(isSuperAdmin()) await syncFromAdminIndex();
-    await syncFromUserConfig();
-    _cleanupCompaniesFantasma();
+
+    // v.0166: lectura DIRECTA del Sheet con diagnóstico, sin pasar por
+    // syncFromUserConfig (que filtra/mergea con cleanup). Necesitamos saber
+    // EXACTO qué hay en el Drive.
+    const configId = await ensureUserConfig();
+    const token = getToken();
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchGet?ranges=CONFIG!A2:B&ranges=EMPRESAS!A2:J`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(!res.ok) throw new Error('No se pudo leer User Config: HTTP ' + res.status);
+    const data = await res.json();
+    const empRows = ((data.valueRanges && data.valueRanges[1] && data.valueRanges[1].values) || []);
+    const remoteCompanies = empRows
+      .map(r => ({nombre: r[0] || '', sheetId: r[1] || '', scriptUrl: r[2] || '', folderId: r[3] || '', createdAt: r[4] || '', razonSocial: r[5] || '', rnc: r[6] || '', direccion: r[7] || '', revisadoPor: r[8] || '', aprobadoPor: r[9] || ''}))
+      .filter(c => c.sheetId);
+
+    // Mergear con local sin cleanup (para diagnóstico claro)
+    const localBefore = getCompanies();
+    const merged = mergeCompanies(localBefore, remoteCompanies);
+    saveCompanies(merged);
     renderCompanyList();
     loading(false);
-    const total = getCompanies().length;
-    toast(`✓ ${total} empresa${total === 1 ? '' : 's'} sincronizada${total === 1 ? '' : 's'}`, 'ok');
+
+    // Diagnóstico explícito en modal
+    const lines = [
+      `📊 Configuración leída del Drive (User Config Sheet ID: …${configId.slice(-12)})`,
+      '',
+      `📥 Filas en hoja EMPRESAS: ${empRows.length}`,
+      `📥 Empresas válidas (con sheetId): ${remoteCompanies.length}`,
+    ];
+    remoteCompanies.forEach((c, i) => {
+      lines.push(`   ${i+1}. ${c.nombre || '(sin nombre)'} → sheetId …${(c.sheetId||'').slice(-12)}`);
+    });
+    lines.push('');
+    lines.push(`💾 En localStorage tras merge: ${merged.length}`);
+    merged.forEach((c, i) => {
+      lines.push(`   ${i+1}. ${c.nombre || '(sin nombre)'} → sheetId …${(c.sheetId||'').slice(-12)}`);
+    });
+
+    showModal(`<div style="font-family:var(--mono);font-size:11px;line-height:1.5;white-space:pre-wrap">${escapeHtml(lines.join('\n'))}</div>
+      <button class="btn btn-blue" onclick="closeModal()" style="margin-top:14px;width:100%">Cerrar</button>`);
   } catch(e){
     loading(false);
     toast('Error al sincronizar: ' + (e.message || e), 'err');
