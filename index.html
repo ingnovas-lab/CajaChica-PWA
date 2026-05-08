@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0172';
+const APP_VERSION = '0173';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -10761,11 +10761,19 @@ async function compartirLinkInvitacion(){
 // puede acceder al Drive del super_admin), así que mostrarles el banner solo
 // generaba ruido + texto falso ("subida por otros usuarios" cuando ellos
 // mismos eran quienes la habían subido).
+// v.0173: bug residual de v.0172. El banner tiene `data-admin-only` en el HTML
+// (línea 341), así que `applyRoleUI()` lo pone visible para CUALQUIER admin
+// (rol ADMIN en sheet USUARIOS), incluyendo invitados-admin. Mi fix v.0172
+// retornaba temprano sin ocultar, dejando el banner visible con texto vacío
+// (`—`). Fix: ocultar explícitamente antes del return para no super_admin.
 async function checkConsolidarStatus(){
-  if(!isSuperAdmin()) return;
   const banner = document.getElementById('consolidar-banner');
   const bannerText = document.getElementById('consolidar-banner-text');
   const statusLabel = document.getElementById('consolidar-status');
+  if(!isSuperAdmin()){
+    if(banner) banner.style.display = 'none';
+    return;
+  }
   if(!banner) return;
 
   try {
