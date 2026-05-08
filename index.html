@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0175';
+const APP_VERSION = '0176';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5491,55 +5491,75 @@ window._autoConsolidate = _autoConsolidate;
 //
 // Idempotente: chequea antes de crear. Throttle: 1 vez por hora.
 const LS_USER_STRUCTURE_AT = 'cc_user_structure_at';
-async function _ensureUserDriveStructure(){
-  if(isSuperAdmin()) return;
-  const token = getToken();
-  if(!token) return;
+async function _ensureUserDriveStructure(opts){
+  const force = opts && opts.force;
+  const tag = '[user structure' + (force ? ' FORCE' : '') + ']';
 
-  // Throttle 1h
-  const lastRun = parseInt(localStorage.getItem(LS_USER_STRUCTURE_AT) || '0', 10);
-  if(Date.now() - lastRun < 60*60*1000) return;
+  if(isSuperAdmin()){ console.log(tag, 'skip: es super_admin'); return {skipped: 'super_admin'}; }
+  const token = getToken();
+  if(!token){ console.log(tag, 'skip: sin token'); return {skipped: 'no_token'}; }
+
+  if(!force){
+    const lastRun = parseInt(localStorage.getItem(LS_USER_STRUCTURE_AT) || '0', 10);
+    if(Date.now() - lastRun < 60*60*1000){
+      const minutesAgo = Math.round((Date.now() - lastRun) / 60000);
+      console.log(tag, 'skip: throttle activo, último run hace', minutesAgo, 'min');
+      return {skipped: 'throttle', minutesAgo};
+    }
+  }
 
   const companies = getCompanies().filter(c => c.sheetId && c.nombre);
-  if(companies.length === 0) return;
+  console.log(tag, 'empresas a procesar:', companies.map(c => c.nombre).join(', ') || '(ninguna)');
+  if(companies.length === 0) return {skipped: 'no_companies'};
 
   try {
     // 1. Asegurar `Caja Chica Master/` en Mi unidad del invitado
+    console.log(tag, 'paso 1: asegurando carpeta `Caja Chica Master/` en Mi unidad...');
     const rootId = await _findOrCreateMyDriveFolder('Caja Chica Master');
     if(!rootId){
-      console.warn('[user structure] no se pudo crear Caja Chica Master');
-      return;
+      console.warn(tag, 'FALLO paso 1: no se pudo crear Caja Chica Master');
+      return {error: 'cannot_create_root'};
     }
+    console.log(tag, 'paso 1 OK: rootId =', rootId);
 
     // 2. Para cada empresa, asegurar shortcut
     let created = 0, existing = 0, errors = 0;
+    const errorDetails = [];
     for(const company of companies){
+      console.log(tag, 'procesando empresa:', company.nombre, 'sheetId:', company.sheetId);
       try {
         // 2a. Pedir folder ID de [Empresa]/ al Apps Script
         const empresaFolderId = await _getEmpresaFolderIdViaScript(company.sheetId);
         if(!empresaFolderId){
+          console.warn(tag, '  ❌ no se obtuvo folder ID de Apps Script para', company.nombre);
           errors++;
+          errorDetails.push(company.nombre + ': sin folder ID');
           continue;
         }
+        console.log(tag, '  folder ID de [Empresa]/:', empresaFolderId);
         // 2b. Crear shortcut si no existe
         const r = await _createShortcutIfMissing(rootId, empresaFolderId, company.nombre);
-        if(r === 'created') created++;
-        else if(r === 'existing') existing++;
-        else errors++;
+        if(r === 'created'){ created++; console.log(tag, '  ✅ shortcut creado:', company.nombre); }
+        else if(r === 'existing'){ existing++; console.log(tag, '  📎 shortcut ya existía:', company.nombre); }
+        else { errors++; errorDetails.push(company.nombre + ': falló crear'); }
       } catch(e){
         errors++;
-        console.warn('[user structure] error en', company.nombre, e.message);
+        errorDetails.push(company.nombre + ': ' + e.message);
+        console.warn(tag, '  ❌ error en', company.nombre, e.message);
       }
     }
 
-    if(created > 0 || errors > 0){
-      console.log(`[user structure] shortcuts: ${created} creados, ${existing} existentes, ${errors} errores`);
-    }
+    console.log(tag, 'RESULTADO: creados=' + created, 'existentes=' + existing, 'errores=' + errors);
+    if(errorDetails.length > 0) console.log(tag, 'detalles errores:', errorDetails);
     localStorage.setItem(LS_USER_STRUCTURE_AT, String(Date.now()));
+    return {created, existing, errors, errorDetails};
   } catch(e){
-    console.warn('[user structure] Error general:', e.message);
+    console.warn(tag, 'Error general:', e.message);
+    return {error: e.message};
   }
 }
+// v.0176: expuesto para debug manual desde dev tools de Mac/Chrome
+window._ensureUserDriveStructure = _ensureUserDriveStructure;
 
 // Helper: encuentra o crea una carpeta por nombre en la raíz de Mi unidad del usuario
 async function _findOrCreateMyDriveFolder(name){
