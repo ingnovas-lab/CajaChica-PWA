@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0154';
+const APP_VERSION = '0155';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5479,10 +5479,15 @@ async function saveEntry(){
     aprobado: aprobado,
     observaciones: document.getElementById('f-obs').value.trim(),
     usuario: await _ensureUserEmail(),
-    // v.0091: si el admin sube directamente desde la PWA, la foto va a su Drive
-    // → ya está consolidada. Si un user regular sube, va a SU Drive y Apps Script
-    // tendrá que consolidar después → CONSOLIDADO=NO.
-    consolidado: isAdmin() ? 'SI' : 'NO',
+    // v.0155: solo el super_admin (dueño del Apps Script central) tiene su Drive
+    // como destino directo de las fotos. Cualquier otro usuario — incluso si
+    // tiene rol ADMIN en una empresa — sube fotos a SU propio Drive (drive.file
+    // scope), no al del super_admin. Por eso la condición debe ser isSuperAdmin,
+    // no isAdmin. Bug v.0091-v.0154: usuarios con rol ADMIN en empresas nuevas
+    // marcaban CONSOLIDADO=SI sin que la foto llegara al Drive del super_admin
+    // → Apps Script saltaba la fila → carpeta de empresa quedaba vacía y el
+    // banner "pendientes de consolidar" nunca aparecía.
+    consolidado: isSuperAdmin() ? 'SI' : 'NO',
     ocr_status: currentCapture ? 'PROCESADO' : 'MANUAL',
     ocr_confidence: 0,
     image_base64: currentCapture ? currentCapture.base64 : null,
