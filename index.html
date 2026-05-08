@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0153';
+const APP_VERSION = '0154';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -8141,7 +8141,13 @@ async function generarPDFFotos(params){
       // ocasionalmente queda colgada en cold start — el primer intento se
       // cuelga, el segundo funciona. 20s cubre renders pesados (~280ms ×
       // páginas) con margen amplio. Si timeout, abortamos y reintentamos.
-      const HTML2CANVAS_TIMEOUT_MS = 20000;
+      // v.0154: timeout reducido de 20s → 8s. Razón: en logs de validación de
+      // v.0153, cada cuelgue de html2canvas costaba 20s de espera antes del
+      // retry. Las páginas normales tardan 100-700ms (peor caso ~2s en iPhone),
+      // así que 8s tiene margen 4-12x. Si Safari cuelga, retry tras 8s en lugar
+      // de 20s. Caso edge (página real entre 8-20s): retry innecesario cuesta
+      // ~1-2s, aceptable comparado con el ahorro de 12s por cuelgue real.
+      const HTML2CANVAS_TIMEOUT_MS = 8000;
       const html2canvasOpts = {scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', windowWidth: 816};
       let canvas;
       const maxAttempts = 2;
