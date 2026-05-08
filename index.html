@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0166';
+const APP_VERSION = '0167';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3476,10 +3476,16 @@ async function recargarEmpresas(){
     // v.0166: lectura DIRECTA del Sheet con diagnóstico, sin pasar por
     // syncFromUserConfig (que filtra/mergea con cleanup). Necesitamos saber
     // EXACTO qué hay en el Drive.
+    // v.0167: URL-encodear los ranges. Safari iOS rechaza con HTTP 400 si el
+    // `!` en `EMPRESAS!A2:J` no está encodeado. Causa raíz del bug "el sync
+    // siempre trae 1 empresa" — los ranges sin encoding fallaban silenciosamente.
     const configId = await ensureUserConfig();
     const token = getToken();
+    const ranges = ['CONFIG!A2:B', 'EMPRESAS!A2:J']
+      .map(r => 'ranges=' + encodeURIComponent(r))
+      .join('&');
     const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchGet?ranges=CONFIG!A2:B&ranges=EMPRESAS!A2:J`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchGet?${ranges}`,
       {headers: {'Authorization': 'Bearer ' + token}}
     );
     if(!res.ok) throw new Error('No se pudo leer User Config: HTTP ' + res.status);
@@ -3807,8 +3813,12 @@ async function syncFromUserConfig(){
     const token = getToken();
 
     // Batch: CONFIG (gemini, empresa activa) + EMPRESAS (lista)
+    // v.0167: URL-encodear ranges. Safari iOS rechaza HTTP 400 sin encoding.
+    const _ranges = ['CONFIG!A2:B', 'EMPRESAS!A2:J']
+      .map(r => 'ranges=' + encodeURIComponent(r))
+      .join('&');
     const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchGet?ranges=CONFIG!A2:B&ranges=EMPRESAS!A2:J`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchGet?${_ranges}`,
       {headers: {'Authorization': 'Bearer ' + token}}
     );
     if(!res.ok) throw new Error('No se pudo leer User Config');
