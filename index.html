@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0171';
+const APP_VERSION = '0172';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -10756,8 +10756,13 @@ async function compartirLinkInvitacion(){
 // ============================================================
 
 // Verifica si hay facturas sin consolidar y muestra/oculta el banner del home
+// v.0172: solo el super_admin ve este banner. Los invitados con rol ADMIN no
+// pueden consolidar (la consolidación corre el Apps Script central que solo
+// puede acceder al Drive del super_admin), así que mostrarles el banner solo
+// generaba ruido + texto falso ("subida por otros usuarios" cuando ellos
+// mismos eran quienes la habían subido).
 async function checkConsolidarStatus(){
-  if(!isAdmin()) return;
+  if(!isSuperAdmin()) return;
   const banner = document.getElementById('consolidar-banner');
   const bannerText = document.getElementById('consolidar-banner-text');
   const statusLabel = document.getElementById('consolidar-status');
