@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0167';
+const APP_VERSION = '0168';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3468,18 +3468,22 @@ async function eliminarEmpresaConfirmada(nombre){
 // puede apuntar al equivocado y trae empresas incompletas.
 async function recargarEmpresas(){
   loading(true, 'Sincronizando', 'Leyendo empresas desde Drive...');
+  let configId = null;
+  let stage = 'init';
   try {
-    // v.0165: invalidar cache del User Config Sheet ID
+    // v.0168: invalidar TODOS los caches del User Config flow para forzar
+    // re-búsqueda + re-verificación de la hoja EMPRESAS.
     localStorage.removeItem(LS_USER_CONFIG_ID);
+    Object.keys(localStorage).forEach(k => {
+      if(k.startsWith('cc_uc_empresas_ok_')) localStorage.removeItem(k);
+    });
+
     if(isSuperAdmin()) await syncFromAdminIndex();
 
-    // v.0166: lectura DIRECTA del Sheet con diagnóstico, sin pasar por
-    // syncFromUserConfig (que filtra/mergea con cleanup). Necesitamos saber
-    // EXACTO qué hay en el Drive.
-    // v.0167: URL-encodear los ranges. Safari iOS rechaza con HTTP 400 si el
-    // `!` en `EMPRESAS!A2:J` no está encodeado. Causa raíz del bug "el sync
-    // siempre trae 1 empresa" — los ranges sin encoding fallaban silenciosamente.
-    const configId = await ensureUserConfig();
+    stage = 'ensureUserConfig';
+    configId = await ensureUserConfig();
+
+    stage = 'batchGet';
     const token = getToken();
     const ranges = ['CONFIG!A2:B', 'EMPRESAS!A2:J']
       .map(r => 'ranges=' + encodeURIComponent(r))
@@ -3488,7 +3492,10 @@ async function recargarEmpresas(){
       `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchGet?${ranges}`,
       {headers: {'Authorization': 'Bearer ' + token}}
     );
-    if(!res.ok) throw new Error('No se pudo leer User Config: HTTP ' + res.status);
+    if(!res.ok){
+      const errBody = await res.text().catch(() => '(sin body)');
+      throw new Error(`HTTP ${res.status} en ${stage}: ${errBody.slice(0, 400)}`);
+    }
     const data = await res.json();
     const empRows = ((data.valueRanges && data.valueRanges[1] && data.valueRanges[1].values) || []);
     const remoteCompanies = empRows
@@ -3504,25 +3511,33 @@ async function recargarEmpresas(){
 
     // Diagnóstico explícito en modal
     const lines = [
-      `📊 Configuración leída del Drive (User Config Sheet ID: …${configId.slice(-12)})`,
+      `📊 User Config Sheet ID: …${configId.slice(-12)}`,
       '',
       `📥 Filas en hoja EMPRESAS: ${empRows.length}`,
       `📥 Empresas válidas (con sheetId): ${remoteCompanies.length}`,
     ];
     remoteCompanies.forEach((c, i) => {
-      lines.push(`   ${i+1}. ${c.nombre || '(sin nombre)'} → sheetId …${(c.sheetId||'').slice(-12)}`);
+      lines.push(`   ${i+1}. ${c.nombre || '(sin nombre)'} → …${(c.sheetId||'').slice(-12)}`);
     });
     lines.push('');
     lines.push(`💾 En localStorage tras merge: ${merged.length}`);
     merged.forEach((c, i) => {
-      lines.push(`   ${i+1}. ${c.nombre || '(sin nombre)'} → sheetId …${(c.sheetId||'').slice(-12)}`);
+      lines.push(`   ${i+1}. ${c.nombre || '(sin nombre)'} → …${(c.sheetId||'').slice(-12)}`);
     });
 
     showModal(`<div style="font-family:var(--mono);font-size:11px;line-height:1.5;white-space:pre-wrap">${escapeHtml(lines.join('\n'))}</div>
       <button class="btn btn-blue" onclick="closeModal()" style="margin-top:14px;width:100%">Cerrar</button>`);
   } catch(e){
     loading(false);
-    toast('Error al sincronizar: ' + (e.message || e), 'err');
+    const errMsg = e.message || String(e);
+    const cfgInfo = configId ? `ConfigId: …${configId.slice(-12)}` : '(no llegó a obtener configId)';
+    showModal(`<div style="font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--red)">
+      <strong>Error en sincronización</strong><br><br>
+      <strong>Etapa:</strong> ${escapeHtml(stage)}<br>
+      <strong>${escapeHtml(cfgInfo)}</strong><br><br>
+      <strong>Mensaje:</strong><br>${escapeHtml(errMsg)}
+      </div>
+      <button class="btn btn-blue" onclick="closeModal()" style="margin-top:14px;width:100%">Cerrar</button>`);
     console.error('[recargarEmpresas]', e);
   }
 }
