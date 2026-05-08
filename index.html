@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0161';
+const APP_VERSION = '0162';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1792,14 +1792,16 @@ function _cleanupCompaniesFantasma(){
       removed++;
       continue;
     }
-    // Empresa con nombre genérico "Empresa" + sheetId que también pertenece a
-    // otra empresa con nombre real → fantasma. Pero solo si esa otra existe.
+    // v.0162: empresa con nombre genérico "Empresa" siempre es fantasma si
+    // hay OTRAS empresas con nombre real. Antes solo se eliminaba si compartía
+    // sheetId — pero el caso real es que tiene su propio sheetId (de invite
+    // viejo sin payload.n) y queda como entrada huérfana.
     if(c.nombre === 'Empresa'){
-      const realCompany = before.find(x =>
-        x !== c && x.nombre !== 'Empresa' && x.sheetId === c.sheetId
+      const hasRealCompanies = before.some(x =>
+        x !== c && x.nombre && x.nombre !== 'Empresa' && x.sheetId
       );
-      if(realCompany){
-        console.warn('[cleanup] Empresa fantasma "Empresa" removida (sheetId comparte con):', realCompany.nombre);
+      if(hasRealCompanies){
+        console.warn('[cleanup] Empresa fantasma "Empresa" removida (hay otras reales):', c.sheetId ? c.sheetId.slice(-12) : '(sin id)');
         removed++;
         continue;
       }
@@ -3458,10 +3460,26 @@ async function eliminarEmpresaConfirmada(nombre){
   }
 }
 
-// Botón "Recargar desde Drive" en el selector
+// Botón "Recargar desde Drive" en el selector.
+// v.0162: ahora REALMENTE sincroniza del Drive. Antes solo re-renderizaba la
+// lista local sin tocar nada — el nombre "Recargar desde Drive" mentía. Ahora
+// llama syncFromUserConfig (y syncFromAdminIndex si super_admin), pasa por
+// _cleanupCompaniesFantasma, y rerenderiza con la lista final.
 async function recargarEmpresas(){
-  toast('Recargando desde Drive...', 'ok');
-  await renderCompanyList();
+  loading(true, 'Sincronizando', 'Leyendo empresas desde Drive...');
+  try {
+    if(isSuperAdmin()) await syncFromAdminIndex();
+    await syncFromUserConfig();
+    _cleanupCompaniesFantasma();
+    renderCompanyList();
+    loading(false);
+    const total = getCompanies().length;
+    toast(`✓ ${total} empresa${total === 1 ? '' : 's'} sincronizada${total === 1 ? '' : 's'}`, 'ok');
+  } catch(e){
+    loading(false);
+    toast('Error al sincronizar: ' + (e.message || e), 'err');
+    console.error('[recargarEmpresas]', e);
+  }
 }
 
 // Maneja click en chip de empresa en el home
