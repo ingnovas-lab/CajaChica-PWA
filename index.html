@@ -847,11 +847,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   </div>
   <div class="body">
     <div class="card">
-      <div class="field" id="inv-empresa-field">
-        <div class="lbl">Empresa para invitar</div>
-        <select id="inv-empresa" style="font-weight:600"></select>
-        <div style="font-size:11px;color:var(--text2);margin-top:4px">El invitado se vinculará al Sheet de esta empresa. Selecciona explícitamente para evitar mezclar datos.</div>
-      </div>
       <div class="field">
         <div class="lbl">Correo Google</div>
         <input type="email" id="inv-email" placeholder="usuario@gmail.com" autocapitalize="none" autocomplete="off">
@@ -1693,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0160';
+const APP_VERSION = '0161';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -10266,36 +10261,6 @@ async function eliminarUsuario(idx){
 // ============================================================
 function initInvite(){
   const obrasBox = document.getElementById('inv-obras');
-  const empresaSelect = document.getElementById('inv-empresa');
-  const empresaField = document.getElementById('inv-empresa-field');
-
-  // v.0160: popular dropdown de empresas. Default = empresa activa. El admin
-  // SELECCIONA explícitamente — elimina la dependencia silenciosa de
-  // `getActiveSheetId()` que causaba invites con sheetId revuelto.
-  // Si el admin elige una empresa distinta de la activa, alertamos para que
-  // la active primero (loadMasters depende del Sheet activo, las obras
-  // checkboxes son de la empresa activa).
-  const allCompanies = getCompanies().filter(c => c && c.sheetId && c.nombre);
-  const currentCompany = getCurrentCompany();
-  empresaSelect.innerHTML = allCompanies.map(c => {
-    const sel = (currentCompany && c.sheetId === currentCompany.sheetId) ? 'selected' : '';
-    return `<option value="${c.sheetId}" ${sel}>${escapeHtml(c.nombre)}</option>`;
-  }).join('');
-  empresaSelect.onchange = () => {
-    const selectedSheetId = empresaSelect.value;
-    const active = getCurrentCompany();
-    if(active && selectedSheetId !== active.sheetId){
-      const sel = getCompanies().find(c => c.sheetId === selectedSheetId);
-      const selName = sel ? sel.nombre : 'esa empresa';
-      alert(
-        'Para invitar a "' + selName + '" primero debes activarla.\n\n' +
-        'Cancela esta pantalla, toca el chip "Empresa activa" en el home, ' +
-        'selecciona "' + selName + '" y vuelve a invitar.'
-      );
-      // Revertir al activo
-      empresaSelect.value = active.sheetId;
-    }
-  };
 
   // Renderizar checkboxes de obras
   const renderObrasCheckboxes = (selectedCodes) => {
@@ -10318,9 +10283,7 @@ function initInvite(){
   };
 
   if(editingUserIdx !== null){
-    // Modo editar — la empresa NO se cambia (la fila USUARIOS está en el Sheet
-    // de la empresa actual). Ocultar el dropdown.
-    empresaField.style.display = 'none';
+    // Modo editar
     const u = masters.users[editingUserIdx];
     document.getElementById('invite-title').textContent = 'Editar usuario';
     document.getElementById('invite-sub').textContent = 'Cambia permisos y obras';
@@ -10331,8 +10294,6 @@ function initInvite(){
     renderObrasCheckboxes(u.proyectos || []);
   } else {
     // Modo invitar nuevo
-    // Si solo hay 1 empresa, ocultar el dropdown (no es ruido visual).
-    empresaField.style.display = allCompanies.length > 1 ? '' : 'none';
     document.getElementById('invite-title').textContent = 'Invitar usuario';
     document.getElementById('invite-sub').textContent = 'Genera link de configuración';
     document.getElementById('inv-email').value = '';
@@ -10364,42 +10325,27 @@ async function guardarInvitacion(){
     err.textContent = 'Debes asignar al menos una obra al usuario'; err.style.display = 'block'; return;
   }
 
-  // v.0160: la empresa para el invite viene del dropdown explícito (modo nuevo)
-  // o de la empresa activa (modo editar — la fila USUARIOS está en el Sheet
-  // activo). Eliminamos la dependencia silenciosa de getActiveSheetId() que
-  // causaba el bug histórico de invites con sheetId revuelto.
-  let inviteCompany;
+  // v.0161: el invite siempre va a la empresa activa (el admin la selecciona
+  // ANTES de entrar a Configuración → Usuarios). v.0143 confirm con nombre +
+  // sheetId truncado se mantiene como segunda línea de defensa por si el admin
+  // se distrajo y entró a invitar desde la empresa equivocada.
+  const inviteCompany = getCurrentCompany();
+  if(!inviteCompany || !inviteCompany.sheetId){
+    err.textContent = 'No hay empresa activa';
+    err.style.display = 'block';
+    return;
+  }
   if(editingUserIdx === null){
-    const empresaSelect = document.getElementById('inv-empresa');
-    const selectedSheetId = empresaSelect ? empresaSelect.value : '';
-    inviteCompany = getCompanies().find(c => c.sheetId === selectedSheetId);
-    if(!inviteCompany){
-      // Fallback a empresa activa si el dropdown está vacío (1 sola empresa)
-      inviteCompany = getCurrentCompany();
-    }
-    if(!inviteCompany || !inviteCompany.sheetId){
-      err.textContent = 'No se pudo determinar la empresa para invitar';
-      err.style.display = 'block';
-      return;
-    }
-    // Confirmación visual con nombre + sheetId truncado (segunda línea de defensa)
     const sheetIdShort = '...' + inviteCompany.sheetId.slice(-12);
     const ok = confirm(
       `Vas a invitar a "${nombre}" a la empresa:\n\n` +
       `   ${inviteCompany.nombre}\n` +
       `   Sheet: ${sheetIdShort}\n\n` +
-      `¿Es correcto?`
+      `¿Es correcto?\n\n` +
+      `Si querías invitar a otra empresa, cancela y cambia primero desde el chip "Empresa activa → Cambiar".`
     );
     if(!ok){
-      err.textContent = 'Invitación cancelada';
-      err.style.display = 'block';
-      return;
-    }
-  } else {
-    // Modo editar: empresa = activa (no se cambia)
-    inviteCompany = getCurrentCompany();
-    if(!inviteCompany || !inviteCompany.sheetId){
-      err.textContent = 'No hay empresa activa';
+      err.textContent = 'Invitación cancelada — cambia de empresa antes de continuar';
       err.style.display = 'block';
       return;
     }
