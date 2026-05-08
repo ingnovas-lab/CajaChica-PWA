@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0176';
+const APP_VERSION = '0177';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5256,19 +5256,7 @@ async function loadMasters(){
     // los manda a Papelera. Throttle: 1 vez por hora.
     if(!isSuperAdmin()){
       _cleanupOrphanedUserFiles().catch(e => console.warn('[cleanup orphaned]', e.message));
-      // v.0174: replica la jerarquía del super_admin en Mi unidad del invitado
-      // vía shortcuts. El invitado ve `Caja Chica Master/[Empresa]/...` en
-      // su Mi unidad y al click entra a la carpeta compartida sincronizada.
-      _ensureUserDriveStructure().catch(e => console.warn('[user structure]', e.message));
     }
-
-    // v.0175: auto-consolidación al boot. Sustituye al botón manual "Consolidar
-    // facturas". Cuando vos (super_admin) o cualquier invitado abre la PWA,
-    // en background se llama action `consolidar` al Apps Script. El script
-    // copia las facturas pendientes del Drive de cada usuario al Drive del
-    // super_admin. Throttle 10 min para no saturar Apps Script con calls
-    // simultáneos. NO bloquea el boot.
-    _autoConsolidate().catch(e => console.warn('[auto consolidate]', e.message));
   } catch(e){
     // Fallback a cache
     const c = localStorage.getItem(LS.MASTERS);
@@ -5291,66 +5279,48 @@ async function loadMasters(){
 //   - Lee TODAS las empresas del usuario para no borrar fotos de otra empresa.
 //   - Throttle: solo 1 vez por hora (key cc_orphan_cleanup_at).
 //   - Background — no bloquea boot.
-// v.0175: refactor con logging extenso siempre + soporte `{force: true}` para
-// bypass del throttle 1h y del cutoff "archivos > 1h". Útil para debug manual:
-//   await window._cleanupOrphanedUserFiles({force: true})
-// Casos cubiertos: fotos legacy de antes de v.0171, fotos consolidadas con
-// URL ya re-apuntada al admin, fotos eliminadas por admin, etc.
 const LS_ORPHAN_CLEANUP_AT = 'cc_orphan_cleanup_at';
-async function _cleanupOrphanedUserFiles(opts){
-  const force = opts && opts.force;
-  const tag = '[cleanup orphan' + (force ? ' FORCE' : '') + ']';
-
-  if(isSuperAdmin()){ console.log(tag, 'skip: es super_admin'); return {skipped: 'super_admin'}; }
+async function _cleanupOrphanedUserFiles(){
+  if(isSuperAdmin()) return;
   const token = getToken();
-  if(!token){ console.log(tag, 'skip: sin token'); return {skipped: 'no_token'}; }
+  if(!token) return;
 
-  if(!force){
-    const lastRun = parseInt(localStorage.getItem(LS_ORPHAN_CLEANUP_AT) || '0', 10);
-    if(Date.now() - lastRun < 60*60*1000){
-      const minutesAgo = Math.round((Date.now() - lastRun) / 60000);
-      console.log(tag, 'skip: throttle activo, último run hace', minutesAgo, 'min');
-      return {skipped: 'throttle', minutesAgo};
-    }
-  }
+  // Throttle: 1 vez por hora
+  const lastRun = parseInt(localStorage.getItem(LS_ORPHAN_CLEANUP_AT) || '0', 10);
+  if(Date.now() - lastRun < 60*60*1000) return;
 
   const allCompanies = getCompanies().filter(c => c.sheetId);
-  console.log(tag, 'empresas del usuario:', allCompanies.map(c => c.nombre).join(', ') || '(ninguna)');
-  if(allCompanies.length === 0) return {skipped: 'no_companies'};
+  if(allCompanies.length === 0) return;
 
   try {
-    // 1. Listar imágenes propias del usuario (visibles via drive.file scope)
+    // 1. Listar imágenes que la app creó y que aún están vivas en el Drive del usuario
     const q = "mimeType contains 'image/' and 'me' in owners and trashed=false";
     const listRes = await fetch(
       'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
-      '&fields=files(id,name,createdTime,parents)&pageSize=1000',
+      '&fields=files(id,name,createdTime)&pageSize=1000',
       {headers: {'Authorization': 'Bearer ' + token}}
     );
-    if(!listRes.ok){
-      console.warn(tag, 'list fail:', listRes.status);
-      return {error: 'list_fail', status: listRes.status};
-    }
+    if(!listRes.ok) return;
     const listData = await listRes.json();
     const myFiles = listData.files || [];
-    console.log(tag, 'archivos imagen propios totales:', myFiles.length);
     if(myFiles.length === 0){
       localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
-      return {totalImages: 0};
+      return;
     }
 
-    // 2. Filtrar candidatos (>1h o force)
-    const cutoff = force ? Date.now() + 1000 : Date.now() - 60*60*1000;
+    // 2. Filtrar candidatos creados hace > 1 hora (no borrar uploads recientes)
+    const cutoff = Date.now() - 60*60*1000;
     const candidatos = myFiles.filter(f => {
       const t = new Date(f.createdTime || 0).getTime();
       return t > 0 && t < cutoff;
     });
-    console.log(tag, 'candidatos (>1h o force):', candidatos.length);
     if(candidatos.length === 0){
       localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
-      return {totalImages: myFiles.length, candidates: 0};
+      return;
     }
 
-    // 3. Leer URLs referenciadas en TODOS los sheets de empresas del usuario
+    // 3. Leer URLs de TODOS los sheets de empresas del usuario.
+    //    REGISTRO!P (URL_FACTURA) + INGRESOS!G (URL_COMPROBANTE).
     const referencedIds = new Set();
     for(const company of allCompanies){
       try {
@@ -5361,296 +5331,44 @@ async function _cleanupOrphanedUserFiles(opts){
           `https://sheets.googleapis.com/v4/spreadsheets/${company.sheetId}/values:batchGet?${ranges}`,
           {headers: {'Authorization': 'Bearer ' + token}}
         );
-        if(!sheetRes.ok){
-          console.warn(tag, 'sheet fail:', company.nombre, sheetRes.status);
-          continue;
-        }
+        if(!sheetRes.ok) continue;
         const sheetData = await sheetRes.json();
-        let countInThisSheet = 0;
         (sheetData.valueRanges || []).forEach(vr => {
           (vr.values || []).forEach(row => {
             const url = row[0];
             if(url){
               const m = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
-              if(m){ referencedIds.add(m[1]); countInThisSheet++; }
+              if(m) referencedIds.add(m[1]);
             }
           });
         });
-        console.log(tag, company.nombre, ':', countInThisSheet, 'URLs referenciadas');
       } catch(e){
-        console.warn(tag, 'error en', company.nombre, e.message);
+        console.warn('[cleanup orphan] error en', company.nombre, e.message);
       }
     }
-    console.log(tag, 'IDs únicos referenciados en sheets:', referencedIds.size);
 
-    // 4. Trashear archivos no referenciados
-    let trashed = 0, errors = 0, skippedRef = 0;
-    const trashedNames = [];
+    // 4. Trashear archivos no referenciados en ningún sheet
+    let trashed = 0, errors = 0;
     for(const f of candidatos){
-      if(referencedIds.has(f.id)){ skippedRef++; continue; }
+      if(referencedIds.has(f.id)) continue;
       try {
         const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
           method: 'PATCH',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
           body: JSON.stringify({trashed: true})
         });
-        if(r.ok){ trashed++; trashedNames.push(f.name); }
-        else { errors++; console.warn(tag, 'trash fail:', f.name, r.status); }
-      } catch(e){ errors++; console.warn(tag, 'trash error:', f.name, e.message); }
+        if(r.ok) trashed++; else errors++;
+      } catch(e){ errors++; }
     }
-
-    console.log(tag, 'RESULTADO:',
-      trashed, 'a Papelera,',
-      skippedRef, 'aún referenciados,',
-      errors, 'errores.',
-      'Total candidatos:', candidatos.length, '/', myFiles.length);
-    if(trashedNames.length > 0){
-      console.log(tag, 'trasheados:', trashedNames.slice(0, 10).join(', ') +
-        (trashedNames.length > 10 ? ' ... (+' + (trashedNames.length - 10) + ')' : ''));
+    if(trashed > 0 || errors > 0){
+      console.log(`[cleanup orphan] ${trashed} archivos huérfanos a Papelera, ${errors} errores. ` +
+        `Candidatos: ${candidatos.length}, referenciados: ${referencedIds.size}`);
     }
 
     localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
-    return {totalImages: myFiles.length, candidates: candidatos.length, trashed, skippedRef, errors};
   } catch(e){
-    console.warn(tag, 'Error general:', e.message);
-    return {error: e.message};
+    console.warn('[cleanup orphan] Error general:', e.message);
   }
-}
-// v.0175: expuesto para debug manual desde dev tools de Safari/Chrome
-window._cleanupOrphanedUserFiles = _cleanupOrphanedUserFiles;
-
-// v.0175: auto-consolidación al boot. Sustituye al botón manual de "Consolidar
-// facturas" que el super_admin tenía que tocar. Cuando vos o cualquier invitado
-// abre la PWA, en background se llama a action `consolidar` del Apps Script
-// para la empresa activa. Throttle 10 min para no saturar el script con
-// runs concurrentes. NO bloquea el boot (background promise).
-//
-// Esto es el espejo de v.0174: igual que v.0174 hace que el invitado vea los
-// cambios del super_admin en su Mi unidad, esta función hace que las facturas/
-// cambios del invitado lleguen al Drive del super_admin sin intervención manual.
-const LS_AUTO_CONSOLIDATE_AT = 'cc_auto_consolidate_at';
-async function _autoConsolidate(){
-  const sheetId = getActiveSheetId();
-  const scriptUrl = getActiveScriptUrl();
-  if(!sheetId || !scriptUrl){
-    console.log('[auto consolidate] skip: sin sheetId o scriptUrl');
-    return {skipped: 'no_sheet_or_script'};
-  }
-
-  // Throttle 10 min
-  const lastRun = parseInt(localStorage.getItem(LS_AUTO_CONSOLIDATE_AT) || '0', 10);
-  if(Date.now() - lastRun < 10*60*1000){
-    const minutesAgo = Math.round((Date.now() - lastRun) / 60000);
-    console.log('[auto consolidate] skip: throttle, último run hace', minutesAgo, 'min');
-    return {skipped: 'throttle'};
-  }
-
-  try {
-    console.log('[auto consolidate] iniciando para empresa activa, sheetId:', sheetId);
-    const res = await fetch(scriptUrl, {
-      method: 'POST',
-      headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({action: 'consolidar', trigger: 'auto', sheetId})
-    });
-    if(!res.ok){
-      console.warn('[auto consolidate] HTTP', res.status);
-      return {error: 'http_' + res.status};
-    }
-    const data = await res.json();
-    if(data.error){
-      console.warn('[auto consolidate] script error:', data.error);
-      return {error: data.error};
-    }
-    const c = data.consolidadas || 0;
-    console.log('[auto consolidate]', c, 'consolidadas,',
-      (data.omitidas || 0), 'sin foto,',
-      (data.errores || 0), 'errores');
-    localStorage.setItem(LS_AUTO_CONSOLIDATE_AT, String(Date.now()));
-    return data;
-  } catch(e){
-    console.warn('[auto consolidate] error:', e.message);
-    return {error: e.message};
-  }
-}
-window._autoConsolidate = _autoConsolidate;
-
-// v.0174: replica la jerarquía del super_admin en Mi unidad del invitado vía
-// shortcuts. Resuelve el requerimiento del usuario: que cada invitado vea, en
-// SU Mi unidad, la misma estructura `Caja Chica Master/[Empresa]/...` que el
-// super_admin tiene compilada en su Drive.
-//
-// Mecánica:
-//   1. Pide al Apps Script (action obtenerFolderEmpresa) el folder ID de
-//      `[Empresa]/` para cada empresa del invitado. La PWA tiene scope
-//      drive.file que NO permite resolver parents — el Apps Script sí.
-//   2. Asegura `Caja Chica Master/` como carpeta normal en Mi unidad del
-//      invitado (creada si no existe).
-//   3. Por cada empresa, asegura un shortcut dentro de `Caja Chica Master/`
-//      apuntando al folder ID de la empresa compartida. Click en el shortcut
-//      → Drive entra a la carpeta compartida sincronizada en tiempo real.
-//
-// Idempotente: chequea antes de crear. Throttle: 1 vez por hora.
-const LS_USER_STRUCTURE_AT = 'cc_user_structure_at';
-async function _ensureUserDriveStructure(opts){
-  const force = opts && opts.force;
-  const tag = '[user structure' + (force ? ' FORCE' : '') + ']';
-
-  if(isSuperAdmin()){ console.log(tag, 'skip: es super_admin'); return {skipped: 'super_admin'}; }
-  const token = getToken();
-  if(!token){ console.log(tag, 'skip: sin token'); return {skipped: 'no_token'}; }
-
-  if(!force){
-    const lastRun = parseInt(localStorage.getItem(LS_USER_STRUCTURE_AT) || '0', 10);
-    if(Date.now() - lastRun < 60*60*1000){
-      const minutesAgo = Math.round((Date.now() - lastRun) / 60000);
-      console.log(tag, 'skip: throttle activo, último run hace', minutesAgo, 'min');
-      return {skipped: 'throttle', minutesAgo};
-    }
-  }
-
-  const companies = getCompanies().filter(c => c.sheetId && c.nombre);
-  console.log(tag, 'empresas a procesar:', companies.map(c => c.nombre).join(', ') || '(ninguna)');
-  if(companies.length === 0) return {skipped: 'no_companies'};
-
-  try {
-    // 1. Asegurar `Caja Chica Master/` en Mi unidad del invitado
-    console.log(tag, 'paso 1: asegurando carpeta `Caja Chica Master/` en Mi unidad...');
-    const rootId = await _findOrCreateMyDriveFolder('Caja Chica Master');
-    if(!rootId){
-      console.warn(tag, 'FALLO paso 1: no se pudo crear Caja Chica Master');
-      return {error: 'cannot_create_root'};
-    }
-    console.log(tag, 'paso 1 OK: rootId =', rootId);
-
-    // 2. Para cada empresa, asegurar shortcut
-    let created = 0, existing = 0, errors = 0;
-    const errorDetails = [];
-    for(const company of companies){
-      console.log(tag, 'procesando empresa:', company.nombre, 'sheetId:', company.sheetId);
-      try {
-        // 2a. Pedir folder ID de [Empresa]/ al Apps Script
-        const empresaFolderId = await _getEmpresaFolderIdViaScript(company.sheetId);
-        if(!empresaFolderId){
-          console.warn(tag, '  ❌ no se obtuvo folder ID de Apps Script para', company.nombre);
-          errors++;
-          errorDetails.push(company.nombre + ': sin folder ID');
-          continue;
-        }
-        console.log(tag, '  folder ID de [Empresa]/:', empresaFolderId);
-        // 2b. Crear shortcut si no existe
-        const r = await _createShortcutIfMissing(rootId, empresaFolderId, company.nombre);
-        if(r === 'created'){ created++; console.log(tag, '  ✅ shortcut creado:', company.nombre); }
-        else if(r === 'existing'){ existing++; console.log(tag, '  📎 shortcut ya existía:', company.nombre); }
-        else { errors++; errorDetails.push(company.nombre + ': falló crear'); }
-      } catch(e){
-        errors++;
-        errorDetails.push(company.nombre + ': ' + e.message);
-        console.warn(tag, '  ❌ error en', company.nombre, e.message);
-      }
-    }
-
-    console.log(tag, 'RESULTADO: creados=' + created, 'existentes=' + existing, 'errores=' + errors);
-    if(errorDetails.length > 0) console.log(tag, 'detalles errores:', errorDetails);
-    localStorage.setItem(LS_USER_STRUCTURE_AT, String(Date.now()));
-    return {created, existing, errors, errorDetails};
-  } catch(e){
-    console.warn(tag, 'Error general:', e.message);
-    return {error: e.message};
-  }
-}
-// v.0176: expuesto para debug manual desde dev tools de Mac/Chrome
-window._ensureUserDriveStructure = _ensureUserDriveStructure;
-
-// Helper: encuentra o crea una carpeta por nombre en la raíz de Mi unidad del usuario
-async function _findOrCreateMyDriveFolder(name){
-  const token = getToken();
-  // Buscar carpeta existente con ese nombre (creada por la app — drive.file scope)
-  const q = `mimeType='application/vnd.google-apps.folder' and name='${name.replace(/'/g, "\\'")}' and 'me' in owners and trashed=false`;
-  const listRes = await fetch(
-    'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&fields=files(id,name,parents)&pageSize=10',
-    {headers: {Authorization: 'Bearer ' + token}}
-  );
-  if(listRes.ok){
-    const data = await listRes.json();
-    // Preferir carpeta en la raíz (sin parents distintos a "root")
-    const rootCandidate = (data.files || []).find(f => !f.parents || f.parents.length === 0);
-    if(rootCandidate) return rootCandidate.id;
-    if(data.files && data.files.length > 0) return data.files[0].id;
-  }
-
-  // Crear carpeta nueva en la raíz de Mi unidad
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
-    method: 'POST',
-    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      name,
-      mimeType: 'application/vnd.google-apps.folder'
-    })
-  });
-  if(!createRes.ok){
-    const err = await createRes.text().catch(() => '');
-    console.warn('[user structure] falló crear carpeta:', createRes.status, err.slice(0, 200));
-    return null;
-  }
-  const created = await createRes.json();
-  return created.id;
-}
-
-// Helper: pide al Apps Script el folder ID de [Empresa]/ vía sheetId
-async function _getEmpresaFolderIdViaScript(sheetId){
-  const scriptUrl = getActiveScriptUrl();
-  if(!scriptUrl) return null;
-  try {
-    const res = await fetch(scriptUrl, {
-      method: 'POST',
-      headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({action: 'obtenerFolderEmpresa', sheetId})
-    });
-    if(!res.ok) return null;
-    const data = await res.json();
-    return data.ok ? data.folderId : null;
-  } catch(e){
-    console.warn('[user structure] obtenerFolderEmpresa falló:', e.message);
-    return null;
-  }
-}
-
-// Helper: crea shortcut si no existe ya uno apuntando al target en parent
-async function _createShortcutIfMissing(parentId, targetId, name){
-  const token = getToken();
-
-  // Buscar shortcut existente en parent que apunte a targetId
-  const q = `mimeType='application/vnd.google-apps.shortcut' and '${parentId}' in parents and trashed=false`;
-  const listRes = await fetch(
-    'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
-    '&fields=files(id,name,shortcutDetails)&pageSize=100',
-    {headers: {Authorization: 'Bearer ' + token}}
-  );
-  if(listRes.ok){
-    const data = await listRes.json();
-    const existing = (data.files || []).find(f =>
-      f.shortcutDetails && f.shortcutDetails.targetId === targetId
-    );
-    if(existing) return 'existing';
-  }
-
-  // Crear shortcut
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
-    method: 'POST',
-    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      name,
-      mimeType: 'application/vnd.google-apps.shortcut',
-      shortcutDetails: {targetId},
-      parents: [parentId]
-    })
-  });
-  if(!createRes.ok){
-    const err = await createRes.text().catch(() => '');
-    console.warn('[user structure] falló crear shortcut:', name, createRes.status, err.slice(0, 200));
-    return 'error';
-  }
-  return 'created';
 }
 
 function populateDropdowns(){
