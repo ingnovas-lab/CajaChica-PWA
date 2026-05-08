@@ -847,6 +847,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   </div>
   <div class="body">
     <div class="card">
+      <div class="field" id="inv-empresa-field">
+        <div class="lbl">Empresa para invitar</div>
+        <select id="inv-empresa" style="font-weight:600"></select>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">El invitado se vinculará al Sheet de esta empresa. Selecciona explícitamente para evitar mezclar datos.</div>
+      </div>
       <div class="field">
         <div class="lbl">Correo Google</div>
         <input type="email" id="inv-email" placeholder="usuario@gmail.com" autocapitalize="none" autocomplete="off">
@@ -1688,7 +1693,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0159';
+const APP_VERSION = '0160';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1763,6 +1768,67 @@ function upsertCompany(company){
     list.push(company);
   }
   saveCompanies(list);
+}
+
+// v.0160: detecta y elimina empresas fantasma del localStorage. Causas:
+//   1. Empresa con sheetId vacío o muy corto (entrada corrupta).
+//   2. Múltiples empresas comparten sheetId pero distintos nombres (bug
+//      histórico v.0091-v.0143 donde invites con `getActiveSheetId` revuelto
+//      generaban entries con sheetId compartido). Mantenemos la PRIMERA
+//      válida y eliminamos las demás.
+//   3. Nombre genérico "Empresa" (default cuando payload.n viene vacío).
+// Si se hace cleanup, persiste a User Config Drive en background.
+function _cleanupCompaniesFantasma(){
+  const before = getCompanies();
+  if(before.length === 0) return;
+
+  const seenSheetIds = new Set();
+  const cleaned = [];
+  let removed = 0;
+
+  for(const c of before){
+    if(!c || !c.sheetId || typeof c.sheetId !== 'string' || c.sheetId.length < 10){
+      console.warn('[cleanup] Empresa sin sheetId válido removida:', c);
+      removed++;
+      continue;
+    }
+    if(seenSheetIds.has(c.sheetId)){
+      console.warn('[cleanup] Empresa duplicada por sheetId removida:', c.nombre, c.sheetId.slice(-12));
+      removed++;
+      continue;
+    }
+    // Empresa con nombre genérico "Empresa" + sheetId que también pertenece a
+    // otra empresa con nombre real → fantasma. Pero solo si esa otra existe.
+    if(c.nombre === 'Empresa'){
+      const realCompany = before.find(x =>
+        x !== c && x.nombre !== 'Empresa' && x.sheetId === c.sheetId
+      );
+      if(realCompany){
+        console.warn('[cleanup] Empresa fantasma "Empresa" removida (sheetId comparte con):', realCompany.nombre);
+        removed++;
+        continue;
+      }
+    }
+    seenSheetIds.add(c.sheetId);
+    cleaned.push(c);
+  }
+
+  if(removed > 0){
+    saveCompanies(cleaned);
+    console.log(`[cleanup] Removidas ${removed} empresa(s) inválida(s). Quedan ${cleaned.length}.`);
+    // Persistir a Drive en background
+    if(getToken() && typeof saveCompaniesToUserConfig === 'function'){
+      saveCompaniesToUserConfig(cleaned).catch(e => {
+        console.warn('[cleanup] saveCompaniesToUserConfig falló:', e.message);
+      });
+    }
+    // Si la empresa activa fue eliminada, fallback a la primera disponible
+    const active = localStorage.getItem(LS.CURRENT_COMPANY);
+    if(active && !cleaned.find(c => c.nombre === active)){
+      if(cleaned.length > 0) setCurrentCompany(cleaned[0].nombre);
+      else localStorage.removeItem(LS.CURRENT_COMPANY);
+    }
+  }
 }
 
 // v.0138: mergea dos listas de empresas (local + remota) por sheetId.
@@ -10200,6 +10266,36 @@ async function eliminarUsuario(idx){
 // ============================================================
 function initInvite(){
   const obrasBox = document.getElementById('inv-obras');
+  const empresaSelect = document.getElementById('inv-empresa');
+  const empresaField = document.getElementById('inv-empresa-field');
+
+  // v.0160: popular dropdown de empresas. Default = empresa activa. El admin
+  // SELECCIONA explícitamente — elimina la dependencia silenciosa de
+  // `getActiveSheetId()` que causaba invites con sheetId revuelto.
+  // Si el admin elige una empresa distinta de la activa, alertamos para que
+  // la active primero (loadMasters depende del Sheet activo, las obras
+  // checkboxes son de la empresa activa).
+  const allCompanies = getCompanies().filter(c => c && c.sheetId && c.nombre);
+  const currentCompany = getCurrentCompany();
+  empresaSelect.innerHTML = allCompanies.map(c => {
+    const sel = (currentCompany && c.sheetId === currentCompany.sheetId) ? 'selected' : '';
+    return `<option value="${c.sheetId}" ${sel}>${escapeHtml(c.nombre)}</option>`;
+  }).join('');
+  empresaSelect.onchange = () => {
+    const selectedSheetId = empresaSelect.value;
+    const active = getCurrentCompany();
+    if(active && selectedSheetId !== active.sheetId){
+      const sel = getCompanies().find(c => c.sheetId === selectedSheetId);
+      const selName = sel ? sel.nombre : 'esa empresa';
+      alert(
+        'Para invitar a "' + selName + '" primero debes activarla.\n\n' +
+        'Cancela esta pantalla, toca el chip "Empresa activa" en el home, ' +
+        'selecciona "' + selName + '" y vuelve a invitar.'
+      );
+      // Revertir al activo
+      empresaSelect.value = active.sheetId;
+    }
+  };
 
   // Renderizar checkboxes de obras
   const renderObrasCheckboxes = (selectedCodes) => {
@@ -10222,7 +10318,9 @@ function initInvite(){
   };
 
   if(editingUserIdx !== null){
-    // Modo editar
+    // Modo editar — la empresa NO se cambia (la fila USUARIOS está en el Sheet
+    // de la empresa actual). Ocultar el dropdown.
+    empresaField.style.display = 'none';
     const u = masters.users[editingUserIdx];
     document.getElementById('invite-title').textContent = 'Editar usuario';
     document.getElementById('invite-sub').textContent = 'Cambia permisos y obras';
@@ -10233,6 +10331,8 @@ function initInvite(){
     renderObrasCheckboxes(u.proyectos || []);
   } else {
     // Modo invitar nuevo
+    // Si solo hay 1 empresa, ocultar el dropdown (no es ruido visual).
+    empresaField.style.display = allCompanies.length > 1 ? '' : 'none';
     document.getElementById('invite-title').textContent = 'Invitar usuario';
     document.getElementById('invite-sub').textContent = 'Genera link de configuración';
     document.getElementById('inv-email').value = '';
@@ -10264,27 +10364,42 @@ async function guardarInvitacion(){
     err.textContent = 'Debes asignar al menos una obra al usuario'; err.style.display = 'block'; return;
   }
 
-  // v.0141: en modo invitar nuevo, confirmar la empresa activa antes de
-  // generar el link. El sheetId del invite viene de getActiveSheetId() — si
-  // el admin tiene activa la empresa equivocada, los invitados terminan con
-  // sheetIds revueltos (causa de "veo proyectos de otra empresa"). Sin UI
-  // nueva, solo el confirm nativo. Skip en modo editar (la empresa ya está
-  // fijada en la fila USUARIOS existente, no se mueve).
-  // v.0143: agregar sheetId truncado para que el admin pueda verificar
-  // visualmente que el ID es el correcto antes de mandar el link.
+  // v.0160: la empresa para el invite viene del dropdown explícito (modo nuevo)
+  // o de la empresa activa (modo editar — la fila USUARIOS está en el Sheet
+  // activo). Eliminamos la dependencia silenciosa de getActiveSheetId() que
+  // causaba el bug histórico de invites con sheetId revuelto.
+  let inviteCompany;
   if(editingUserIdx === null){
-    const cur = getCurrentCompany() || {};
-    const empresaActiva = cur.nombre || 'Empresa';
-    const sheetIdShort = cur.sheetId ? '...' + cur.sheetId.slice(-12) : '(sin ID)';
+    const empresaSelect = document.getElementById('inv-empresa');
+    const selectedSheetId = empresaSelect ? empresaSelect.value : '';
+    inviteCompany = getCompanies().find(c => c.sheetId === selectedSheetId);
+    if(!inviteCompany){
+      // Fallback a empresa activa si el dropdown está vacío (1 sola empresa)
+      inviteCompany = getCurrentCompany();
+    }
+    if(!inviteCompany || !inviteCompany.sheetId){
+      err.textContent = 'No se pudo determinar la empresa para invitar';
+      err.style.display = 'block';
+      return;
+    }
+    // Confirmación visual con nombre + sheetId truncado (segunda línea de defensa)
+    const sheetIdShort = '...' + inviteCompany.sheetId.slice(-12);
     const ok = confirm(
       `Vas a invitar a "${nombre}" a la empresa:\n\n` +
-      `   ${empresaActiva}\n` +
+      `   ${inviteCompany.nombre}\n` +
       `   Sheet: ${sheetIdShort}\n\n` +
-      `¿Es correcto?\n\n` +
-      `Si querías invitar a otra empresa, cancela y cambia primero desde el chip "Empresa activa → Cambiar".`
+      `¿Es correcto?`
     );
     if(!ok){
-      err.textContent = 'Invitación cancelada — cambia de empresa antes de continuar';
+      err.textContent = 'Invitación cancelada';
+      err.style.display = 'block';
+      return;
+    }
+  } else {
+    // Modo editar: empresa = activa (no se cambia)
+    inviteCompany = getCurrentCompany();
+    if(!inviteCompany || !inviteCompany.sheetId){
+      err.textContent = 'No hay empresa activa';
       err.style.display = 'block';
       return;
     }
@@ -10360,15 +10475,14 @@ async function guardarInvitacion(){
 
     // Generar link de invitación (se muestra tanto al invitar como al editar)
     // Incluye nombre de empresa + URL del script para configuración completa del usuario.
-    // v.0149: usa getEffectiveScriptUrl — si la empresa está en modo central
-    // (scriptUrl=''), propaga la URL central del admin. Antes el invitado
-    // recibía u='' y su empresa quedaba "Sin Apps Script".
-    const currentCompany = getCurrentCompany();
+    // v.0160: payload usa `inviteCompany` (validado contra el dropdown +
+    // empresa activa) en lugar de getCurrentCompany() ciego. Mismo resultado
+    // pero el flow es explícito y resistente al bug del sheetId revuelto.
     const payload = {
       k: localStorage.getItem(LS.GEMINI),
-      s: ssid,
-      n: currentCompany ? currentCompany.nombre : 'Empresa',  // nombre empresa
-      u: getEffectiveScriptUrl(currentCompany) || ''  // URL Apps Script (propia o central)
+      s: inviteCompany.sheetId,
+      n: inviteCompany.nombre,
+      u: getEffectiveScriptUrl(inviteCompany) || ''
     };
     const encoded = btoa(JSON.stringify(payload));
     const baseUrl = window.location.origin + window.location.pathname;
@@ -10816,17 +10930,27 @@ function rewireClickable(root){
     await _ensureUserEmail();
   }
 
-  // v.0138: sync desde Drive si hay token pero falta empresa/Gemini.
-  // - SUPER_ADMIN: Admin Index (empresas creadas por él) + User Config (invites externos).
-  // - Usuario regular: solo User Config.
-  // Ambos hacen MERGE — empresas conocidas en localStorage se conservan.
-  if(hasToken && (!hasCompany || !hasGemini)){
-    loading(true, 'Iniciando', 'Buscando configuración en Drive...');
+  // v.0160: sync INCONDICIONAL al boot si hay token. Antes solo se hacía
+  // cuando faltaba empresa o Gemini, lo que rompía el caso clásico:
+  //   - Usuario invitado a 2da empresa abre el link en Safari iOS.
+  //   - Safari procesa el invite + persiste en User Config Drive.
+  //   - Usuario abre PWA standalone (storage AISLADO de Safari en iOS).
+  //   - PWA tiene empresa anterior + Gemini → skip sync → no trae la nueva.
+  //
+  // Ahora sync siempre — trae empresas que llegaron por invite procesado en
+  // otro contexto (Safari ↔ PWA, dispositivo distinto, etc.).
+  // Costo: 1 lectura batch a Sheets API por boot (~300ms). El throttle de
+  // visibilitychange (v.0140, 5min) sigue protegiendo contra abuso.
+  if(hasToken){
+    loading(true, 'Iniciando', 'Sincronizando empresas con Drive...');
     try {
       if(isSuperAdmin()){
         await syncFromAdminIndex();
       }
       const cfg = await syncFromUserConfig();
+      // v.0160: cleanup de empresas fantasma post-sync (entries inválidas o
+      // duplicadas por bug histórico de invites con sheetId revuelto).
+      _cleanupCompaniesFantasma();
       // Refrescar flags después del merge
       hasCompany = !!getCurrentCompany();
       hasGemini = !!localStorage.getItem(LS.GEMINI);
