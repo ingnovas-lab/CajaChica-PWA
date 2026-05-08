@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0170';
+const APP_VERSION = '0171';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5247,11 +5247,127 @@ async function loadMasters(){
     populateDropdowns();
     applyRoleUI();
     refreshHome();
+
+    // v.0171: cleanup de archivos huérfanos en el Drive del usuario regular.
+    // Background, no bloquea. Issue #6: cuando admin elimina factura o se
+    // consolida (URL_FACTURA pasa a apuntar a la copia del admin), el archivo
+    // original del usuario queda huérfano en su Drive. La PWA del usuario
+    // detecta archivos no referenciados en ningún Sheet de sus empresas y
+    // los manda a Papelera. Throttle: 1 vez por hora.
+    if(!isSuperAdmin()){
+      _cleanupOrphanedUserFiles().catch(e => console.warn('[cleanup orphaned]', e.message));
+    }
   } catch(e){
     // Fallback a cache
     const c = localStorage.getItem(LS.MASTERS);
     if(c){ masters = JSON.parse(c); populateDropdowns(); applyRoleUI(); }
     toast('Trabajando offline', 'err');
+  }
+}
+
+// v.0171: limpia archivos huérfanos en el Drive del usuario regular. Compara
+// los archivos creados por la app con las URL_FACTURA de TODOS los sheets de
+// empresas del usuario. Los que no están referenciados se mandan a Papelera.
+//
+// Casos cubiertos:
+//   - Factura consolidada por Apps Script: URL_FACTURA actualizada a la copia
+//     del admin → el original del usuario queda huérfano → trash.
+//   - Factura eliminada por admin: la URL ya no existe en el Sheet → trash.
+//
+// Salvaguardas:
+//   - Solo archivos creados hace > 1 hora (margen para uploads recientes).
+//   - Lee TODAS las empresas del usuario para no borrar fotos de otra empresa.
+//   - Throttle: solo 1 vez por hora (key cc_orphan_cleanup_at).
+//   - Background — no bloquea boot.
+const LS_ORPHAN_CLEANUP_AT = 'cc_orphan_cleanup_at';
+async function _cleanupOrphanedUserFiles(){
+  if(isSuperAdmin()) return;
+  const token = getToken();
+  if(!token) return;
+
+  // Throttle: 1 vez por hora
+  const lastRun = parseInt(localStorage.getItem(LS_ORPHAN_CLEANUP_AT) || '0', 10);
+  if(Date.now() - lastRun < 60*60*1000) return;
+
+  const allCompanies = getCompanies().filter(c => c.sheetId);
+  if(allCompanies.length === 0) return;
+
+  try {
+    // 1. Listar imágenes que la app creó y que aún están vivas en el Drive del usuario
+    const q = "mimeType contains 'image/' and 'me' in owners and trashed=false";
+    const listRes = await fetch(
+      'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
+      '&fields=files(id,name,createdTime)&pageSize=1000',
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(!listRes.ok) return;
+    const listData = await listRes.json();
+    const myFiles = listData.files || [];
+    if(myFiles.length === 0){
+      localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
+      return;
+    }
+
+    // 2. Filtrar candidatos creados hace > 1 hora (no borrar uploads recientes)
+    const cutoff = Date.now() - 60*60*1000;
+    const candidatos = myFiles.filter(f => {
+      const t = new Date(f.createdTime || 0).getTime();
+      return t > 0 && t < cutoff;
+    });
+    if(candidatos.length === 0){
+      localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
+      return;
+    }
+
+    // 3. Leer URLs de TODOS los sheets de empresas del usuario.
+    //    REGISTRO!P (URL_FACTURA) + INGRESOS!G (URL_COMPROBANTE).
+    const referencedIds = new Set();
+    for(const company of allCompanies){
+      try {
+        const ranges = ['REGISTRO!P2:P', 'INGRESOS!G2:G']
+          .map(r => 'ranges=' + encodeURIComponent(r))
+          .join('&');
+        const sheetRes = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${company.sheetId}/values:batchGet?${ranges}`,
+          {headers: {'Authorization': 'Bearer ' + token}}
+        );
+        if(!sheetRes.ok) continue;
+        const sheetData = await sheetRes.json();
+        (sheetData.valueRanges || []).forEach(vr => {
+          (vr.values || []).forEach(row => {
+            const url = row[0];
+            if(url){
+              const m = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
+              if(m) referencedIds.add(m[1]);
+            }
+          });
+        });
+      } catch(e){
+        console.warn('[cleanup orphan] error en', company.nombre, e.message);
+      }
+    }
+
+    // 4. Trashear archivos no referenciados en ningún sheet
+    let trashed = 0, errors = 0;
+    for(const f of candidatos){
+      if(referencedIds.has(f.id)) continue;
+      try {
+        const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
+          method: 'PATCH',
+          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+          body: JSON.stringify({trashed: true})
+        });
+        if(r.ok) trashed++; else errors++;
+      } catch(e){ errors++; }
+    }
+    if(trashed > 0 || errors > 0){
+      console.log(`[cleanup orphan] ${trashed} archivos huérfanos a Papelera, ${errors} errores. ` +
+        `Candidatos: ${candidatos.length}, referenciados: ${referencedIds.size}`);
+    }
+
+    localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
+  } catch(e){
+    console.warn('[cleanup orphan] Error general:', e.message);
   }
 }
 
