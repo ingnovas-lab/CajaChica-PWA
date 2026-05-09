@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0179';
+const APP_VERSION = '0180';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2952,6 +2952,35 @@ async function updateScriptUrl(){
 
   // Persistir como URL central
   await setCentralScriptUrl(u);
+
+  // v.0180: propagar la URL a la celda canónica USUARIOS!Z1 de cada empresa
+  // del super_admin. Los invitados (y otros dispositivos del super_admin) la
+  // leen en su próximo loadMasters y auto-corrigen su empresa.scriptUrl. Esto
+  // resuelve el problema de URLs hardcodeadas en invites viejos sin re-invite.
+  if(isSuperAdmin()){
+    const token = getToken();
+    const companies = getCompanies();
+    let propagadas = 0, fallidas = 0;
+    for(const c of companies){
+      if(!c.sheetId) continue;
+      try {
+        const res = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${c.sheetId}/values/USUARIOS!Z1?valueInputOption=USER_ENTERED`,
+          {
+            method: 'PUT',
+            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify({values: [[u]]})
+          }
+        );
+        if(res.ok){ propagadas++; console.log(`[updateScriptUrl] propagado a "${c.nombre}"`); }
+        else { fallidas++; console.warn(`[updateScriptUrl] fallo en "${c.nombre}": HTTP ${res.status}`); }
+      } catch(e){
+        fallidas++;
+        console.warn(`[updateScriptUrl] error en "${c.nombre}":`, e.message);
+      }
+    }
+    console.log(`[updateScriptUrl] URL propagada a ${propagadas}/${companies.length} empresa(s)${fallidas ? ` (${fallidas} fallaron)` : ''}`);
+  }
 
   // Si la empresa activa tenía scriptUrl propio (legacy), vaciarlo para
   // que herede la central como las demás.
@@ -4679,7 +4708,23 @@ async function initializeSheetStructure(sheetId){
     body: JSON.stringify({values: categorias})
   });
 
-  // 7. Agregar al SUPER_ADMIN como ADMIN automáticamente (solo en este primer setup)
+  // 7. v.0180: escribir URL del Apps Script central en USUARIOS!Z1 — celda
+  // canónica que todos los usuarios leen al activar empresa para
+  // auto-corregir su empresa.scriptUrl si difiere.
+  const centralUrl = (typeof getCentralScriptUrl === 'function' && getCentralScriptUrl()) || '';
+  if(centralUrl){
+    try {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/USUARIOS!Z1?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({values: [[centralUrl]]})
+      });
+    } catch(e){
+      console.warn('[initializeSheetStructure] no se pudo escribir USUARIOS!Z1:', e.message);
+    }
+  }
+
+  // 8. Agregar al SUPER_ADMIN como ADMIN automáticamente (solo en este primer setup)
   const adminEmail = localStorage.getItem(LS.EMAIL);
   if(adminEmail){
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/USUARIOS!A2:append?valueInputOption=USER_ENTERED`, {
@@ -5191,8 +5236,28 @@ function escapeHtml(s){
 async function loadMasters(){
   try {
     const email = (localStorage.getItem(LS.EMAIL) || '').trim().toLowerCase();
-    const batch = await sheetsBatchGet(['PROYECTOS!A2:F', 'SUPLIDORES!A2:D', 'CATEGORIAS!A2:C', 'USUARIOS!A2:D']);
-    const [proj, sup, cat, usr] = batch.map(b => b.values || []);
+    // v.0180: USUARIOS!Z1 es la celda canónica donde el super_admin guarda la
+    // URL del Apps Script para esta empresa. Todos los usuarios la leen cada
+    // vez que activan empresa y auto-corrigen su empresa.scriptUrl si difiere.
+    // Esto resuelve el problema de URLs hardcodeadas en invites viejos: cuando
+    // el super_admin cambia el AS, propaga a USUARIOS!Z1 y los invitados se
+    // sincronizan en su próximo loadMasters sin re-invite.
+    const batch = await sheetsBatchGet(['PROYECTOS!A2:F', 'SUPLIDORES!A2:D', 'CATEGORIAS!A2:C', 'USUARIOS!A2:D', 'USUARIOS!Z1']);
+    const [proj, sup, cat, usr, urlCell] = batch.map(b => b.values || []);
+
+    // Sync de URL del Apps Script desde celda canónica
+    const remoteScriptUrl = ((urlCell[0] || [])[0] || '').trim();
+    if(remoteScriptUrl){
+      const empresa = getCurrentCompany();
+      if(empresa && empresa.scriptUrl !== remoteScriptUrl){
+        console.log(`[loadMasters] Sync URL AS desde Sheet: "${empresa.scriptUrl || '(vacío)'}" → "${remoteScriptUrl}"`);
+        empresa.scriptUrl = remoteScriptUrl;
+        upsertCompany(empresa);
+        if(typeof saveCompaniesToUserConfig === 'function' && getToken()){
+          saveCompaniesToUserConfig(getCompanies()).catch(e => console.warn('[loadMasters] saveCompaniesToUserConfig:', e.message));
+        }
+      }
+    }
 
     // Filtrar proyectos por USUARIOS_ASIGNADOS del usuario actual
     // Normalizamos emails (minúsculas + trim) para evitar problemas de case/espacios
