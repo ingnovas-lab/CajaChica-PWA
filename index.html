@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0182';
+const APP_VERSION = '0183';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5506,24 +5506,28 @@ async function _distributeMastersToUserDrive(){
       expectedMasters.set(m[1], {projCod});
     }
 
-    // 3. Listar copias locales actuales (con marca appProperties.ccCopyOf)
-    const q = "appProperties has { key='ccCopyOf' and value!=null } and 'me' in owners and trashed=false";
+    // 3. Listar imágenes mías y filtrar localmente las que tienen marca
+    // `appProperties.ccCopyOf`. Drive query no soporta `value!=null`, solo
+    // igualdad exacta — por eso se filtra client-side.
+    console.log(`[distribute] empresa "${empresa.nombre}": ${expectedMasters.size} master(s) esperado(s) en sheet`);
+    const q = "mimeType contains 'image/' and 'me' in owners and trashed=false";
     const listRes = await fetch(
       'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
       '&fields=files(id,name,appProperties,parents)&pageSize=1000',
       {headers: {'Authorization': 'Bearer ' + token}}
     );
     if(!listRes.ok){
-      console.warn('[distribute] list copias falló:', listRes.status);
+      console.warn('[distribute] list mis archivos falló:', listRes.status);
       localStorage.setItem(throttleKey, String(Date.now()));
       return;
     }
-    const myCopies = (await listRes.json()).files || [];
+    const allMyFiles = (await listRes.json()).files || [];
     const copiesByMasterId = new Map();
-    for(const f of myCopies){
+    for(const f of allMyFiles){
       const masterId = f.appProperties && f.appProperties.ccCopyOf;
       if(masterId) copiesByMasterId.set(masterId, f);
     }
+    console.log(`[distribute] copias locales con marca ccCopyOf: ${copiesByMasterId.size}`);
 
     // 4. Resolver: copiar faltantes, renombrar desactualizadas
     const stats = {copied: 0, renamed: 0, deleted: 0, errors: 0};
