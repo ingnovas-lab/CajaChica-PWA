@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0180';
+const APP_VERSION = '0181';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -6395,33 +6395,36 @@ async function uploadImage(entry){
   if(!r.ok) throw new Error('Upload Drive falló: ' + r.status);
   const data = await r.json();
 
-  // Compartir automáticamente con los admins del sistema.
-  // Esto permite que el Apps Script del admin pueda leer el archivo para consolidar.
+  // Compartir automáticamente con todos los usuarios de la empresa.
+  // v.0181: antes solo se compartía con ADMINs (para que Apps Script pudiera
+  // consolidar). Ahora se comparte con todos los usuarios de USUARIOS para
+  // que cualquier miembro de la empresa pueda ver fotos de otros — caso
+  // típico: super_admin sube factura → Kathy (USUARIO/ADMIN) la ve en su Drive.
   // Transparente al usuario — no requiere ninguna acción manual.
-  await sharePhotoWithAdmins(data.id);
+  await sharePhotoWithCompanyUsers(data.id);
 
   return `https://drive.google.com/file/d/${data.id}/view`;
 }
 
-// Comparte un archivo de Drive con todos los admins registrados en USUARIOS
-// Y como anyone-with-link (público, vía CDN sin auth).
+// v.0181: comparte archivo con TODOS los usuarios de USUARIOS (no solo ADMINs)
+// + anyone-with-link (público, vía CDN sin auth).
 // Se llama automáticamente después de subir cada foto.
 // No bloquea — si falla, solo avisa en consola.
-async function sharePhotoWithAdmins(fileId){
+async function sharePhotoWithCompanyUsers(fileId){
   try {
-    // Obtener lista de admins desde masters (ya cargados) o del cache
-    const admins = (masters.users || [])
-      .filter(u => (u.rol || '').toUpperCase() === 'ADMIN')
-      .map(u => u.email)
-      .filter(Boolean);
+    const myEmail = (localStorage.getItem(LS.EMAIL) || '').trim().toLowerCase();
+    // Compartir con todos los usuarios registrados (ADMIN + USUARIO),
+    // excluyendo al subidor mismo (ya es dueño).
+    const recipients = (masters.users || [])
+      .map(u => (u.email || '').trim().toLowerCase())
+      .filter(e => e && e !== myEmail);
 
     const token = getToken();
+    let okCount = 0, failCount = 0;
 
-    // Compartir con cada admin (lectura). Necesario para que Apps Script del
-    // admin pueda procesar el archivo en consolidarFacturas.
-    for(const adminEmail of admins){
+    for(const email of recipients){
       try {
-        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?sendNotificationEmail=false`, {
+        const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?sendNotificationEmail=false`, {
           method: 'POST',
           headers: {
             'Authorization': 'Bearer ' + token,
@@ -6430,13 +6433,16 @@ async function sharePhotoWithAdmins(fileId){
           body: JSON.stringify({
             role: 'reader',
             type: 'user',
-            emailAddress: adminEmail
+            emailAddress: email
           })
         });
+        if(r.ok) okCount++; else failCount++;
       } catch(e){
-        console.warn(`[sharePhoto] No se pudo compartir con ${adminEmail}:`, e);
+        failCount++;
+        console.warn(`[shareWithCompany] No se pudo compartir con ${email}:`, e);
       }
     }
+    console.log(`[shareWithCompany] Foto compartida con ${okCount}/${recipients.length} usuario(s)${failCount ? ` (${failCount} fallaron)` : ''}`);
 
     // v.0104: además compartir como anyone-with-link. Sin esto las miniaturas
     // y los previews fallan porque el thumbnail público de Drive requiere foto
@@ -6444,8 +6450,14 @@ async function sharePhotoWithAdmins(fileId){
     // pero ejecutado al subir para que las fotos sean accesibles inmediatamente.
     await _ensurePublicShare(fileId);
   } catch(e){
-    console.warn('[sharePhoto] Error general:', e);
+    console.warn('[shareWithCompany] Error general:', e);
   }
+}
+
+// v.0181: alias retrocompatible. Algún código viejo puede seguir llamando
+// sharePhotoWithAdmins — redirige al comportamiento nuevo.
+async function sharePhotoWithAdmins(fileId){
+  return sharePhotoWithCompanyUsers(fileId);
 }
 
 // v.0104: comparte el archivo como anyone-with-link (lectura). Retorna true
