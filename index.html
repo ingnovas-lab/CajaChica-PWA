@@ -1742,7 +1742,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0219';
+const APP_VERSION = '0220';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3749,93 +3749,6 @@ async function eliminarEmpresaConfirmada(nombre){
     loading(false);
     toast('Error: ' + e.message, 'err');
     console.error('[eliminarEmpresa]', e);
-  }
-}
-
-// Botón "Recargar desde Drive" en el selector.
-// v.0162: sincroniza del Drive de verdad (antes solo re-renderizaba local).
-// v.0165: invalida el cache de LS_USER_CONFIG_ID antes del sync para forzar
-// re-búsqueda del Sheet en Drive. Caso real: si por algún motivo hay
-// múltiples archivos `_CC_UserConfig` en el Drive del usuario, el cache
-// puede apuntar al equivocado y trae empresas incompletas.
-async function recargarEmpresas(){
-  loading(true, 'Sincronizando', 'Leyendo empresas desde Drive...');
-  let configId = null;
-  let stage = 'init';
-  try {
-    // v.0168: invalidar TODOS los caches del User Config flow para forzar
-    // re-búsqueda + re-verificación de la hoja EMPRESAS.
-    localStorage.removeItem(LS_USER_CONFIG_ID);
-    Object.keys(localStorage).forEach(k => {
-      if(k.startsWith('cc_uc_empresas_ok_')) localStorage.removeItem(k);
-    });
-
-    if(isSuperAdmin()) await syncFromAdminIndex();
-
-    stage = 'ensureUserConfig';
-    configId = await ensureUserConfig();
-
-    stage = 'batchGet';
-    const token = getToken();
-    const ranges = ['CONFIG!A2:B', 'EMPRESAS!A2:J']
-      .map(r => 'ranges=' + encodeURIComponent(r))
-      .join('&');
-    const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${configId}/values:batchGet?${ranges}`,
-      {headers: {'Authorization': 'Bearer ' + token}}
-    );
-    if(!res.ok){
-      const errBody = await res.text().catch(() => '(sin body)');
-      throw new Error(`HTTP ${res.status} en ${stage}: ${errBody.slice(0, 400)}`);
-    }
-    const data = await res.json();
-    const empRows = ((data.valueRanges && data.valueRanges[1] && data.valueRanges[1].values) || []);
-    const remoteCompanies = empRows
-      .map(r => ({nombre: r[0] || '', sheetId: r[1] || '', scriptUrl: r[2] || '', folderId: r[3] || '', createdAt: r[4] || '', razonSocial: r[5] || '', rnc: r[6] || '', direccion: r[7] || '', revisadoPor: r[8] || '', aprobadoPor: r[9] || ''}))
-      .filter(c => c.sheetId);
-
-    // v.0178: SYNC FULL en lugar de merge. El usuario tocó "Recargar desde
-    // Drive" explícitamente — espera que el localStorage refleje lo que está
-    // en Drive, no que se acumulen empresas viejas de cache.
-    // Antes (mergeCompanies) mantenía locales que NO estaban en remoto, lo
-    // cual generó casos como Kathy con 5 empresas en cache pero solo 2 en
-    // su _CC_UserConfig. Ahora remote pisa local.
-    const localBefore = getCompanies();
-    const merged = remoteCompanies;
-    saveCompanies(merged);
-    renderCompanyList();
-    loading(false);
-
-    // Diagnóstico explícito en modal
-    const lines = [
-      `📊 User Config Sheet ID: …${configId.slice(-12)}`,
-      '',
-      `📥 Filas en hoja EMPRESAS: ${empRows.length}`,
-      `📥 Empresas válidas (con sheetId): ${remoteCompanies.length}`,
-    ];
-    remoteCompanies.forEach((c, i) => {
-      lines.push(`   ${i+1}. ${c.nombre || '(sin nombre)'} → …${(c.sheetId||'').slice(-12)}`);
-    });
-    lines.push('');
-    lines.push(`💾 En localStorage tras merge: ${merged.length}`);
-    merged.forEach((c, i) => {
-      lines.push(`   ${i+1}. ${c.nombre || '(sin nombre)'} → …${(c.sheetId||'').slice(-12)}`);
-    });
-
-    showModal(`<div style="font-family:var(--mono);font-size:11px;line-height:1.5;white-space:pre-wrap">${escapeHtml(lines.join('\n'))}</div>
-      <button class="btn btn-blue" onclick="closeModal()" style="margin-top:14px;width:100%">Cerrar</button>`);
-  } catch(e){
-    loading(false);
-    const errMsg = e.message || String(e);
-    const cfgInfo = configId ? `ConfigId: …${configId.slice(-12)}` : '(no llegó a obtener configId)';
-    showModal(`<div style="font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--red)">
-      <strong>Error en sincronización</strong><br><br>
-      <strong>Etapa:</strong> ${escapeHtml(stage)}<br>
-      <strong>${escapeHtml(cfgInfo)}</strong><br><br>
-      <strong>Mensaje:</strong><br>${escapeHtml(errMsg)}
-      </div>
-      <button class="btn btn-blue" onclick="closeModal()" style="margin-top:14px;width:100%">Cerrar</button>`);
-    console.error('[recargarEmpresas]', e);
   }
 }
 
@@ -7541,20 +7454,6 @@ async function _recoverPrivatePhoto(img, fileId){
 function openSheet(){
   const id = getActiveSheetId();
   if(id) window.open(`https://docs.google.com/spreadsheets/d/${id}/edit`, '_blank');
-}
-
-// Refresca nombres de proyectos, suplidores, categorías desde el Sheet
-async function refreshData(){
-  loading(true, 'Actualizando', 'Leyendo Sheet...');
-  try {
-    await loadMasters();
-    await refreshBalance(true);
-    loading(false);
-    toast('Datos actualizados', 'ok');
-  } catch(e){
-    loading(false);
-    toast('Error: ' + e.message, 'err');
-  }
 }
 
 // Repara fórmulas del DASHBOARD + migra estructura del Sheet a la versión actual
