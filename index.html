@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0186';
+const APP_VERSION = '0187';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5496,14 +5496,22 @@ async function _distributeMastersToUserDrive(){
     // expectedMasters de A — eran "huérfanas" desde la perspectiva del sync
     // de A). Ahora la cascada de borrado solo trashea cuando el master no
     // está en NINGUNA empresa.
+    // v.0187: leer REGISTRO + PROYECTOS de cada empresa en el mismo batchGet.
+    // Antes el sync resolvía folders con getSubfolderObra() que internamente
+    // usa getCurrentCompany() y masters.projects globales. Si el usuario
+    // cambiaba de empresa via UI mid-sync, los globals cambiaban y las
+    // copias terminaban en la carpeta de OTRA empresa. Ahora usamos
+    // proj names cacheados localmente.
     const allCompanies = getCompanies().filter(c => c.sheetId);
     const expectedByCompany = new Map(); // sheetId → Map<masterId, {projCod, sheetId}>
+    const projNamesByCompany = new Map(); // sheetId → Map<projCod, projName>
     const allExpectedMasterIds = new Set();
 
     for(const company of allCompanies){
       const m = new Map();
+      const projNames = new Map();
       try {
-        const ranges = ['REGISTRO!A1:Z']
+        const ranges = ['REGISTRO!A1:Z', 'PROYECTOS!A2:B']
           .map(r => 'ranges=' + encodeURIComponent(r))
           .join('&');
         const r = await fetch(
@@ -5516,11 +5524,21 @@ async function _distributeMastersToUserDrive(){
         }
         const data = await r.json();
         const rows = (data.valueRanges && data.valueRanges[0] && data.valueRanges[0].values) || [];
-        if(rows.length < 2) { expectedByCompany.set(company.sheetId, m); continue; }
+        const projRows = (data.valueRanges && data.valueRanges[1] && data.valueRanges[1].values) || [];
+
+        // Build projNames mapping (cod → name)
+        for(const pr of projRows){
+          const cod = (pr[0] || '').toString().trim();
+          const name = (pr[1] || '').toString().trim();
+          if(cod && name) projNames.set(cod, name);
+        }
+
+        if(rows.length < 2) { expectedByCompany.set(company.sheetId, m); projNamesByCompany.set(company.sheetId, projNames); continue; }
         const H = {};
         rows[0].forEach((h, i) => { H[h] = i; });
         if(H.URL_FACTURA === undefined || H.PROYECTO === undefined || H.CONSOLIDADO === undefined){
           expectedByCompany.set(company.sheetId, m);
+          projNamesByCompany.set(company.sheetId, projNames);
           continue;
         }
         for(const row of rows.slice(1)){
@@ -5538,11 +5556,28 @@ async function _distributeMastersToUserDrive(){
         console.warn(`[distribute] error leyendo "${company.nombre}":`, e.message);
       }
       expectedByCompany.set(company.sheetId, m);
+      projNamesByCompany.set(company.sheetId, projNames);
     }
 
-    // Para procesar copy/rename solo de la empresa activa — `getSubfolderObra`
-    // resuelve carpetas en el contexto de la empresa activa.
-    const expectedMasters = expectedByCompany.get(empresa.sheetId) || new Map();
+    // v.0187: capturar empresa activa SOLO una vez (no usar getCurrentCompany
+    // durante el loop). Si el usuario cambia de empresa via UI mid-sync, este
+    // sync sigue operando sobre la empresa que tenía al inicio.
+    const syncEmpresa = empresa;
+    const syncProjNames = projNamesByCompany.get(syncEmpresa.sheetId) || new Map();
+
+    // Helper local que resuelve la carpeta `Fotos/` de un proyecto SIN
+    // depender de getCurrentCompany() ni de masters.projects globales.
+    const resolveFotosFolder = async (projCod) => {
+      const projName = syncProjNames.get(projCod);
+      if(!projName) throw new Error(`Proyecto ${projCod} no encontrado en empresa "${syncEmpresa.nombre}"`);
+      const master = await ensureFolder(ROOT_MASTER, null);
+      const empresaFolder = await ensureFolder(syncEmpresa.nombre, master);
+      const proyectosFolder = await ensureFolder('Proyectos', empresaFolder);
+      const obraFolder = await ensureFolder(projName, proyectosFolder);
+      return await ensureFolder('Fotos', obraFolder);
+    };
+
+    const expectedMasters = expectedByCompany.get(syncEmpresa.sheetId) || new Map();
 
     // 3. Listar imágenes mías y filtrar localmente las que tienen marca
     // `appProperties.ccCopyOf`. Drive query no soporta `value!=null`, solo
@@ -5619,6 +5654,55 @@ async function _distributeMastersToUserDrive(){
       }
     }
 
+    // v.0187: detectar copias mis-placed (parent != carpeta Fotos esperada
+    // para su proyecto). Causa: en versiones previas el sync resolvía la
+    // carpeta destino con globals que mutaban si el usuario cambiaba de
+    // empresa mid-sync. Trashear las mis-placed y removerlas de
+    // copiesByMasterId para que el loop main las re-cree en lugar correcto.
+    const expectedFotosByProj = new Map(); // projCod → fotosId (cache)
+    for(const [masterId, info] of expectedMasters){
+      const mine = copiesByMasterId.get(masterId);
+      if(!mine) continue;
+      const ccCompany = mine.appProperties && mine.appProperties.ccCompany;
+      // Solo validar copias que reclaman pertenecer a esta empresa
+      // (las legacy sin ccCompany se respetan).
+      if(!ccCompany || ccCompany !== syncEmpresa.sheetId) continue;
+
+      let expectedFotosId = expectedFotosByProj.get(info.projCod);
+      if(!expectedFotosId){
+        try {
+          expectedFotosId = await resolveFotosFolder(info.projCod);
+          expectedFotosByProj.set(info.projCod, expectedFotosId);
+        } catch(e){
+          console.warn(`[distribute] no pude resolver folder para proj ${info.projCod}:`, e.message);
+          continue;
+        }
+      }
+
+      const actualParent = (mine.parents || [])[0];
+      if(actualParent !== expectedFotosId){
+        try {
+          const r = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${mine.id}`,
+            {
+              method: 'PATCH',
+              headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+              body: JSON.stringify({trashed: true})
+            }
+          );
+          if(r.ok){
+            stats.deleted++;
+            console.log(`[distribute] Mis-placed trashed: "${mine.name}" (parent ${(actualParent||'').slice(-6)} != esperado ${expectedFotosId.slice(-6)})`);
+            copiesByMasterId.delete(masterId); // forzar re-creación en loop main
+          } else {
+            stats.errors++;
+          }
+        } catch(e){
+          stats.errors++;
+        }
+      }
+    }
+
     for(const [masterId, info] of expectedMasters){
       const mine = copiesByMasterId.get(masterId);
       const needContent = !mine;
@@ -5655,10 +5739,13 @@ async function _distributeMastersToUserDrive(){
       }
 
       if(!mine){
-        // Crear archivo nuevo en mi Drive con el contenido recibido del AS
+        // Crear archivo nuevo en mi Drive con el contenido recibido del AS.
+        // v.0187: usa resolveFotosFolder local (no getSubfolderObra) para
+        // resolver la carpeta destino sin depender de globals que pueden
+        // mutar mid-sync si el usuario cambia de empresa.
         try {
-          const fotosId = await getSubfolderObra(info.projCod, 'Fotos');
-          await _createDistributedCopy(fotosId, masterFile.name, masterFile.mimeType, masterFile.base64, masterId, empresa.sheetId);
+          const fotosId = await resolveFotosFolder(info.projCod);
+          await _createDistributedCopy(fotosId, masterFile.name, masterFile.mimeType, masterFile.base64, masterId, syncEmpresa.sheetId);
           stats.copied++;
           console.log(`[distribute] Copiado: ${masterFile.name}`);
         } catch(e){
