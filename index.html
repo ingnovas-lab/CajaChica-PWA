@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0199';
+const APP_VERSION = '0200';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3644,6 +3644,18 @@ async function eliminarEmpresaConfirmada(nombre){
     // ni Admin Index del admin.
     if(superAdmin){
       const token = getToken();
+
+      // v.0200: revocar shares directos en estructura (subcarpetas y obras)
+      // antes de trashear la carpeta padre. Sin esto, los permisos directos
+      // creados por flows legacy (Proyectos, Base de datos, obras compartidas
+      // con admins) quedan persistidos en Drive aunque la carpeta esté en
+      // Papelera, y el invitado puede seguir viendo entradas fantasma en su
+      // "Compartido conmigo".
+      if(empresa.folderId){
+        await _revokeAllSharesUnderEmpresa(empresa.folderId).catch(e => {
+          console.warn('[eliminarEmpresa] revoke estructura falló:', e.message);
+        });
+      }
 
       // 1. Mover carpeta de la empresa a Papelera de Drive
       if(empresa.folderId){
@@ -5662,6 +5674,228 @@ async function _cleanupOrphanedUserFiles(opts){
   }
 }
 
+// v.0200: revoca permisos directos en TODA la jerarquía de una empresa para
+// limpiar shares legacy (carpeta empresa, Base de datos, Proyectos, cada
+// obra dentro de Proyectos). Solo super_admin puede usarlo (es el dueño de
+// las carpetas). Idempotente — si una carpeta ya no tiene shares directos,
+// pasa sin error. Best-effort — errores individuales se loguean y se siguen.
+//
+// Uso:
+//   - Al eliminar empresa (`eliminarEmpresaConfirmada`): asegura que el
+//     invitado deje de ver la estructura cuando el super_admin borra.
+//   - Cleanup automático one-shot post-deploy v.0200 (flag local).
+async function _revokeAllSharesUnderEmpresa(empresaFolderId){
+  const token = getToken();
+  if(!token || !empresaFolderId) return {revoked: 0, errors: 0, foldersScanned: 0};
+  const stats = {revoked: 0, errors: 0, foldersScanned: 0};
+  const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
+
+  // Recorrer: empresa → hijos directos → si hijo es "Proyectos" entrar a obras.
+  const targetsToScan = [empresaFolderId];
+
+  // Helper local: lista hijos folder-only de un parent.
+  async function _listChildFolders(parentId){
+    const q = encodeURIComponent(
+      `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+    );
+    const r = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=200`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(!r.ok) return [];
+    const j = await r.json();
+    return j.files || [];
+  }
+
+  // Helper local: revoca permisos directos NO-owner de un fileId.
+  async function _revokePermsOf(fileId){
+    try {
+      const r = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}/permissions?fields=permissions(id,role,type,emailAddress)&supportsAllDrives=true`,
+        {headers: {'Authorization': 'Bearer ' + token}}
+      );
+      if(!r.ok) return;
+      const j = await r.json();
+      const perms = j.permissions || [];
+      for(const p of perms){
+        if(p.role === 'owner') continue;
+        const pe = (p.emailAddress || '').toLowerCase();
+        if(pe && pe === myEmail) continue;
+        try {
+          const dr = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}/permissions/${p.id}?supportsAllDrives=true`,
+            {method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}}
+          );
+          if(dr.ok) stats.revoked++; else stats.errors++;
+        } catch(e){ stats.errors++; }
+      }
+    } catch(e){ stats.errors++; }
+  }
+
+  // Nivel 1: hijos directos de la carpeta empresa (Base de datos, Proyectos, etc.).
+  let level1 = [];
+  try { level1 = await _listChildFolders(empresaFolderId); }
+  catch(e){ console.warn('[revoke estructura] list nivel1:', e.message); }
+
+  for(const child of level1){
+    targetsToScan.push(child.id);
+    if((child.name || '').toLowerCase() === 'proyectos'){
+      // Nivel 2: obras dentro de Proyectos.
+      try {
+        const obras = await _listChildFolders(child.id);
+        for(const obra of obras){
+          targetsToScan.push(obra.id);
+        }
+      } catch(e){ console.warn('[revoke estructura] list obras:', e.message); }
+    }
+  }
+
+  // Revocar en cada folder reunido.
+  for(const fid of targetsToScan){
+    stats.foldersScanned++;
+    await _revokePermsOf(fid);
+  }
+
+  console.log(`[revoke estructura] folders=${stats.foldersScanned}, revocados=${stats.revoked}, errores=${stats.errors}`);
+  return stats;
+}
+
+// v.0200: detecta empresas en la lista local del invitado cuyo Sheet ya no es
+// accesible (super_admin la trasheó o revocó permisos). Para cada una:
+//   - Trashea las copias distribuidas (`appProperties.ccCompany == sheetId`).
+//   - Quita la empresa de su lista local + User Config.
+//   - Si era la activa, cambia a otra.
+// Sin botón. Corre una vez post-boot, después del sync de empresas.
+const LS_DETECT_DELETED_AT = 'cc_detect_deleted_at';
+async function _detectarEmpresasEliminadas(){
+  if(isSuperAdmin()) return null;
+  const token = getToken();
+  if(!token) return null;
+
+  // Throttle: 1 vez cada 30 minutos.
+  const lastRun = parseInt(localStorage.getItem(LS_DETECT_DELETED_AT) || '0', 10);
+  if(Date.now() - lastRun < 30*60*1000) return null;
+
+  const companies = getCompanies().filter(c => c.sheetId);
+  if(companies.length === 0) return null;
+
+  const eliminadas = [];
+
+  for(const c of companies){
+    try {
+      const r = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${c.sheetId}?fields=id,trashed`,
+        {headers: {'Authorization': 'Bearer ' + token}}
+      );
+      if(r.status === 404 || r.status === 403){
+        eliminadas.push(c);
+        continue;
+      }
+      if(r.ok){
+        const j = await r.json();
+        if(j && j.trashed === true){
+          eliminadas.push(c);
+        }
+      }
+    } catch(e){
+      // Error de red — no marcar como eliminada (defensivo).
+      console.warn('[detect-eliminadas] check', c.nombre, e.message);
+    }
+  }
+
+  if(eliminadas.length === 0){
+    localStorage.setItem(LS_DETECT_DELETED_AT, String(Date.now()));
+    return {eliminadas: 0};
+  }
+
+  // Trashear copias distribuidas + quitar de lista local.
+  for(const c of eliminadas){
+    try {
+      // Listar archivos creados por la app marcados con esta empresa.
+      const myFiles = await _listAllMyImages('files(id,appProperties),nextPageToken').catch(() => []);
+      const toTrash = (myFiles || []).filter(f => {
+        const cc = f.appProperties && f.appProperties.ccCompany;
+        return cc && cc === c.sheetId;
+      });
+      for(const f of toTrash){
+        try {
+          await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
+            method: 'PATCH',
+            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify({trashed: true})
+          });
+        } catch(_){}
+      }
+      console.log(`[detect-eliminadas] "${c.nombre}" eliminada por admin — ${toTrash.length} copias trashed`);
+    } catch(e){
+      console.warn('[detect-eliminadas] trash copies:', e.message);
+    }
+
+    // Quitar de lista local.
+    removeCompany(c.nombre);
+    if(localStorage.getItem('cc_last_saved_active_company') === c.nombre){
+      localStorage.removeItem('cc_last_saved_active_company');
+    }
+  }
+
+  // Persistir lista nueva en User Config.
+  try { await saveCompaniesToUserConfig(getCompanies()); }
+  catch(e){ console.warn('[detect-eliminadas] saveUserConfig:', e.message); }
+
+  // Si la activa fue eliminada, activar la primera disponible.
+  const current = getCurrentCompany();
+  const stillExists = current && getCompanies().some(c => c.nombre === current.nombre);
+  if(!stillExists){
+    const remaining = getCompanies();
+    if(remaining.length > 0) setCurrentCompany(remaining[0].nombre);
+  }
+
+  localStorage.setItem(LS_DETECT_DELETED_AT, String(Date.now()));
+
+  // Toast resumen para el usuario.
+  try {
+    const nombres = eliminadas.map(e => e.nombre).join(', ');
+    toast(`${eliminadas.length} empresa(s) eliminada(s) por el admin: ${nombres}`, 'ok');
+  } catch(_){}
+
+  return {eliminadas: eliminadas.length, nombres: eliminadas.map(e => e.nombre)};
+}
+
+// v.0200: cleanup one-shot post-deploy del super_admin. Limpia shares legacy
+// directos en subcarpetas (Proyectos, Base de datos, obras) que se crearon
+// con flows previos a v.0200. Idempotente — si nada está compartido, pasa
+// sin tocar nada. Solo se ejecuta una vez (flag local).
+const LS_CLEANUP_STRUCT_DONE = 'cc_cleanup_struct_done_v200';
+async function _cleanupSharesEstructuraLegacy(){
+  if(!isSuperAdmin()) return;
+  if(localStorage.getItem(LS_CLEANUP_STRUCT_DONE) === '1') return;
+  const token = getToken();
+  if(!token) return;
+
+  const companies = getCompanies().filter(c => c.folderId);
+  if(companies.length === 0){
+    // Sin empresas con folderId → marcar como hecho para no reintentar.
+    localStorage.setItem(LS_CLEANUP_STRUCT_DONE, '1');
+    return;
+  }
+
+  let totalRevoked = 0, totalFolders = 0, totalErrors = 0;
+  for(const c of companies){
+    try {
+      const stats = await _revokeAllSharesUnderEmpresa(c.folderId);
+      totalRevoked += stats.revoked;
+      totalFolders += stats.foldersScanned;
+      totalErrors += stats.errors;
+    } catch(e){
+      console.warn('[cleanup struct legacy]', c.nombre, e.message);
+      totalErrors++;
+    }
+  }
+
+  console.log(`[cleanup struct legacy] empresas=${companies.length}, folders=${totalFolders}, revocados=${totalRevoked}, errores=${totalErrors}`);
+  localStorage.setItem(LS_CLEANUP_STRUCT_DONE, '1');
+}
+
 // v.0182: distribuye los archivos master (en Drive del super_admin) al Drive
 // del usuario invitado, copiándolos a la carpeta `Fotos/` de la obra
 // correspondiente. Idempotente — al activar empresa o refrescar balance:
@@ -7242,43 +7476,12 @@ async function _recoverPrivatePhoto(img, fileId){
   }
 }
 
-// Comparte una CARPETA con todos los admins + SUPER_ADMIN. Las carpetas Drive
-// propagan permisos a hijos automáticamente, así que compartir la carpeta de
-// una obra basta para que admins vean Fotos/Comprobantes/Reportes/Papelera.
-// Usado en saveNewProj para que cuando un USUARIO cree una obra, su admin la
-// vea aparecer en "Compartido conmigo" en su Drive sin acción manual.
-async function shareFolderWithAdmins(folderId, role = 'writer'){
-  try {
-    const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
-    const targets = new Set();
-    (masters.users || []).forEach(u => {
-      if((u.rol || '').toUpperCase() === 'ADMIN' && u.email) targets.add(u.email.toLowerCase());
-    });
-    targets.add(SUPER_ADMIN_EMAIL.toLowerCase());
-    targets.delete(myEmail);  // no compartir conmigo mismo
-
-    if(targets.size === 0) return;
-
-    const token = getToken();
-    if(!token) return;
-    for(const email of targets){
-      try {
-        await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=false&supportsAllDrives=true`, {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({role, type: 'user', emailAddress: email})
-        });
-      } catch(e){
-        console.warn(`[shareFolder] No se pudo compartir folder ${folderId} con ${email}:`, e);
-      }
-    }
-  } catch(e){
-    console.warn('[shareFolder] Error general:', e);
-  }
-}
+// v.0200: ELIMINADA `shareFolderWithAdmins`. Antes saveNewProj compartía la
+// carpeta de cada obra nueva con admins+super_admin para que la vieran en
+// "Compartido conmigo". Razón del retiro: los admins ya tienen acceso a los
+// datos de la obra vía el Sheet (compartido directo), y a las fotos vía
+// _distributeMastersToUserDrive (copias en su Mi unidad). La carpeta de la
+// obra solo añadía ruido en su Drive sin payoff funcional.
 
 // ============================================================
 // UTILIDADES
@@ -9722,12 +9925,9 @@ async function createProject(){
     await ensureFolder('Reportes', obraFolderId);
     await ensureFolder('Papelera', obraFolderId);
 
-    // 3.5) Compartir la carpeta de la obra con admins/SUPER_ADMIN automáticamente.
-    // Drive propaga permisos a hijos: con compartir el folder de la obra, todas
-    // las subcarpetas (Fotos, Comprobantes, etc.) quedan visibles para el admin
-    // en "Compartido conmigo". Sin esto, el admin nunca ve la estructura nueva.
-    loading(true, 'Creando obra', 'Compartiendo carpetas con admins...');
-    await shareFolderWithAdmins(obraFolderId);
+    // v.0200: ya NO se comparte la carpeta de obra con admins. Los admins
+    // acceden a los datos vía Sheet (compartido directo) y a fotos vía
+    // distribución a su Drive (_distributeMastersToUserDrive).
 
     // 4) Refrescar masters y seleccionar la nueva obra
     await loadMasters();
@@ -12434,6 +12634,19 @@ function rewireClickable(root){
       }
       if(cfg && cfg.empresas){
         console.log(`[init] Sync OK: ${cfg.empresas.length} empresa(s) total`);
+      }
+
+      // v.0200: detectar empresas eliminadas por el admin (para invitados).
+      // Trashea copias distribuidas locales + quita la empresa de la lista.
+      // Background — no bloquea boot, no falla si offline.
+      if(!isSuperAdmin()){
+        _detectarEmpresasEliminadas().catch(e => console.warn('[init] detect-eliminadas:', e.message));
+      }
+
+      // v.0200: cleanup one-shot post-deploy de shares legacy (super_admin).
+      // Idempotente. Background — corre 1 vez en la vida de esta instalación.
+      if(isSuperAdmin()){
+        _cleanupSharesEstructuraLegacy().catch(e => console.warn('[init] cleanup-struct:', e.message));
       }
     } catch(e){
       console.warn('[init] Sync desde Drive falló:', e.message);
