@@ -1690,7 +1690,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0193';
+const APP_VERSION = '0194';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5707,32 +5707,37 @@ async function _distributeMastersToUserDrive(){
         }
       }
 
-      // 6b. Procesar masters: copy missing + rename outdated.
+      // 6b. v.0194: recolectar todas las requests del master y procesarlas en
+      // batch (`getMastersBatch`). Antes hacíamos 1 POST AS por archivo —
+      // 30-50s para 100 archivos. Ahora 1 POST por chunk de 10 (with-content)
+      // o 50 (metadata-only). Speedup típico 5-10×. Si el AS apuntado por la
+      // empresa es viejo y no conoce `getMastersBatch`, _fetchMastersBatch
+      // hace fallback transparente al loop con `getMasterFile`.
+      const batchRequests = [];
       for(const [masterId, info] of expectedMasters){
         const mine = copiesByMasterId.get(masterId);
-        const needContent = !mine;
+        batchRequests.push({fileId: masterId, withContent: !mine});
+      }
 
-        let masterFile;
-        try {
-          const r = await fetch(scriptUrl, {
-            method: 'POST',
-            headers: {'Content-Type': 'text/plain;charset=utf-8'},
-            body: JSON.stringify({
-              action: 'getMasterFile',
-              sheetId: company.sheetId,
-              fileId: masterId,
-              withContent: needContent
-            })
-          });
-          if(!r.ok){ stats.errors++; continue; }
-          const d = await r.json();
-          if(!d.ok){
-            stats.errors++;
-            console.warn(`[distribute] [${company.nombre}] AS rechazó ${masterId}: ${d.error}`);
-            continue;
+      const batchResults = await _fetchMastersBatch(company, batchRequests);
+      const masterFileById = new Map();
+      for(const r of batchResults){
+        if(r && r.fileId) masterFileById.set(r.fileId, r);
+      }
+
+      // 6c. Procesar masters con resultados del batch.
+      for(const [masterId, info] of expectedMasters){
+        const mine = copiesByMasterId.get(masterId);
+        const masterFile = masterFileById.get(masterId);
+        if(!masterFile || !masterFile.ok){
+          stats.errors++;
+          if(masterFile){
+            console.warn(`[distribute] [${company.nombre}] AS rechazó ${masterId}: ${masterFile.error}`);
+          } else {
+            console.warn(`[distribute] [${company.nombre}] sin resultado para ${masterId} (batch incompleto)`);
           }
-          masterFile = d;
-        } catch(e){ stats.errors++; continue; }
+          continue;
+        }
 
         if(!mine){
           try {
@@ -11419,6 +11424,65 @@ async function contarFacturasSinConsolidar(){
 // Consolidación delegada al Apps Script (corre en servidores de Google, sin CORS).
 // El admin debe configurar una vez la URL del Web App desde Settings → Gestión de usuarios.
 // La URL se guarda dentro de la empresa activa (getCurrentCompany().scriptUrl).
+// v.0194: helper para hacer batch fetch de masters con fallback al loop
+// 1-a-1 (`getMasterFile`) si el AS apuntado no soporta `getMastersBatch`.
+//
+// Splits respetando caps del AS v.0099:
+//   - max 10 requests con withContent por call (bytes pesados)
+//   - max 50 requests metadata-only por call
+//
+// Fallback: si la primera batch call falla con "Acción desconocida" (AS muy
+// viejo) o cualquier error, hace loop con `getMasterFile` para ese chunk.
+// El resto de chunks sigue intentando batch — no degradamos toda la run
+// si un solo chunk falla intermitentemente.
+//
+// Devuelve array de results con shape igual al output de getMastersBatch:
+//   [{fileId, ok, name, mimeType, base64?, error?}, ...]
+async function _fetchMastersBatch(empresa, requests){
+  if(!requests || !requests.length) return [];
+
+  const withContentReqs = requests.filter(r => r && r.withContent);
+  const metaOnlyReqs = requests.filter(r => r && !r.withContent);
+
+  const chunks = [];
+  for(let i = 0; i < withContentReqs.length; i += 10){
+    chunks.push(withContentReqs.slice(i, i + 10));
+  }
+  for(let i = 0; i < metaOnlyReqs.length; i += 50){
+    chunks.push(metaOnlyReqs.slice(i, i + 50));
+  }
+
+  const allResults = [];
+  for(const chunk of chunks){
+    const res = await _callASForEmpresa(empresa, {
+      action: 'getMastersBatch',
+      requests: chunk
+    });
+
+    if(res && res.ok && Array.isArray(res.results)){
+      allResults.push(...res.results);
+      continue;
+    }
+
+    // Fallback al loop 1-a-1 con getMasterFile.
+    console.log('[fetchMastersBatch] batch falló para "' + empresa.nombre + '" (' + ((res && res.error) || 'sin ok') + '), fallback a getMasterFile loop (' + chunk.length + ' archivos)');
+    for(const req of chunk){
+      const r = await _callASForEmpresa(empresa, {
+        action: 'getMasterFile',
+        fileId: req.fileId,
+        withContent: !!req.withContent
+      });
+      if(r && r.ok){
+        allResults.push({fileId: req.fileId, ok: true, name: r.name, mimeType: r.mimeType, base64: r.base64});
+      } else {
+        allResults.push({fileId: req.fileId, ok: false, error: (r && r.error) || 'unknown'});
+      }
+    }
+  }
+
+  return allResults;
+}
+
 // v.0193: helper para llamar una action del AS de una empresa puntual con
 // auto-heal si la URL local apunta a un deploy desactualizado.
 //
