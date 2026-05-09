@@ -1713,7 +1713,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0213';
+const APP_VERSION = '0214';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5722,67 +5722,6 @@ async function _cleanupOrphanedUserFiles(opts){
 // cubre todo. v.0185: in-memory lock para prevenir ejecuciones
 // concurrentes en la misma sesión (Drive tiene eventual consistency en
 // listings — sin lock dos invocaciones paralelas pueden generar duplicados).
-// v.0207: para cada empresa en la lista del invitado, asegura que existe
-// `Mi unidad/Caja Chica Master/<empresa>/` y crea ahí un shortcut al Sheet
-// (nombre `CajaChica_<empresa>`). Resultado: el invitado abre Drive y ve
-// la carpeta empresa con `Proyectos/` y al lado el acceso directo al Sheet.
-// Idempotente — si el shortcut ya existe apuntando al sheetId correcto, no
-// crea otro.
-async function _ensureSheetShortcuts(){
-  if(isSuperAdmin()) return;
-  const token = getToken();
-  if(!token) return;
-
-  const companies = getCompanies().filter(c => c.sheetId && c.nombre);
-  if(companies.length === 0) return;
-
-  for(const c of companies){
-    try {
-      const masterId = await ensureFolder(ROOT_MASTER, null);
-      const empresaFolderId = await ensureFolder(c.nombre, masterId);
-
-      // ¿Ya existe shortcut apuntando al sheetId en esta carpeta?
-      const q = encodeURIComponent(
-        `'${empresaFolderId}' in parents and mimeType='application/vnd.google-apps.shortcut' and trashed=false`
-      );
-      const r = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,shortcutDetails)&pageSize=10`,
-        {headers: {'Authorization': 'Bearer ' + token}}
-      );
-      let exists = false;
-      if(r.ok){
-        const j = await r.json();
-        for(const f of (j.files || [])){
-          if(f.shortcutDetails && f.shortcutDetails.targetId === c.sheetId){
-            exists = true;
-            break;
-          }
-        }
-      }
-      if(exists) continue;
-
-      // Crear shortcut.
-      const createR = await fetch('https://www.googleapis.com/drive/v3/files', {
-        method: 'POST',
-        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          name: `CajaChica_${c.nombre}`,
-          mimeType: 'application/vnd.google-apps.shortcut',
-          parents: [empresaFolderId],
-          shortcutDetails: {targetId: c.sheetId}
-        })
-      });
-      if(createR.ok){
-        console.log(`[shortcut] creado para "${c.nombre}"`);
-      } else {
-        console.warn(`[shortcut] create fail "${c.nombre}":`, createR.status);
-      }
-    } catch(e){
-      console.warn(`[shortcut] error en "${c.nombre}":`, e.message);
-    }
-  }
-}
-
 // v.0207: detecta empresas en la lista local del invitado cuyo Sheet ya no
 // es accesible (super_admin la eliminó → AS revocó permisos del Sheet).
 // Para cada eliminada:
@@ -12713,11 +12652,9 @@ function rewireClickable(root){
         _revokeSharesEmpresasEliminadas().catch(e => console.warn('[init] revoke-empresas-eliminadas:', e.message));
       }
 
-      // v.0208: invitado — separadas, cada una con su propio catch.
-      // Una falla no bloquea la otra.
+      // v.0208: invitado — detectar empresas eliminadas por el admin.
       if(!isSuperAdmin()){
         _detectarEmpresasEliminadas().catch(e => console.warn('[init] detect-eliminadas:', e.message));
-        _ensureSheetShortcuts().catch(e => console.warn('[init] shortcuts:', e.message));
       }
     } catch(e){
       console.warn('[init] Sync desde Drive falló:', e.message);
