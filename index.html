@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0201';
+const APP_VERSION = '0202';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5766,6 +5766,16 @@ async function _revokeAllSharesUnderEmpresa(empresaFolderId){
 //   - Quita la empresa de su lista local + User Config.
 //   - Si era la activa, cambia a otra.
 // Sin botón. Corre una vez post-boot, después del sync de empresas.
+//
+// v.0202: check vía Sheets API (no Drive API). Bug v.0200: invitado tiene
+// scope `drive.file` — Drive API solo ve archivos creados/abiertos por la app.
+// Sheets recién compartidos daban 404 falso. Sheets API usa scope
+// `auth/spreadsheets` que sí ve cualquier sheet con permiso de lectura.
+//
+// Códigos:
+//   200      → existe y accesible. NO eliminada.
+//   404, 403 → no existe o sin permiso. ELIMINADA.
+//   otros    → error de transporte. NO marcar (no es señal de Drive).
 const LS_DETECT_DELETED_AT = 'cc_detect_deleted_at';
 async function _detectarEmpresasEliminadas(){
   if(isSuperAdmin()) return null;
@@ -5784,21 +5794,16 @@ async function _detectarEmpresasEliminadas(){
   for(const c of companies){
     try {
       const r = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${c.sheetId}?fields=id,trashed`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${c.sheetId}?fields=spreadsheetId`,
         {headers: {'Authorization': 'Bearer ' + token}}
       );
       if(r.status === 404 || r.status === 403){
         eliminadas.push(c);
-        continue;
       }
-      if(r.ok){
-        const j = await r.json();
-        if(j && j.trashed === true){
-          eliminadas.push(c);
-        }
-      }
+      // 200 = accesible, no marcar. Otros (5xx, network) = error de
+      // transporte, no es señal de Drive — no marcar.
     } catch(e){
-      // Error de red — no marcar como eliminada (defensivo).
+      // Error de red — no marcar.
       console.warn('[detect-eliminadas] check', c.nombre, e.message);
     }
   }
@@ -12636,17 +12641,10 @@ function rewireClickable(root){
         console.log(`[init] Sync OK: ${cfg.empresas.length} empresa(s) total`);
       }
 
-      // v.0201: HOTFIX — `_detectarEmpresasEliminadas` deshabilitado en boot.
-      // Bug v.0200: usaba `drive/v3/files/<sheetId>` para chequear si el Sheet
-      // sigue accesible. Pero el invitado tiene scope `drive.file` — Drive API
-      // solo ve archivos "created or opened by the app". Sheets recién compartidos
-      // dan 404 falso positivo → la app marcaba como eliminadas empresas válidas
-      // y trasheaba copias buenas + deslogueaba al user. Re-habilitar SOLO
-      // cuando el check use Sheets API (auth/spreadsheets) y sea conservador.
-      //
-      // if(!isSuperAdmin()){
-      //   _detectarEmpresasEliminadas().catch(e => console.warn('[init] detect-eliminadas:', e.message));
-      // }
+      // v.0202: detector re-habilitado con check vía Sheets API.
+      if(!isSuperAdmin()){
+        _detectarEmpresasEliminadas().catch(e => console.warn('[init] detect-eliminadas:', e.message));
+      }
 
       // v.0200: cleanup one-shot post-deploy de shares legacy (super_admin).
       // Idempotente. Background — corre 1 vez en la vida de esta instalación.
