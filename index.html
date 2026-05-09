@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0198';
+const APP_VERSION = '0199';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5556,40 +5556,52 @@ async function loadMasters(){
 //   - Throttle: solo 1 vez por hora (key cc_orphan_cleanup_at).
 //   - Background — no bloquea boot.
 const LS_ORPHAN_CLEANUP_AT = 'cc_orphan_cleanup_at';
-async function _cleanupOrphanedUserFiles(){
-  if(isSuperAdmin()) return;
+async function _cleanupOrphanedUserFiles(opts){
+  if(isSuperAdmin()) return null;
   const token = getToken();
-  if(!token) return;
+  if(!token) return null;
 
-  // Throttle: 1 vez por hora
-  const lastRun = parseInt(localStorage.getItem(LS_ORPHAN_CLEANUP_AT) || '0', 10);
-  if(Date.now() - lastRun < 60*60*1000) return;
+  // v.0199: opts.includeCcCopyOf=true incluye copias distribuidas en el sweep.
+  // Modo normal: skipea ccCopyOf (las maneja _distributeMastersToUserDrive con
+  // su protección legacy de ccCompany). Modo agresivo: si el master apuntado
+  // por ccCopyOf no está referenciado en ningún sheet → trashea la copia.
+  // Útil para "Forzar barrido" donde queremos limpieza agresiva.
+  const includeCcCopyOf = !!(opts && opts.includeCcCopyOf);
+
+  // Throttle: 1 vez por hora (saltea si opts.skipThrottle=true)
+  if(!opts || !opts.skipThrottle){
+    const lastRun = parseInt(localStorage.getItem(LS_ORPHAN_CLEANUP_AT) || '0', 10);
+    if(Date.now() - lastRun < 60*60*1000) return null;
+  }
 
   const allCompanies = getCompanies().filter(c => c.sheetId);
-  if(allCompanies.length === 0) return;
+  if(allCompanies.length === 0) return null;
+
+  const stats = {listed: 0, candidatos: 0, refsTotal: 0, trashed: 0, errors: 0};
 
   try {
     // 1. Listar TODAS las imágenes vivas del usuario. v.0195: paginado para
     // captar cuentas con >1000 imágenes (antes pageSize=1000 silently capeaba).
     const myFiles = await _listAllMyImages('files(id,name,createdTime,appProperties),nextPageToken');
+    stats.listed = myFiles.length;
     if(myFiles.length === 0){
       localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
-      return;
+      return stats;
     }
 
-    // 2. Filtrar candidatos creados hace > 1 hora (no borrar uploads recientes)
-    // v.0182: excluir copias distribuidas (`appProperties.ccCopyOf`). Estas
-    // son copias del master del super_admin que `_distributeMastersToUserDrive`
-    // crea para el usuario. NO son huérfanas — su gestión la hace esa función.
+    // 2. Filtrar candidatos. v.0182: en modo normal excluye copias distribuidas
+    // (ccCopyOf). v.0199: en modo agresivo (includeCcCopyOf), las incluye y
+    // valida contra masterId.
     const cutoff = Date.now() - 60*60*1000;
     const candidatos = myFiles.filter(f => {
-      if(f.appProperties && f.appProperties.ccCopyOf) return false;
+      if(f.appProperties && f.appProperties.ccCopyOf && !includeCcCopyOf) return false;
       const t = new Date(f.createdTime || 0).getTime();
       return t > 0 && t < cutoff;
     });
+    stats.candidatos = candidatos.length;
     if(candidatos.length === 0){
       localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
-      return;
+      return stats;
     }
 
     // 3. Leer URLs de TODOS los sheets de empresas del usuario.
@@ -5620,27 +5632,33 @@ async function _cleanupOrphanedUserFiles(){
       }
     }
 
-    // 4. Trashear archivos no referenciados en ningún sheet
-    let trashed = 0, errors = 0;
+    stats.refsTotal = referencedIds.size;
+
+    // 4. Trashear archivos no referenciados. v.0199: si f tiene ccCopyOf, valida
+    // contra el masterId apuntado (no contra el id del propio archivo).
     for(const f of candidatos){
-      if(referencedIds.has(f.id)) continue;
+      const ccCopyOf = f.appProperties && f.appProperties.ccCopyOf;
+      const checkId = ccCopyOf || f.id;
+      if(referencedIds.has(checkId)) continue;
       try {
         const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
           method: 'PATCH',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
           body: JSON.stringify({trashed: true})
         });
-        if(r.ok) trashed++; else errors++;
-      } catch(e){ errors++; }
+        if(r.ok) stats.trashed++; else stats.errors++;
+      } catch(e){ stats.errors++; }
     }
-    if(trashed > 0 || errors > 0){
-      console.log(`[cleanup orphan] ${trashed} archivos huérfanos a Papelera, ${errors} errores. ` +
-        `Candidatos: ${candidatos.length}, referenciados: ${referencedIds.size}`);
+    if(stats.trashed > 0 || stats.errors > 0){
+      console.log(`[cleanup orphan] ${stats.trashed} archivos huérfanos a Papelera, ${stats.errors} errores. ` +
+        `Candidatos: ${stats.candidatos}, referenciados: ${stats.refsTotal}`);
     }
 
     localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
+    return stats;
   } catch(e){
     console.warn('[cleanup orphan] Error general:', e.message);
+    return stats;
   }
 }
 
@@ -12001,12 +12019,28 @@ async function forzarBarridoDrive(){
         '<button class="btn btn-amber" onclick="closeModal()" style="margin-top:14px">Cerrar</button>'
       );
     } else {
+      // v.0199: barrido agresivo para users no-super_admin. Incluye copias
+      // distribuidas (ccCopyOf): valida que el master apuntado siga referenciado
+      // en algún sheet. Si no, trashea la copia.
       localStorage.removeItem(LS_DISTRIBUTE_AT);
-      localStorage.removeItem(LS_ORPHAN_CLEANUP_AT);
-      await _cleanupOrphanedUserFiles().catch(e => console.warn('[forzar] cleanup:', e.message));
+      const stats = await _cleanupOrphanedUserFiles({includeCcCopyOf: true, skipThrottle: true})
+        .catch(e => ({error: e.message}));
+      // Distribute después para detectar mis-placed/renames pendientes
       await _distributeMastersToUserDrive().catch(e => console.warn('[forzar] distribute:', e.message));
       loading(false);
-      toast('Barrido completo. Refrescá Drive si seguís viendo cosas raras.', 'ok');
+      const lines = stats && !stats.error ? [
+        'Archivos listados: ' + stats.listed,
+        'Referenciados (todos los Sheets): ' + stats.refsTotal,
+        'Candidatos analizados: ' + stats.candidatos,
+        'Trasheados: ' + stats.trashed,
+        'Errores: ' + stats.errors
+      ] : ['Error: ' + (stats && stats.error || 'sin stats')];
+      showModal(
+        '<h3>Barrido completo</h3>' +
+        '<div style="font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;font-family:var(--mono);background:var(--bg2);padding:10px;border-radius:8px;margin-top:10px">' + escapeHtml(lines.join('\n')) + '</div>' +
+        '<div style="font-size:11px;color:var(--text2);margin-top:10px">Los archivos van a Papelera de Drive (recoverable 30 días).</div>' +
+        '<button class="btn btn-amber" onclick="closeModal()" style="margin-top:14px">Cerrar</button>'
+      );
     }
   } catch(e){
     loading(false);
