@@ -1259,12 +1259,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         </div>
         <h3 style="margin:0">Mantenimiento</h3>
       </div>
-      <button class="btn btn-amber" onclick="repairFormulas()" style="padding:10px;font-size:12px">Reparar fórmulas del Dashboard</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO, URL_COMPROBANTE) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
-      <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="padding:10px;font-size:12px;margin-top:10px">Sincronizar archivos con Sheet</button>
+      <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="padding:10px;font-size:12px">Sincronizar archivos con Sheet</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
-      <button class="btn btn-amber" id="btn-backfill-shares" onclick="backfillSharesLegacy()" style="padding:10px;font-size:12px;margin-top:10px;display:none">Backfill share fotos legacy</button>
-      <div id="backfill-shares-help" style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4;display:none">Comparte fotos consolidadas pre-v.0181 con todos los usuarios (incluido rol USUARIO). One-shot, idempotente. Solo SUPER_ADMIN.</div>
       <button class="btn btn-red" onclick="resetApp()" style="padding:10px;font-size:12px;margin-top:10px">Borrar todo y empezar de cero</button>
       <div style="font-size:11px;color:#fca5a5;margin-top:6px;line-height:1.4;opacity:.85">⚠️ Borra TODA la configuración local de este dispositivo: token de Google, clave de Gemini, empresa activa, proyectos cacheados, balances cacheados, e IndexedDB (registros pendientes sin sincronizar). NO toca tus datos en Google Drive ni en los Sheets — esos quedan intactos. Útil si quieres empezar limpio o si la app se rompió.</div>
     </div>
@@ -1713,7 +1709,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0214';
+const APP_VERSION = '0215';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5231,15 +5227,6 @@ function applyRoleUI(){
   document.querySelectorAll('[data-admin-only]').forEach(el => {
     el.style.display = admin ? '' : 'none';
   });
-  // v.0192: elementos restringidos a SUPER_ADMIN (sólo el dueño del script).
-  // El panel donde viven es admin-only, así que un admin no super_admin
-  // tampoco los vería; aún así limpiamos explícitamente para que no se
-  // muestren si el panel se abre por accidente desde otro path.
-  const superAdmin = isSuperAdmin();
-  ['btn-backfill-shares', 'backfill-shares-help'].forEach(id => {
-    const el = document.getElementById(id);
-    if(el) el.style.display = superAdmin ? '' : 'none';
-  });
 }
 
 // ============================================================
@@ -7515,34 +7502,41 @@ async function refreshData(){
 
 // Repara fórmulas del DASHBOARD + migra estructura del Sheet a la versión actual
 // (inserta columna NO_REPORTE en C si no existe, agrega ELIMINADO en X, actualiza fórmulas)
-async function repairFormulas(){
-  if(!confirm('Esto migrará el Sheet a la estructura actualizada: agrega columnas NO_REPORTE y ELIMINADO, actualiza las fórmulas. Tus datos se preservan. ¿Continuar?')) return;
-
+// v.0215: helper silencioso que aplica la migración de estructura a un
+// sheetId específico. Reemplaza al `repairFormulas()` interactivo que se
+// llamaba desde un botón. Ahora el flow corre automático en boot del
+// super_admin para TODAS las empresas (`_validateAllSheetsStructure`).
+async function _repairFormulasSheet(sheetId){
   const token = getToken();
-  if(!token){ toast('Sesión expirada', 'err'); return; }
-  const ssid = getActiveSheetId();
-  if(!ssid){ toast('Sin base de datos', 'err'); return; }
+  if(!token) return {ok: false, error: 'no token'};
+  if(!sheetId) return {ok: false, error: 'no sheetId'};
 
-  loading(true, 'Migrando', 'Leyendo estructura...');
+  // Helper local: GET de un range, sin depender de getActiveSheetId.
+  const _get = async (range) => {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`;
+    const r = await fetch(url, {headers: {'Authorization': 'Bearer ' + token}});
+    if(!r.ok) throw new Error(`Sheets get ${range}: ${r.status}`);
+    const d = await r.json();
+    return d.values || [];
+  };
+
+  let changes = 0;
   try {
-    // 1. Obtener sheetId de REGISTRO y headers actuales
-    const ssRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}?fields=sheets.properties`, {
+    // 1. sheetId numérico de REGISTRO.
+    const ssRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`, {
       headers: {'Authorization': 'Bearer ' + token}
     });
+    if(!ssRes.ok) return {ok: false, error: 'no metadata'};
     const ssData = await ssRes.json();
-    const regSheet = ssData.sheets.find(s => s.properties.title === 'REGISTRO');
-    if(!regSheet) throw new Error('Hoja REGISTRO no encontrada');
+    const regSheet = (ssData.sheets || []).find(s => s.properties && s.properties.title === 'REGISTRO');
+    if(!regSheet) return {ok: false, error: 'no REGISTRO'};
     const regSheetId = regSheet.properties.sheetId;
 
-    let headers = await sheetsGet('REGISTRO!A1:Z1');
-    let headerRow = headers[0] || [];
-    const hasNoReporte = headerRow.includes('NO_REPORTE');
-    const hasEliminado = headerRow.includes('ELIMINADO');
+    let headerRow = (await _get('REGISTRO!A1:Z1'))[0] || [];
 
-    // 2. Insertar NO_REPORTE en columna C si no existe
-    if(!hasNoReporte){
-      loading(true, 'Migrando', 'Insertando columna NO_REPORTE...');
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}:batchUpdate`, {
+    // 2. Insertar NO_REPORTE en columna C si falta.
+    if(!headerRow.includes('NO_REPORTE')){
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
         method: 'POST',
         headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -7554,48 +7548,44 @@ async function repairFormulas(){
           }]
         })
       });
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!C1?valueInputOption=USER_ENTERED`, {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/REGISTRO!C1?valueInputOption=USER_ENTERED`, {
         method: 'PUT',
         headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
         body: JSON.stringify({values: [['NO_REPORTE']]})
       });
+      changes++;
     }
 
-    // 3. Agregar ELIMINADO en posición X (columna 24) al final si no existe
-    if(!hasEliminado){
-      loading(true, 'Migrando', 'Agregando columna ELIMINADO...');
-      // Re-leer headers por si se movieron tras insertar NO_REPORTE
-      headers = await sheetsGet('REGISTRO!A1:Z1');
-      headerRow = headers[0] || [];
-      // Agregar ELIMINADO justo después del último header existente (sin dejar huecos)
-      let targetCol = headerRow.length + 1; // 1-indexed
-      // Si MONTO_APROBADO (W) no existe, asegurarnos que esté antes de ELIMINADO (X)
+    // 3. Agregar ELIMINADO al final (col X) si falta.
+    headerRow = (await _get('REGISTRO!A1:Z1'))[0] || [];
+    if(!headerRow.includes('ELIMINADO')){
+      let targetCol = headerRow.length + 1;
       if(!headerRow.includes('MONTO_APROBADO')){
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
           method: 'PUT',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
           body: JSON.stringify({values: [['MONTO_APROBADO']]})
         });
-        targetCol = 24; // X
+        targetCol = 24;
       }
-      const colLetter = String.fromCharCode(64 + targetCol); // A=65, X=88
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!${colLetter}1?valueInputOption=USER_ENTERED`, {
+      const colLetter = String.fromCharCode(64 + targetCol);
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/REGISTRO!${colLetter}1?valueInputOption=USER_ENTERED`, {
         method: 'PUT',
         headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
         body: JSON.stringify({values: [['ELIMINADO']]})
       });
+      changes++;
     }
 
-    // 4. Reescribir fórmula MONTO_APROBADO (MONTO * aprobado * no-eliminado)
-    loading(true, 'Migrando', 'Actualizando fórmulas...');
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
+    // 4. Fórmula MONTO_APROBADO siempre actual (idempotente).
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/REGISTRO!W1?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: JSON.stringify({values: [['=ARRAYFORMULA(IF(ROW(M:M)=1,"MONTO_APROBADO",IF((N:N="SI")*(X:X<>"SI"),IFERROR(M:M*1,0),0)))']]})
     });
 
-    // 5. Fórmulas de DASHBOARD
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/DASHBOARD!A2:C2?valueInputOption=USER_ENTERED`, {
+    // 5. DASHBOARD!A2:C2 (idempotente).
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/DASHBOARD!A2:C2?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: JSON.stringify({values: [[
@@ -7605,27 +7595,51 @@ async function repairFormulas(){
       ]]})
     });
 
-    // 6. INGRESOS!G1 = URL_COMPROBANTE (v.0061+) — agrega header si falta para que abonos
-    // con foto puedan persistir el link al cheque/comprobante.
-    loading(true, 'Migrando', 'Verificando URL_COMPROBANTE en INGRESOS...');
-    const ingHeaders = await sheetsGet('INGRESOS!A1:G1');
-    const ingHeaderRow = ingHeaders[0] || [];
+    // 6. URL_COMPROBANTE en INGRESOS si falta.
+    const ingHeaderRow = (await _get('INGRESOS!A1:G1'))[0] || [];
     if(!ingHeaderRow.includes('URL_COMPROBANTE')){
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssid}/values/INGRESOS!G1?valueInputOption=USER_ENTERED`, {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/INGRESOS!G1?valueInputOption=USER_ENTERED`, {
         method: 'PUT',
         headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
         body: JSON.stringify({values: [['URL_COMPROBANTE']]})
       });
+      changes++;
     }
 
-    loading(false);
-    toast('Migración completa', 'ok');
-    setTimeout(() => refreshBalance(true), 800);
+    return {ok: true, changes};
   } catch(e){
-    loading(false);
-    toast('Error: ' + e.message, 'err');
-    console.error(e);
+    return {ok: false, error: e.message};
   }
+}
+
+// v.0215: valida y aplica la estructura correcta a TODOS los Sheets de las
+// empresas activas del super_admin. Idempotente — si la estructura ya está
+// OK, no hace cambios. Throttle por APP_VERSION: corre una vez por versión
+// instalada, después salta hasta que la versión cambie.
+async function _validateAllSheetsStructure(){
+  if(!isSuperAdmin()) return;
+  const flagKey = `cc_validated_struct_v${APP_VERSION}`;
+  if(localStorage.getItem(flagKey) === '1') return;
+
+  const companies = getCompanies().filter(c => c.sheetId);
+  if(companies.length === 0) return;
+
+  let totalChanges = 0, processed = 0, errors = 0;
+  for(const c of companies){
+    try {
+      const res = await _repairFormulasSheet(c.sheetId);
+      if(res && res.ok){
+        processed++;
+        totalChanges += (res.changes || 0);
+      } else {
+        errors++;
+        console.warn('[validate-struct]', c.nombre, (res && res.error) || 'unknown');
+      }
+    } catch(e){ errors++; console.warn('[validate-struct]', c.nombre, e.message); }
+  }
+
+  console.log(`[validate-struct] empresas=${processed}/${companies.length}, cambios=${totalChanges}, errores=${errors}`);
+  if(errors === 0) localStorage.setItem(flagKey, '1');
 }
 
 function resetApp(){
@@ -12069,131 +12083,10 @@ async function _callASForEmpresa(empresa, body){
   return {error: errStr + ' (auto-heal intentado, sin éxito)'};
 }
 
-// v.0192: backfill one-shot para super_admin. Recorre TODAS las empresas del
-// super_admin y agrega readers faltantes a fotos consolidadas pre-v.0181 (cuando
-// sharePhotoWithAdmins solo compartía con rol ADMIN). Idempotente. Tarda ~1-5
-// min según volumen.
-//
-// El AS pagina (batchSize=10) para no exceder timeout 6min del Web App. La
-// PWA hace loop por batches mostrando progreso vivo en el loader.
-//
-// v.0193: usa _callASForEmpresa para auto-heal cuando una empresa apunta a un
-// deploy del AS más viejo. Esto evita errores "Acción desconocida" que pasaban
-// con empresas legacy cuya scriptUrl quedó hardcodeada antes de v.0180.
-async function backfillSharesLegacy(){
-  if(!isSuperAdmin()){ toast('Solo SUPER_ADMIN', 'err'); return; }
-  const companies = getCompanies();
-  if(!companies || !companies.length){
-    toast('No hay empresas para procesar', 'err');
-    return;
-  }
-
-  // Ahora una empresa "tiene AS" si tiene scriptUrl propio O si hay central.
-  const conScript = companies.filter(c => getEffectiveScriptUrl(c));
-  if(!conScript.length){
-    toast('Ninguna empresa tiene Apps Script configurado', 'err');
-    return;
-  }
-
-  const okConfirm = confirm(
-    'Backfill share fotos legacy\n\n' +
-    'Recorrerá TUS ' + conScript.length + ' empresa(s) con AS configurado y agregará permisos de lectura a fotos consolidadas que aún no se compartieron con todos los usuarios.\n\n' +
-    '• No borra ni renombra nada\n' +
-    '• Idempotente (si ya está compartido, skip)\n' +
-    '• Tarda ~1-5 min según volumen\n\n' +
-    '¿Continuar?'
-  );
-  if(!okConfirm) return;
-
-  const totals = {empresas: 0, archivos: 0, sharesAgregados: 0, anyoneAplicado: 0, errores: 0, archivosNoOwner: 0};
-  const empresasErroneas = [];
-  let healed = 0;
-
-  loading(true, 'Backfill', 'Iniciando...');
-
-  for(let i = 0; i < conScript.length; i++){
-    const c = conScript[i];
-    const urlBefore = getEffectiveScriptUrl(c);
-    let batchStart = 0;
-    let totalEmpresa = 0;
-    let safety = 500; // hard limit: 500 batches × 10 = 5000 archivos por empresa
-
-    while(safety-- > 0){
-      loading(true, 'Backfill',
-        'Empresa ' + (i+1) + '/' + conScript.length + ' · ' + c.nombre.slice(0, 24) +
-        ' · ' + (totals.archivos + batchStart) + ' archivos · ' +
-        totals.sharesAgregados + ' shares · ' + totals.errores + ' errores'
-      );
-
-      const res = await _callASForEmpresa(c, {
-        action: 'backfillShares',
-        batchStart: batchStart,
-        batchSize: 10
-      });
-
-      if(!res || res.error){
-        empresasErroneas.push({nombre: c.nombre, error: (res && res.error) || 'unknown'});
-        break;
-      }
-      if(!res.ok){
-        empresasErroneas.push({nombre: c.nombre, error: res.error || 'unknown'});
-        break;
-      }
-
-      totalEmpresa = res.total;
-      totals.sharesAgregados += res.sharesAgregados || 0;
-      totals.anyoneAplicado += res.anyoneAplicado || 0;
-      totals.errores += res.errores || 0;
-      totals.archivosNoOwner += res.archivosNoOwner || 0;
-
-      if(res.done){
-        totals.archivos += totalEmpresa;
-        totals.empresas++;
-        break;
-      }
-      batchStart = res.batchEnd;
-    }
-
-    if(safety <= 0){
-      empresasErroneas.push({nombre: c.nombre, error: 'safety limit alcanzado (>5000 archivos)'});
-    }
-
-    // Si la URL efectiva cambió durante este loop (auto-heal mid-flight),
-    // contarlo para reportar al super_admin.
-    const urlAfter = getEffectiveScriptUrl(c);
-    if(urlAfter !== urlBefore) healed++;
-  }
-
-  loading(false);
-
-  const lines = [
-    'Empresas procesadas: ' + totals.empresas + ' / ' + conScript.length,
-    'Archivos analizados: ' + totals.archivos,
-    'Shares agregados: ' + totals.sharesAgregados,
-    'Anyone-with-link aplicados: ' + totals.anyoneAplicado,
-    'Skipped (no super_admin owner): ' + totals.archivosNoOwner,
-    'Errores: ' + totals.errores
-  ];
-  if(healed > 0){
-    lines.push('URLs auto-corregidas: ' + healed);
-  }
-  let summary = lines.join('\n');
-  if(empresasErroneas.length){
-    summary += '\n\nEmpresas con error:\n' +
-      empresasErroneas.map(e => '  • ' + e.nombre + ': ' + e.error).join('\n');
-    summary += '\n\nSi alguna empresa sigue dando "Acción desconocida" tras el auto-heal, su Sheet probablemente no tiene URL en USUARIOS!Z1 ni hay URL central. Fix manual:\n  1. Activa esa empresa.\n  2. Configuración → Apps Script → pegá la URL del AS v.0098.\n  3. Click "Guardar URL".\n  4. Re-corre el backfill.';
-  }
-
-  console.log('[backfillShares] resultado:', {totals, empresasErroneas, healed});
-
-  showModal(
-    '<h3>Resultado del backfill</h3>' +
-    '<div style="font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;font-family:var(--mono);background:var(--bg2);padding:10px;border-radius:8px;margin-top:10px;max-height:340px;overflow-y:auto">' +
-      escapeHtml(summary) +
-    '</div>' +
-    '<button class="btn btn-amber" onclick="closeModal()" style="margin-top:14px">Cerrar</button>'
-  );
-}
+// v.0215: ELIMINADA `backfillSharesLegacy`. Era un one-shot para fotos
+// consolidadas pre-v.0181 que no estaban compartidas con users rol USUARIO.
+// Ya se ejecutó en su momento; los uploads nuevos se comparten en el flow
+// normal. Sin nada legacy pendiente.
 
 // v.0198: barrido on-demand. Para super_admin llama AS cleanupMastersHuerfanos
 // (su PWA con scope drive.file no ve los masters consolidados). Para resto de
@@ -12648,8 +12541,11 @@ function rewireClickable(root){
       // que ella creó (drive.file scope ve sheets propios incluso trashed),
       // identifica los que pertenecen a empresas trashed, revoca permisos
       // no-owner. Idempotente, cada boot. Cubre legacy + futuras.
+      // v.0215: además valida estructura de TODOS los sheets activos
+      // (columnas + fórmulas). Throttle por APP_VERSION.
       if(isSuperAdmin()){
         _revokeSharesEmpresasEliminadas().catch(e => console.warn('[init] revoke-empresas-eliminadas:', e.message));
+        _validateAllSheetsStructure().catch(e => console.warn('[init] validate-struct:', e.message));
       }
 
       // v.0208: invitado — detectar empresas eliminadas por el admin.
