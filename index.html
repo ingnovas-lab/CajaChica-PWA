@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0202';
+const APP_VERSION = '0203';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5813,27 +5813,38 @@ async function _detectarEmpresasEliminadas(){
     return {eliminadas: 0};
   }
 
-  // Trashear copias distribuidas + quitar de lista local.
+  // Trashear la carpeta empresa entera en Mi unidad del invitado. Drive
+  // cascadea: archivos y subcarpetas dentro van a Papelera junto con el
+  // padre. Más limpio que trashear archivos uno por uno (que dejaba carpetas
+  // huérfanas vacías visibles).
   for(const c of eliminadas){
     try {
-      // Listar archivos creados por la app marcados con esta empresa.
-      const myFiles = await _listAllMyImages('files(id,appProperties),nextPageToken').catch(() => []);
-      const toTrash = (myFiles || []).filter(f => {
-        const cc = f.appProperties && f.appProperties.ccCompany;
-        return cc && cc === c.sheetId;
-      });
-      for(const f of toTrash){
-        try {
-          await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
-            method: 'PATCH',
-            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-            body: JSON.stringify({trashed: true})
-          });
-        } catch(_){}
+      const masterId = await getMasterFolderId().catch(() => null);
+      if(masterId){
+        const safeName = (c.nombre || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const q = encodeURIComponent(
+          `'${masterId}' in parents and name='${safeName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
+        );
+        const r = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=10`,
+          {headers: {'Authorization': 'Bearer ' + token}}
+        );
+        if(r.ok){
+          const j = await r.json();
+          for(const f of (j.files || [])){
+            try {
+              await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
+                method: 'PATCH',
+                headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                body: JSON.stringify({trashed: true})
+              });
+            } catch(_){}
+          }
+          console.log(`[detect-eliminadas] "${c.nombre}" eliminada por admin — ${(j.files || []).length} carpeta(s) empresa trashed`);
+        }
       }
-      console.log(`[detect-eliminadas] "${c.nombre}" eliminada por admin — ${toTrash.length} copias trashed`);
     } catch(e){
-      console.warn('[detect-eliminadas] trash copies:', e.message);
+      console.warn('[detect-eliminadas] trash empresa folder:', e.message);
     }
 
     // Quitar de lista local.
