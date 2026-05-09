@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0185';
+const APP_VERSION = '0186';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5490,37 +5490,64 @@ async function _distributeMastersToUserDrive(){
 
   _distributingNow = true;
   try {
-    // 1. Leer REGISTRO completo
-    const rows = await sheetsGet('REGISTRO!A1:Z');
-    if(!rows || rows.length < 2){
-      localStorage.setItem(throttleKey, String(Date.now()));
-      return;
-    }
-    const H = {};
-    rows[0].forEach((h, i) => { H[h] = i; });
-    if(H.URL_FACTURA === undefined || H.PROYECTO === undefined || H.CONSOLIDADO === undefined){
-      console.warn('[distribute] REGISTRO sin columnas requeridas, skip');
-      return;
+    // v.0186: leer REGISTRO de TODAS las empresas del invitado para construir
+    // el set GLOBAL de masters esperados. Esto evita el bug donde el sync de
+    // empresa A trasheaba las copias de empresa B (porque B no estaba en el
+    // expectedMasters de A — eran "huérfanas" desde la perspectiva del sync
+    // de A). Ahora la cascada de borrado solo trashea cuando el master no
+    // está en NINGUNA empresa.
+    const allCompanies = getCompanies().filter(c => c.sheetId);
+    const expectedByCompany = new Map(); // sheetId → Map<masterId, {projCod, sheetId}>
+    const allExpectedMasterIds = new Set();
+
+    for(const company of allCompanies){
+      const m = new Map();
+      try {
+        const ranges = ['REGISTRO!A1:Z']
+          .map(r => 'ranges=' + encodeURIComponent(r))
+          .join('&');
+        const r = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${company.sheetId}/values:batchGet?${ranges}`,
+          {headers: {'Authorization': 'Bearer ' + token}}
+        );
+        if(!r.ok){
+          console.warn(`[distribute] no pude leer REGISTRO de "${company.nombre}": HTTP ${r.status}`);
+          continue;
+        }
+        const data = await r.json();
+        const rows = (data.valueRanges && data.valueRanges[0] && data.valueRanges[0].values) || [];
+        if(rows.length < 2) { expectedByCompany.set(company.sheetId, m); continue; }
+        const H = {};
+        rows[0].forEach((h, i) => { H[h] = i; });
+        if(H.URL_FACTURA === undefined || H.PROYECTO === undefined || H.CONSOLIDADO === undefined){
+          expectedByCompany.set(company.sheetId, m);
+          continue;
+        }
+        for(const row of rows.slice(1)){
+          const url = (row[H.URL_FACTURA] || '').toString();
+          const projCod = (row[H.PROYECTO] || '').toString().trim();
+          const consolidado = (row[H.CONSOLIDADO] || '').toString().trim().toUpperCase() === 'SI';
+          const eliminado = H.ELIMINADO !== undefined && (row[H.ELIMINADO] || '').toString().trim().toUpperCase() === 'SI';
+          if(!url || !projCod || !consolidado || eliminado) continue;
+          const fid = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+          if(!fid) continue;
+          m.set(fid[1], {projCod, sheetId: company.sheetId});
+          allExpectedMasterIds.add(fid[1]);
+        }
+      } catch(e){
+        console.warn(`[distribute] error leyendo "${company.nombre}":`, e.message);
+      }
+      expectedByCompany.set(company.sheetId, m);
     }
 
-    // 2. Construir mapa de masters esperados: solo facturas CONSOLIDADO=SI y
-    // no eliminadas. Estas son las que viven en el Drive del super_admin.
-    const expectedMasters = new Map(); // masterFileId → {projCod}
-    for(const row of rows.slice(1)){
-      const url = (row[H.URL_FACTURA] || '').toString();
-      const projCod = (row[H.PROYECTO] || '').toString().trim();
-      const consolidado = (row[H.CONSOLIDADO] || '').toString().trim().toUpperCase() === 'SI';
-      const eliminado = H.ELIMINADO !== undefined && (row[H.ELIMINADO] || '').toString().trim().toUpperCase() === 'SI';
-      if(!url || !projCod || !consolidado || eliminado) continue;
-      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      if(!m) continue;
-      expectedMasters.set(m[1], {projCod});
-    }
+    // Para procesar copy/rename solo de la empresa activa — `getSubfolderObra`
+    // resuelve carpetas en el contexto de la empresa activa.
+    const expectedMasters = expectedByCompany.get(empresa.sheetId) || new Map();
 
     // 3. Listar imágenes mías y filtrar localmente las que tienen marca
     // `appProperties.ccCopyOf`. Drive query no soporta `value!=null`, solo
     // igualdad exacta — por eso se filtra client-side.
-    console.log(`[distribute] empresa "${empresa.nombre}": ${expectedMasters.size} master(s) esperado(s) en sheet`);
+    console.log(`[distribute] empresa activa "${empresa.nombre}": ${expectedMasters.size} master(s) esperado(s); global: ${allExpectedMasterIds.size} master(s) en ${allCompanies.length} empresa(s)`);
     const q = "mimeType contains 'image/' and 'me' in owners and trashed=false";
     const listRes = await fetch(
       'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
@@ -5631,7 +5658,7 @@ async function _distributeMastersToUserDrive(){
         // Crear archivo nuevo en mi Drive con el contenido recibido del AS
         try {
           const fotosId = await getSubfolderObra(info.projCod, 'Fotos');
-          await _createDistributedCopy(fotosId, masterFile.name, masterFile.mimeType, masterFile.base64, masterId);
+          await _createDistributedCopy(fotosId, masterFile.name, masterFile.mimeType, masterFile.base64, masterId, empresa.sheetId);
           stats.copied++;
           console.log(`[distribute] Copiado: ${masterFile.name}`);
         } catch(e){
@@ -5661,9 +5688,19 @@ async function _distributeMastersToUserDrive(){
       }
     }
 
-    // 5. Borrar copias cuyos masters ya no están en sheet (cascada)
+    // 5. Borrar copias cuyos masters ya no están en NINGUNA empresa (cascada).
+    // v.0186: usar `allExpectedMasterIds` (global, no solo empresa activa)
+    // para evitar trashear copias de otra empresa cuando la activa cambia.
+    // Protege también copias legacy sin `appProperties.ccCompany` (creadas
+    // antes de v.0186) para no borrarlas hasta que se re-creen con marca.
     for(const [masterId, mine] of copiesByMasterId){
-      if(!expectedMasters.has(masterId)){
+      const hasCcCompany = !!(mine.appProperties && mine.appProperties.ccCompany);
+      if(!hasCcCompany){
+        // Copia legacy sin marca de empresa — proteger (no trashear). Cuando
+        // la empresa activa la "redescubra" en su próximo sync, se reusa.
+        continue;
+      }
+      if(!allExpectedMasterIds.has(masterId)){
         try {
           const r = await fetch(
             `https://www.googleapis.com/drive/v3/files/${mine.id}`,
@@ -5700,7 +5737,9 @@ async function _distributeMastersToUserDrive(){
 // v.0184: crea archivo en Drive del invitado vía multipart upload con
 // contenido recibido del Apps Script proxy. Marca con appProperties.ccCopyOf
 // para distinguirlo de uploads del usuario y de archivos huérfanos.
-async function _createDistributedCopy(parentFolderId, name, mimeType, base64Content, masterFileId){
+// v.0186: agregar `ccCompany` (sheetId de la empresa) para que el sync de
+// otra empresa no borre estas copias por error.
+async function _createDistributedCopy(parentFolderId, name, mimeType, base64Content, masterFileId, companySheetId){
   const token = getToken();
 
   // Decodificar base64 a binary blob
@@ -5713,7 +5752,7 @@ async function _createDistributedCopy(parentFolderId, name, mimeType, base64Cont
     name: name,
     mimeType: mimeType || 'image/jpeg',
     parents: [parentFolderId],
-    appProperties: {ccCopyOf: masterFileId}
+    appProperties: {ccCopyOf: masterFileId, ccCompany: companySheetId || ''}
   };
 
   const boundary = '-------distribute' + Date.now();
