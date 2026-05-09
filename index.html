@@ -1750,7 +1750,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0217';
+const APP_VERSION = '0218';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4511,7 +4511,31 @@ async function syncFromAdminIndex(){
     // sido invitado a empresas de OTROS admins (vía link), que viven solo en
     // localStorage hasta este sync. Pisar borraba esas invites.
     const merged = mergeCompanies(getCompanies(), companies);
-    saveCompanies(merged);
+
+    // v.0218: si una empresa local NO está en Admin Index Y tiene >5 min de
+    // antigüedad, considerarla eliminada en otro dispositivo y quitarla.
+    // Caso real: super_admin elimina empresa en navegador → Admin Index queda
+    // limpio → su iPhone PWA hace sync, pero localStorage del iPhone seguía
+    // con la entry porque mergeCompanies preserva locales no-en-remote.
+    // El cutoff de 5 min protege el caso v.0138 de invite recién recibido.
+    const remoteSheetIds = new Set(companies.map(c => c.sheetId));
+    const cutoff = Date.now() - 5*60*1000;
+    const finalList = merged.filter(c => {
+      if(remoteSheetIds.has(c.sheetId)) return true;
+      const ts = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+      return ts > cutoff;
+    });
+    const removed = merged.length - finalList.length;
+    if(removed > 0){
+      console.log(`[adminIndex] ${removed} empresa(s) huérfana(s) removidas del local (no están en Admin Index y son >5min)`);
+      // Si la activa fue removida, fallback a la primera disponible.
+      const active = localStorage.getItem(LS.CURRENT_COMPANY);
+      if(active && !finalList.find(c => c.nombre === active)){
+        if(finalList.length > 0) setCurrentCompany(finalList[0].nombre);
+        else localStorage.removeItem(LS.CURRENT_COMPANY);
+      }
+    }
+    saveCompanies(finalList);
 
     // CONFIG (Gemini key)
     const cfgRows = (data.valueRanges[1].values || []);
@@ -4521,8 +4545,8 @@ async function syncFromAdminIndex(){
       localStorage.setItem(LS.GEMINI, cfg.GEMINI_KEY);
     }
 
-    console.log(`[adminIndex] ${companies.length} empresa(s) en index, ${merged.length} total después de merge`);
-    return merged;
+    console.log(`[adminIndex] ${companies.length} empresa(s) en index, ${finalList.length} total después de merge+limpieza`);
+    return finalList;
   } catch(e){
     console.warn('[syncFromAdminIndex] Error:', e.message);
     return null;
