@@ -1690,7 +1690,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0194';
+const APP_VERSION = '0195';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5379,16 +5379,9 @@ async function _cleanupOrphanedUserFiles(){
   if(allCompanies.length === 0) return;
 
   try {
-    // 1. Listar imágenes que la app creó y que aún están vivas en el Drive del usuario
-    const q = "mimeType contains 'image/' and 'me' in owners and trashed=false";
-    const listRes = await fetch(
-      'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
-      '&fields=files(id,name,createdTime,appProperties)&pageSize=1000',
-      {headers: {'Authorization': 'Bearer ' + token}}
-    );
-    if(!listRes.ok) return;
-    const listData = await listRes.json();
-    const myFiles = listData.files || [];
+    // 1. Listar TODAS las imágenes vivas del usuario. v.0195: paginado para
+    // captar cuentas con >1000 imágenes (antes pageSize=1000 silently capeaba).
+    const myFiles = await _listAllMyImages('files(id,name,createdTime,appProperties),nextPageToken');
     if(myFiles.length === 0){
       localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
       return;
@@ -5580,18 +5573,13 @@ async function _distributeMastersToUserDrive(){
     console.log(`[distribute] ${allExpectedMasterIds.size} master(s) global en ${allCompanies.length} empresa(s)`);
 
     // 2. Listar TODAS mis imágenes del Drive (no filtrar por empresa).
-    const q = "mimeType contains 'image/' and 'me' in owners and trashed=false";
-    const listRes = await fetch(
-      'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
-      '&fields=files(id,name,appProperties,parents,createdTime)&pageSize=1000',
-      {headers: {'Authorization': 'Bearer ' + token}}
-    );
-    if(!listRes.ok){
-      console.warn('[distribute] list mis archivos falló:', listRes.status);
+    // v.0195: paginado vía _listAllMyImages para captar cuentas con >1000.
+    const allMyFiles = await _listAllMyImages('files(id,name,appProperties,parents,createdTime),nextPageToken');
+    if(allMyFiles.length === 0){
+      console.log('[distribute] sin imágenes en mi Drive — nada que sincronizar');
       localStorage.setItem(LS_DISTRIBUTE_AT, String(Date.now()));
       return;
     }
-    const allMyFiles = (await listRes.json()).files || [];
 
     // 3. Identificar copias distribuidas (con marca ccCopyOf) y duplicados.
     const copiesByMasterId = new Map();
@@ -5668,24 +5656,33 @@ async function _distributeMastersToUserDrive(){
         return await ensureFolder('Fotos', obraFolder);
       };
 
+      // v.0195: cache compartido entre 6a y 6c. resolveFotosFolderForCompany
+      // hace 5 llamadas a ensureFolder (cada una con verificación a Drive),
+      // así que cachear por proyecto evita 5N llamadas redundantes cuando
+      // hay muchas facturas del mismo proyecto.
+      const expectedFotosByProj = new Map();
+      const getFotosFolderId = async (projCod) => {
+        let id = expectedFotosByProj.get(projCod);
+        if(id) return id;
+        id = await resolveFotosFolderForCompany(projCod);
+        expectedFotosByProj.set(projCod, id);
+        return id;
+      };
+
       // 6a. Detectar mis-placed: copias con `ccCompany == company.sheetId`
       // cuyo parent NO coincide con la carpeta `Fotos/` esperada del proyecto.
-      const expectedFotosByProj = new Map();
       for(const [masterId, info] of expectedMasters){
         const mine = copiesByMasterId.get(masterId);
         if(!mine) continue;
         const ccCompany = mine.appProperties && mine.appProperties.ccCompany;
         if(!ccCompany || ccCompany !== company.sheetId) continue;
 
-        let expectedFotosId = expectedFotosByProj.get(info.projCod);
-        if(!expectedFotosId){
-          try {
-            expectedFotosId = await resolveFotosFolderForCompany(info.projCod);
-            expectedFotosByProj.set(info.projCod, expectedFotosId);
-          } catch(e){
-            console.warn(`[distribute] [${company.nombre}] folder ${info.projCod}:`, e.message);
-            continue;
-          }
+        let expectedFotosId;
+        try {
+          expectedFotosId = await getFotosFolderId(info.projCod);
+        } catch(e){
+          console.warn(`[distribute] [${company.nombre}] folder ${info.projCod}:`, e.message);
+          continue;
         }
         const actualParent = (mine.parents || [])[0];
         if(actualParent !== expectedFotosId){
@@ -5741,7 +5738,7 @@ async function _distributeMastersToUserDrive(){
 
         if(!mine){
           try {
-            const fotosId = await resolveFotosFolderForCompany(info.projCod);
+            const fotosId = await getFotosFolderId(info.projCod);
             const newFile = await _createDistributedCopy(fotosId, masterFile.name, masterFile.mimeType, masterFile.base64, masterId, company.sheetId);
             stats.copied++;
             console.log(`[distribute] [${company.nombre}] Copiado: ${masterFile.name}`);
@@ -5801,13 +5798,9 @@ async function _distributeMastersToUserDrive(){
     // con el nombre viejo — el matching por nombre falla, pero la marca
     // `ccUploaded` identifica al original sin importar el nombre).
     try {
-      const refreshRes = await fetch(
-        'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
-        '&fields=files(id,name,appProperties,parents)&pageSize=1000',
-        {headers: {'Authorization': 'Bearer ' + token}}
-      );
-      if(refreshRes.ok){
-        const freshFiles = (await refreshRes.json()).files || [];
+      // v.0195: paginado para no perder huérfanos en cuentas con >1000 imágenes.
+      const freshFiles = await _listAllMyImages('files(id,name,appProperties,parents),nextPageToken');
+      if(freshFiles.length > 0){
         // Reconstruir tracker de copias distribuidas con data fresca.
         for(const f of freshFiles){
           if(f.appProperties && f.appProperties.ccCopyOf){
@@ -11424,6 +11417,54 @@ async function contarFacturasSinConsolidar(){
 // Consolidación delegada al Apps Script (corre en servidores de Google, sin CORS).
 // El admin debe configurar una vez la URL del Web App desde Settings → Gestión de usuarios.
 // La URL se guarda dentro de la empresa activa (getCurrentCompany().scriptUrl).
+// v.0195: helper para listar TODAS las imágenes del Drive del usuario,
+// paginando con `nextPageToken`. Antes la PWA usaba `pageSize=1000` sin
+// paginación — si el usuario llegaba a tener >1000 imágenes (escenario
+// realista con distribución multi-empresa: copias del super_admin + uploads
+// propios + imágenes de otros contextos), las que pasaban ese límite eran
+// silenciosamente ignoradas → orphan cleanup y distribute los perdían.
+//
+// `fields` por defecto cubre lo común (id, name, appProperties, parents,
+// createdTime). Caller puede pasar custom para optimizar payload.
+//
+// Hard cap: 50 páginas (= 50000 archivos) para evitar runaway en cuentas
+// patológicas. Si se alcanza, loguea warning y devuelve lo acumulado.
+async function _listAllMyImages(fields){
+  const token = getToken();
+  if(!token) return [];
+  const f = fields || 'files(id,name,appProperties,parents,createdTime),nextPageToken';
+  const q = "mimeType contains 'image/' and 'me' in owners and trashed=false";
+  const baseUrl = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
+    '&fields=' + encodeURIComponent(f) + '&pageSize=1000';
+
+  let all = [];
+  let pageToken = null;
+  let pages = 0;
+  const maxPages = 50;
+  while(pages++ < maxPages){
+    const url = pageToken ? (baseUrl + '&pageToken=' + encodeURIComponent(pageToken)) : baseUrl;
+    let r;
+    try {
+      r = await fetch(url, {headers: {'Authorization': 'Bearer ' + token}});
+    } catch(e){
+      console.warn('[listAllMyImages] fetch falló:', e.message);
+      break;
+    }
+    if(!r.ok){
+      console.warn('[listAllMyImages] HTTP ' + r.status);
+      break;
+    }
+    const data = await r.json();
+    if(Array.isArray(data.files)) all = all.concat(data.files);
+    pageToken = data.nextPageToken || null;
+    if(!pageToken) break;
+  }
+  if(pages > maxPages){
+    console.warn('[listAllMyImages] alcanzado maxPages=' + maxPages + ' (' + all.length + ' archivos hasta acá)');
+  }
+  return all;
+}
+
 // v.0194: helper para hacer batch fetch de masters con fallback al loop
 // 1-a-1 (`getMasterFile`) si el AS apuntado no soporta `getMastersBatch`.
 //
