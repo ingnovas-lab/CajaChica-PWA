@@ -1713,7 +1713,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0210';
+const APP_VERSION = '0211';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5879,27 +5879,32 @@ async function _revokeSharesEmpresasEliminadas(){
     getCompanies().filter(c => c.sheetId).map(c => c.sheetId)
   );
 
-  // Listar Sheets activos creados por la app.
-  const baseQ = "mimeType='application/vnd.google-apps.spreadsheet' and 'me' in owners and trashed=false";
+  // Listar Sheets creados por la app. v.0211: 2 queries (trashed=false +
+  // trashed=true) porque Drive list excluye archivos cuyo parent está trashed
+  // del query trashed=false, aunque el sheet en sí no esté trashed. Sin esto
+  // el sheet de empresas eliminadas (parent en Papelera) no aparecía.
+  const baseQ = "mimeType='application/vnd.google-apps.spreadsheet' and 'me' in owners";
   const allSheets = [];
-  let pageToken = '';
-  do {
-    const q = encodeURIComponent(baseQ);
-    const tok = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
-    try {
-      const r = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name),nextPageToken&pageSize=200${tok}`,
-        {headers: {'Authorization': 'Bearer ' + token}}
-      );
-      if(!r.ok) break;
-      const j = await r.json();
-      for(const f of (j.files || [])) allSheets.push(f);
-      pageToken = j.nextPageToken || '';
-    } catch(e){
-      console.warn('[revoke-empresas-eliminadas] list:', e.message);
-      break;
-    }
-  } while(pageToken);
+  for(const tflag of ['false', 'true']){
+    let pageToken = '';
+    do {
+      const q = encodeURIComponent(`${baseQ} and trashed=${tflag}`);
+      const tok = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+      try {
+        const r = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,trashed),nextPageToken&pageSize=200${tok}`,
+          {headers: {'Authorization': 'Bearer ' + token}}
+        );
+        if(!r.ok) break;
+        const j = await r.json();
+        for(const f of (j.files || [])) allSheets.push(f);
+        pageToken = j.nextPageToken || '';
+      } catch(e){
+        console.warn('[revoke-empresas-eliminadas] list:', e.message);
+        break;
+      }
+    } while(pageToken);
+  }
 
   let trashedSheets = 0, processed = 0;
 
