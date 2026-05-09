@@ -1187,6 +1187,18 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button class="btn btn-blue" onclick="forceAppUpdate()" style="padding:8px;font-size:12px">↻ Forzar actualización</button>
     </div>
 
+    <!-- v.0196: row de diagnóstico de auth (validación Opción D) -->
+    <div onclick="showAuthDiagnostico()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
+      <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Auth · <span id="set-auth-mode" style="color:var(--text)">—</span></div>
+        <div id="set-auth-summary" style="font-size:11px;color:var(--text2);margin-top:1px">Toca para diagnóstico</div>
+      </div>
+      <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+
     <!-- Consolidar facturas: queda detallada (config one-time + acción) -->
     <div class="card" data-admin-only>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
@@ -1690,7 +1702,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0195';
+const APP_VERSION = '0196';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1714,6 +1726,7 @@ const LS = {
   PENDING_USER_CONFIG_SAVE: 'cc_pending_user_config_save', // flag: hay cambios de config pendientes de subir a Drive
   REPORTE_TIPO: 'cc_reporte_tipo', // 'ejecutivo' | 'contabilidad' — última selección del tipo de informe
   SESSION_ID: 'cc_session_id',     // v.0123: UUID retornado por Apps Script en exchange_code, requerido para refresh_access_token
+  AUTH_HISTORY: 'cc_auth_history', // v.0196: array de últimos 30 eventos auth para validar Opción D (login_success, refresh_ok, reauth_required)
 };
 
 // Email del SUPER_ADMIN (pasaporte universal, crea y ve todas las empresas)
@@ -2024,6 +2037,8 @@ function show(id){
       ucount.textContent = n === 0 ? 'Ninguno' : (n + ' usuario' + (n === 1 ? '' : 's') + ' registrado' + (n === 1 ? '' : 's'));
     }
     checkConsolidarStatus();
+    // v.0196: refrescar el row de diagnóstico de auth.
+    if(typeof refreshAuthDiagnosticRow === 'function') refreshAuthDiagnosticRow();
   }
   // pg-abono se inicializa vía newAbono() o editarPending() — no auto-reset acá
   if(id==='pg-reportes') initReportes();
@@ -2124,6 +2139,163 @@ function _authLog(msg, data){
   window._authTrace.push(line);
   // Limitar tamaño — solo guardamos las últimas 200 líneas
   if(window._authTrace.length > 200) window._authTrace.shift();
+}
+
+// v.0196: telemetría persistente de eventos de auth para validar Opción D.
+// El _authTrace existente vive solo en memoria (window prop) — se pierde al
+// reload. Este record sobrevive entre sesiones para que el usuario pueda
+// observar el patrón real de re-logins en su dispositivo (típico iOS PWA
+// donde ITP/Apple invalida storage cada N días).
+//
+// Tipos:
+//   - 'login_success'    — exchange OK tras click "Reconectar" o initial setup
+//   - 'refresh_ok'       — silentRefresh exitoso (server-side o legacy)
+//   - 'reauth_required'  — requireReauth disparado (silent falló, 401, etc.)
+//
+// Source:
+//   - 'opcion_d' — flow nuevo (exchange_code + refresh server-side via AS)
+//   - 'legacy'   — flow viejo (initTokenClient directo a Google)
+//
+// Cap: últimos 30 eventos. Más antiguos se descartan.
+function _recordAuthEvent(type, opts){
+  try {
+    const raw = localStorage.getItem(LS.AUTH_HISTORY);
+    const arr = raw ? JSON.parse(raw) : [];
+    const entry = {ts: Date.now(), type: type};
+    if(opts && opts.source) entry.source = opts.source;
+    if(opts && opts.reason) entry.reason = String(opts.reason).slice(0, 200);
+    arr.push(entry);
+    while(arr.length > 30) arr.shift();
+    localStorage.setItem(LS.AUTH_HISTORY, JSON.stringify(arr));
+  } catch(e){
+    console.warn('[recordAuthEvent] falló:', e.message);
+  }
+}
+
+function _readAuthHistory(){
+  try {
+    const raw = localStorage.getItem(LS.AUTH_HISTORY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+// v.0196: humaniza un timestamp absoluto a "hace 3 días" / "hace 4h" / etc.
+function _humanizeAgo(ts){
+  if(!ts) return '—';
+  const ms = Date.now() - ts;
+  if(ms < 0) return 'en el futuro';
+  const sec = Math.floor(ms / 1000);
+  if(sec < 60) return 'hace ' + sec + 's';
+  const min = Math.floor(sec / 60);
+  if(min < 60) return 'hace ' + min + 'min';
+  const h = Math.floor(min / 60);
+  if(h < 24) return 'hace ' + h + 'h';
+  const d = Math.floor(h / 24);
+  if(d < 30) return 'hace ' + d + 'd';
+  const mo = Math.floor(d / 30);
+  if(mo < 12) return 'hace ' + mo + 'mes' + (mo === 1 ? '' : 'es');
+  return 'hace ' + Math.floor(mo / 12) + 'a';
+}
+
+// v.0196: calcula resumen del estado de auth para mostrar en el row + modal.
+//   - mode: 'opcion_d' si hay session_id, 'legacy' si no.
+//   - lastLoginTs: timestamp del último login_success (cualquier source).
+//   - avgIntervalDays: promedio en días entre los últimos N login_success.
+function _authStatusForDisplay(){
+  const hist = _readAuthHistory();
+  const sessionId = localStorage.getItem(LS.SESSION_ID);
+  const mode = sessionId ? 'opcion_d' : 'legacy';
+
+  const logins = hist.filter(e => e && e.type === 'login_success');
+  const lastLogin = logins.length ? logins[logins.length - 1] : null;
+
+  // Promedio de intervalo entre los últimos 6 logins (= 5 intervalos).
+  let avgIntervalDays = null;
+  if(logins.length >= 2){
+    const last = logins.slice(-6);
+    const intervals = [];
+    for(let i = 1; i < last.length; i++){
+      intervals.push(last[i].ts - last[i-1].ts);
+    }
+    const avgMs = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    avgIntervalDays = avgMs / (24 * 3600 * 1000);
+  }
+
+  return {
+    mode: mode,
+    sessionPresent: !!sessionId,
+    lastLoginTs: lastLogin ? lastLogin.ts : null,
+    lastLoginSource: lastLogin ? lastLogin.source : null,
+    avgIntervalDays: avgIntervalDays,
+    historyCount: hist.length
+  };
+}
+
+// v.0196: actualiza el row "Auth" en Configuración con el resumen actual.
+// Llamado al mostrar pg-settings y tras eventos de auth.
+function refreshAuthDiagnosticRow(){
+  const modeEl = document.getElementById('set-auth-mode');
+  const summaryEl = document.getElementById('set-auth-summary');
+  if(!modeEl || !summaryEl) return;
+  const st = _authStatusForDisplay();
+  modeEl.textContent = st.mode === 'opcion_d' ? 'Opción D' : 'Legacy';
+  if(st.lastLoginTs){
+    let s = 'Último login ' + _humanizeAgo(st.lastLoginTs);
+    if(st.avgIntervalDays !== null){
+      s += ' · promedio ' + st.avgIntervalDays.toFixed(1) + 'd';
+    }
+    summaryEl.textContent = s;
+  } else {
+    summaryEl.textContent = 'Sin historial todavía — toca para detalle';
+  }
+}
+
+// v.0196: modal con detalle completo del estado de auth.
+function showAuthDiagnostico(){
+  const st = _authStatusForDisplay();
+  const hist = _readAuthHistory();
+  const lastReauth = [...hist].reverse().find(e => e && e.type === 'reauth_required');
+
+  const modeLabel = st.mode === 'opcion_d'
+    ? '<span style="color:var(--green)">Opción D (refresh server-side)</span>'
+    : '<span style="color:var(--amber)">Legacy (sin refresh server-side)</span>';
+
+  const lines = [];
+  lines.push('<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Modo activo</span><span>' + modeLabel + '</span></div>');
+  lines.push('<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Session ID</span><span>' + (st.sessionPresent ? '<span style="color:var(--green)">presente</span>' : '<span style="color:var(--text3)">ausente</span>') + '</span></div>');
+  lines.push('<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Último login</span><span>' + (st.lastLoginTs ? _humanizeAgo(st.lastLoginTs) + (st.lastLoginSource ? ' (' + st.lastLoginSource + ')' : '') : '—') + '</span></div>');
+  lines.push('<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Último re-login forzado</span><span>' + (lastReauth ? _humanizeAgo(lastReauth.ts) : '—') + '</span></div>');
+  lines.push('<div style="display:flex;justify-content:space-between;padding:6px 0"><span style="color:var(--text2)">Promedio entre logins</span><span>' + (st.avgIntervalDays !== null ? st.avgIntervalDays.toFixed(1) + ' días' : '—') + '</span></div>');
+
+  const histRows = hist.length === 0
+    ? '<div style="color:var(--text3);font-size:12px;padding:8px;text-align:center">Sin eventos registrados todavía</div>'
+    : [...hist].reverse().map(e => {
+        const ts = e.ts ? new Date(e.ts).toISOString().slice(0, 16).replace('T', ' ') : '?';
+        let label = e.type;
+        let color = 'var(--text2)';
+        if(e.type === 'login_success'){ label = 'login_success'; color = 'var(--green)'; }
+        else if(e.type === 'refresh_ok'){ label = 'refresh_ok'; color = 'var(--blue)'; }
+        else if(e.type === 'reauth_required'){ label = 'reauth_required'; color = 'var(--amber)'; }
+        const meta = [];
+        if(e.source) meta.push(e.source);
+        if(e.reason) meta.push('"' + e.reason + '"');
+        const metaStr = meta.length ? ' · ' + meta.join(' · ') : '';
+        return '<div style="font-family:var(--mono);font-size:11px;padding:5px 0;border-bottom:1px solid var(--border);color:var(--text)"><span style="color:var(--text3)">' + escapeHtml(ts) + '</span>  <span style="color:' + color + '">' + escapeHtml(label) + '</span><span style="color:var(--text2)">' + escapeHtml(metaStr) + '</span></div>';
+      }).join('');
+
+  showModal(
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">' +
+      '<div style="font-size:15px;font-weight:600">Diagnóstico de auth</div>' +
+      '<div style="font-size:18px;color:var(--text2);cursor:pointer" onclick="closeModal()">✕</div>' +
+    '</div>' +
+    '<div style="font-size:13px;line-height:1.6">' + lines.join('') + '</div>' +
+    '<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-top:14px;margin-bottom:6px">Historial (últimos ' + hist.length + ')</div>' +
+    '<div style="max-height:280px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px">' + histRows + '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="btn" onclick="copiarLogAuth()" style="flex:1;padding:10px;font-size:12px">📋 Copiar log auth</button>' +
+      '<button class="btn btn-amber" onclick="closeModal()" style="flex:1;padding:10px;font-size:12px">Cerrar</button>' +
+    '</div>'
+  );
 }
 
 async function copiarLogAuth(){
@@ -2287,6 +2459,7 @@ async function silentRefresh(){
               expires_at: Date.now() + ((data.expires_in || 3600) - 60) * 1000
             }));
             _authLog('silentRefresh: OK via Apps Script');
+            _recordAuthEvent('refresh_ok', {source: 'opcion_d'});
             return data.access_token;
           }
         } catch(e){
@@ -2330,6 +2503,7 @@ async function silentRefresh(){
               access_token: resp.access_token,
               expires_at: Date.now() + (resp.expires_in - 60) * 1000
             }));
+            _recordAuthEvent('refresh_ok', {source: 'legacy'});
             finish(resp.access_token, `expires_in=${resp.expires_in}s`);
           },
           error_callback: (err) => {
@@ -2367,6 +2541,7 @@ async function ensureFreshToken(){
 // volver a ella después del re-auth exitoso.
 function requireReauth(reason){
   _authLog(`requireReauth: navegando a pg-reconnect (${reason})`);
+  _recordAuthEvent('reauth_required', {reason: reason});
   const activePage = document.querySelector('.page.on');
   const fromId = activePage ? activePage.id : null;
   // No volver a pg-reconnect ni a pg-setup ni a páginas internas de OAuth flow
@@ -2558,6 +2733,7 @@ function initGoogleAuth(){
               expires_at: Date.now() + ((data.expires_in || 3600) - 60) * 1000
             }));
             localStorage.setItem(LS.SESSION_ID, data.session_id);
+            _recordAuthEvent('login_success', {source: 'opcion_d'});
             await _onAuthSuccess(data.access_token, data.email, '');
             _authLog('initGoogleAuth: flow NUEVO completado OK');
             resolve(true);
@@ -2589,6 +2765,7 @@ function initGoogleAuth(){
         }));
         // En flow legacy NO tenemos session_id — silentRefresh va a usar Google directo.
         localStorage.removeItem(LS.SESSION_ID);
+        _recordAuthEvent('login_success', {source: 'legacy'});
         await _onAuthSuccess(resp.access_token, '', '');
       }
     });
@@ -2662,6 +2839,7 @@ function doReauthFromUI(){
             const data = await _appsScriptOAuthExchange(resp.code);
             localStorage.setItem(LS.SESSION_ID, data.session_id);
             if(data.email) localStorage.setItem(LS.EMAIL, data.email);
+            _recordAuthEvent('login_success', {source: 'opcion_d'});
             await onSuccess(data.access_token, data.expires_in);
             resolve(true);
           } catch(e){
@@ -2689,6 +2867,7 @@ function doReauthFromUI(){
         }
         // Sin Apps Script no hay session_id — limpiar para no usar refresh proxy roto
         localStorage.removeItem(LS.SESSION_ID);
+        _recordAuthEvent('login_success', {source: 'legacy'});
         await onSuccess(resp.access_token, resp.expires_in);
       }
     });
@@ -2721,6 +2900,7 @@ function doReauthChangeAccount(){
             }));
             localStorage.setItem(LS.SESSION_ID, data.session_id);
             if(data.email) localStorage.setItem(LS.EMAIL, data.email);
+            _recordAuthEvent('login_success', {source: 'opcion_d'});
             _authLog(`doReauthChangeAccount: OK nuevo email=${data.email}`);
             toast('Cuenta cambiada', 'ok');
             location.reload();
@@ -2752,6 +2932,7 @@ function doReauthChangeAccount(){
           expires_at: Date.now() + (resp.expires_in - 60) * 1000
         }));
         localStorage.removeItem(LS.SESSION_ID);
+        _recordAuthEvent('login_success', {source: 'legacy'});
         try {
           const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: {'Authorization': 'Bearer ' + resp.access_token}
