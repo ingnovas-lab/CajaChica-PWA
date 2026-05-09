@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0190';
+const APP_VERSION = '0191';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5491,17 +5491,22 @@ async function _distributeMastersToUserDrive(){
 
   _distributingNow = true;
   try {
-    // 1. Lee REGISTRO + PROYECTOS de TODAS las empresas del invitado.
+    // 1. Lee REGISTRO + PROYECTOS + INGRESOS de TODAS las empresas del invitado.
     const allCompanies = getCompanies().filter(c => c.sheetId);
     const expectedByCompany = new Map(); // sheetId → Map<masterId, {projCod}>
     const projNamesByCompany = new Map(); // sheetId → Map<projCod, projName>
     const allExpectedMasterIds = new Set();
+    // v.0191: set GLOBAL de TODOS los fileIds referenciados en cualquier sheet.
+    // Incluye URL_FACTURA (REGISTRO!P) y URL_COMPROBANTE (INGRESOS!G), de
+    // TODAS las empresas, sin importar CONSOLIDADO/ELIMINADO. Sirve para
+    // identificar archivos del usuario que ya NO son referenciados → huérfanos.
+    const allReferencedFileIds = new Set();
 
     for(const company of allCompanies){
       const m = new Map();
       const projNames = new Map();
       try {
-        const ranges = ['REGISTRO!A1:Z', 'PROYECTOS!A2:B']
+        const ranges = ['REGISTRO!A1:Z', 'PROYECTOS!A2:B', 'INGRESOS!G2:G']
           .map(r => 'ranges=' + encodeURIComponent(r))
           .join('&');
         const r = await fetch(
@@ -5517,11 +5522,20 @@ async function _distributeMastersToUserDrive(){
         const data = await r.json();
         const rows = (data.valueRanges && data.valueRanges[0] && data.valueRanges[0].values) || [];
         const projRows = (data.valueRanges && data.valueRanges[1] && data.valueRanges[1].values) || [];
+        const ingresoRows = (data.valueRanges && data.valueRanges[2] && data.valueRanges[2].values) || [];
 
         for(const pr of projRows){
           const cod = (pr[0] || '').toString().trim();
           const name = (pr[1] || '').toString().trim();
           if(cod && name) projNames.set(cod, name);
+        }
+
+        // URL_COMPROBANTE de INGRESOS: solo agregar a allReferencedFileIds
+        for(const ir of ingresoRows){
+          const u = (ir[0] || '').toString();
+          if(!u) continue;
+          const fid = u.match(/\/d\/([a-zA-Z0-9_-]+)/);
+          if(fid) allReferencedFileIds.add(fid[1]);
         }
 
         if(rows.length >= 2){
@@ -5533,9 +5547,13 @@ async function _distributeMastersToUserDrive(){
               const projCod = (row[H.PROYECTO] || '').toString().trim();
               const consolidado = (row[H.CONSOLIDADO] || '').toString().trim().toUpperCase() === 'SI';
               const eliminado = H.ELIMINADO !== undefined && (row[H.ELIMINADO] || '').toString().trim().toUpperCase() === 'SI';
-              if(!url || !projCod || !consolidado || eliminado) continue;
+              if(!url) continue;
               const fid = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
               if(!fid) continue;
+              // Cualquier URL_FACTURA cuenta como referenciado (consolidado o no, eliminado o no)
+              allReferencedFileIds.add(fid[1]);
+              // Solo masters consolidados activos para el loop main de distribución
+              if(!projCod || !consolidado || eliminado) continue;
               m.set(fid[1], {projCod});
               allExpectedMasterIds.add(fid[1]);
             }
@@ -5760,11 +5778,12 @@ async function _distributeMastersToUserDrive(){
     }
 
     // 8. Detectar y trashear huérfanos post-consolidación. v.0190: ahora corre
-    // AL FINAL del sync (después de crear copias), no al principio. Esto
-    // permite detectar huérfanos cuyos masters fueron consolidados durante
-    // ESTA ejecución del sync. Re-listamos archivos para tener data fresca
-    // (incluye archivos subidos por el usuario muy recientemente que el
-    // primer listing pudo haber missed por eventual consistency de Drive).
+    // AL FINAL del sync (después de crear copias), no al principio. v.0191:
+    // detección por marca `ccUploaded='true'` además de matching por nombre,
+    // para ser robusta a renames del master (ej. cuando admin edita la fecha
+    // de la factura, el master se renombra y el huérfano del usuario queda
+    // con el nombre viejo — el matching por nombre falla, pero la marca
+    // `ccUploaded` identifica al original sin importar el nombre).
     try {
       const refreshRes = await fetch(
         'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
@@ -5773,20 +5792,47 @@ async function _distributeMastersToUserDrive(){
       );
       if(refreshRes.ok){
         const freshFiles = (await refreshRes.json()).files || [];
-        // Reconstruir tracker con data fresca + tracker en memoria de creadas.
+        // Reconstruir tracker de copias distribuidas con data fresca.
         for(const f of freshFiles){
           if(f.appProperties && f.appProperties.ccCopyOf){
             const parent = (f.parents || [])[0];
             if(parent) distributedByLocation.set(parent + '::' + f.name, f);
           }
         }
-        // Detectar huérfanos: archivos sin marca con (parent + name) que
-        // matchea con una copia distribuida.
+        // Trashear cualquier archivo que sea huérfano. Un archivo es
+        // huérfano si cumple cualquiera de:
+        //   (a) marca `ccUploaded='true'` Y su id NO está referenciado
+        //       en NINGÚN sheet (post-consolidación o post-eliminación).
+        //   (b) sin marca pero (parent+name) matchea con una copia
+        //       distribuida → fallback para uploads legacy sin marca.
+        const trashed = new Set();
         for(const f of freshFiles){
           if(f.appProperties && f.appProperties.ccCopyOf) continue;
+          // (a) Match por marca ccUploaded + no referenciado
+          const isUploaded = f.appProperties && f.appProperties.ccUploaded === 'true';
+          if(isUploaded && !allReferencedFileIds.has(f.id)){
+            try {
+              const r = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${f.id}`,
+                {
+                  method: 'PATCH',
+                  headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                  body: JSON.stringify({trashed: true})
+                }
+              );
+              if(r.ok){
+                stats.deleted++;
+                trashed.add(f.id);
+                console.log(`[distribute] Huérfano (ccUploaded no-ref) trashed: "${f.name}"`);
+              } else stats.errors++;
+            } catch(e){ stats.errors++; }
+            continue;
+          }
+          // (b) Fallback: matching por (parent + name) con copia distribuida
           const parent = (f.parents || [])[0];
           if(!parent) continue;
           if(!distributedByLocation.has(parent + '::' + f.name)) continue;
+          if(trashed.has(f.id)) continue;
           try {
             const r = await fetch(
               `https://www.googleapis.com/drive/v3/files/${f.id}`,
@@ -5798,7 +5844,7 @@ async function _distributeMastersToUserDrive(){
             );
             if(r.ok){
               stats.deleted++;
-              console.log(`[distribute] Huérfano post-consolidación trashed: "${f.name}"`);
+              console.log(`[distribute] Huérfano (parent+name match) trashed: "${f.name}"`);
             } else stats.errors++;
           } catch(e){ stats.errors++; }
         }
@@ -6790,10 +6836,14 @@ async function uploadImage(entry){
   const fechaDot = fechaRaw.replace(/-/g, '.'); // 2026-03-20 → 2026.03.20
   const fileName = `${fechaDot} _ ${safeLabel} _ ${entry.id}.jpg`;
 
+  // v.0191: marcar uploads del usuario con `appProperties.ccUploaded = 'true'`
+  // para que el sync pueda identificarlos como huérfanos post-consolidación
+  // sin depender del nombre (que cambia si admin edita la fecha).
   const metadata = {
     name: fileName,
     mimeType: entry.image_mime || 'image/jpeg',
-    parents: [projFolderId]
+    parents: [projFolderId],
+    appProperties: {ccUploaded: 'true'}
   };
   const boundary = '-------314159265358979323846';
   const body = new Blob([
