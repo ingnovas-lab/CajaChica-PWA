@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0183';
+const APP_VERSION = '0184';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5530,73 +5530,78 @@ async function _distributeMastersToUserDrive(){
     console.log(`[distribute] copias locales con marca ccCopyOf: ${copiesByMasterId.size}`);
 
     // 4. Resolver: copiar faltantes, renombrar desactualizadas
+    // v.0184: la PWA del invitado NO puede leer archivos creados por Apps
+    // Script (scope drive.file responde 404). Pasamos por el AS como proxy
+    // — la action `getMasterFile` sirve metadata + bytes con validación de
+    // que el fileId esté referenciado en este Sheet.
+    const scriptUrl = getActiveScriptUrl();
+    if(!scriptUrl){
+      console.warn('[distribute] sin scriptUrl, no puedo descargar masters');
+      localStorage.setItem(throttleKey, String(Date.now()));
+      return;
+    }
     const stats = {copied: 0, renamed: 0, deleted: 0, errors: 0};
 
     for(const [masterId, info] of expectedMasters){
       const mine = copiesByMasterId.get(masterId);
+      const needContent = !mine;
 
-      // Fetch nombre del master (para crear copia con mismo nombre o detectar rename)
-      let masterName;
+      // Llamar AS proxy
+      let masterFile;
       try {
-        const r = await fetch(
-          `https://www.googleapis.com/drive/v3/files/${masterId}?fields=name`,
-          {headers: {'Authorization': 'Bearer ' + token}}
-        );
+        const r = await fetch(scriptUrl, {
+          method: 'POST',
+          headers: {'Content-Type': 'text/plain;charset=utf-8'},
+          body: JSON.stringify({
+            action: 'getMasterFile',
+            sheetId: empresa.sheetId,
+            fileId: masterId,
+            withContent: needContent
+          })
+        });
         if(!r.ok){
-          // Master no accesible (sin permisos o borrado). Skip.
-          if(r.status !== 404 && r.status !== 403){
-            console.warn(`[distribute] master ${masterId} fetch ${r.status}`);
-            stats.errors++;
-          }
+          stats.errors++;
+          console.warn(`[distribute] AS HTTP ${r.status} para ${masterId}`);
           continue;
         }
-        masterName = (await r.json()).name;
+        const d = await r.json();
+        if(!d.ok){
+          stats.errors++;
+          console.warn(`[distribute] AS rechazó ${masterId}: ${d.error}`);
+          continue;
+        }
+        masterFile = d;
       } catch(e){
         stats.errors++;
+        console.warn('[distribute] AS error:', e.message);
         continue;
       }
 
       if(!mine){
-        // Crear copia en Fotos/ de la obra correspondiente
+        // Crear archivo nuevo en mi Drive con el contenido recibido del AS
         try {
           const fotosId = await getSubfolderObra(info.projCod, 'Fotos');
-          const r = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${masterId}/copy?supportsAllDrives=true`,
-            {
-              method: 'POST',
-              headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-              body: JSON.stringify({
-                name: masterName,
-                parents: [fotosId],
-                appProperties: {ccCopyOf: masterId}
-              })
-            }
-          );
-          if(r.ok){
-            stats.copied++;
-            console.log(`[distribute] Copiado: ${masterName}`);
-          } else {
-            stats.errors++;
-            console.warn(`[distribute] copy ${masterId} → ${r.status}: ${(await r.text()).slice(0, 200)}`);
-          }
+          await _createDistributedCopy(fotosId, masterFile.name, masterFile.mimeType, masterFile.base64, masterId);
+          stats.copied++;
+          console.log(`[distribute] Copiado: ${masterFile.name}`);
         } catch(e){
           stats.errors++;
-          console.warn('[distribute] copy error:', e.message);
+          console.warn(`[distribute] crear copia falló: ${e.message}`);
         }
-      } else if(mine.name !== masterName){
-        // Renombrar copia para igualar al master
+      } else if(mine.name !== masterFile.name){
+        // Renombrar copia local
         try {
           const r = await fetch(
             `https://www.googleapis.com/drive/v3/files/${mine.id}`,
             {
               method: 'PATCH',
               headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-              body: JSON.stringify({name: masterName})
+              body: JSON.stringify({name: masterFile.name})
             }
           );
           if(r.ok){
             stats.renamed++;
-            console.log(`[distribute] Renombrado: "${mine.name}" → "${masterName}"`);
+            console.log(`[distribute] Renombrado: "${mine.name}" → "${masterFile.name}"`);
           } else {
             stats.errors++;
           }
@@ -5638,6 +5643,46 @@ async function _distributeMastersToUserDrive(){
   } catch(e){
     console.warn('[distribute] error general:', e.message);
   }
+}
+
+// v.0184: crea archivo en Drive del invitado vía multipart upload con
+// contenido recibido del Apps Script proxy. Marca con appProperties.ccCopyOf
+// para distinguirlo de uploads del usuario y de archivos huérfanos.
+async function _createDistributedCopy(parentFolderId, name, mimeType, base64Content, masterFileId){
+  const token = getToken();
+
+  // Decodificar base64 a binary blob
+  const binary = atob(base64Content);
+  const arr = new Uint8Array(binary.length);
+  for(let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+  const fileBlob = new Blob([arr], {type: mimeType || 'image/jpeg'});
+
+  const metadata = {
+    name: name,
+    mimeType: mimeType || 'image/jpeg',
+    parents: [parentFolderId],
+    appProperties: {ccCopyOf: masterFileId}
+  };
+
+  const boundary = '-------distribute' + Date.now();
+  const body = new Blob([
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
+    JSON.stringify(metadata),
+    `\r\n--${boundary}\r\nContent-Type: ${metadata.mimeType}\r\n\r\n`,
+    fileBlob,
+    `\r\n--${boundary}--`
+  ]);
+
+  const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': `multipart/related; boundary=${boundary}`
+    },
+    body: body
+  });
+  if(!r.ok) throw new Error(`multipart upload HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  return await r.json();
 }
 
 function populateDropdowns(){
