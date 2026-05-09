@@ -1690,7 +1690,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0192';
+const APP_VERSION = '0193';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -11419,6 +11419,107 @@ async function contarFacturasSinConsolidar(){
 // Consolidación delegada al Apps Script (corre en servidores de Google, sin CORS).
 // El admin debe configurar una vez la URL del Web App desde Settings → Gestión de usuarios.
 // La URL se guarda dentro de la empresa activa (getCurrentCompany().scriptUrl).
+// v.0193: helper para llamar una action del AS de una empresa puntual con
+// auto-heal si la URL local apunta a un deploy desactualizado.
+//
+// Síntomas que disparan auto-heal:
+//   - response.error contiene "Acción desconocida" → el AS apuntado existe pero
+//     es una versión vieja que no conoce esa action.
+//
+// Auto-heal flow:
+//   1. Lee `USUARIOS!Z1` del Sheet — la celda canónica donde el super_admin
+//      mantiene la URL del AS para esta empresa (introducida en v.0180).
+//   2. Si Z1 != URL efectiva actual, retry con la URL de Z1.
+//   3. Si Z1 está vacío Y la empresa tiene scriptUrl legacy Y existe URL
+//      central, retry con la central.
+//   4. Si retry funciona, persiste el cambio en local (empresa.scriptUrl).
+//   5. Si retry falla o no hay alternativa, devuelve el error original.
+//
+// Devuelve el response del AS tal cual o {error: '...'} si todo falló.
+async function _callASForEmpresa(empresa, body){
+  if(!empresa) return {error: 'Empresa requerida'};
+  const initialUrl = getEffectiveScriptUrl(empresa);
+  if(!initialUrl) return {error: 'Empresa sin Apps Script configurado'};
+
+  const _doCall = async (u) => {
+    try {
+      const r = await fetch(u, {
+        method: 'POST',
+        headers: {'Content-Type': 'text/plain;charset=utf-8'},
+        body: JSON.stringify({...body, sheetId: empresa.sheetId})
+      });
+      if(!r.ok) return {error: 'HTTP ' + r.status};
+      return await r.json();
+    } catch(e){
+      return {error: (e && e.message) || String(e)};
+    }
+  };
+
+  let res = await _doCall(initialUrl);
+
+  // Sin error reconocible o action OK → devolver tal cual.
+  const errStr = res && res.error ? String(res.error) : '';
+  const isUnknownAction = /[Aa]cci.n desconocida/.test(errStr);
+  if(!isUnknownAction) return res;
+
+  // Auto-heal: leer Z1 del Sheet de esta empresa específica.
+  console.warn('[_callASForEmpresa] "' + empresa.nombre + '" → "Acción desconocida". Intentando auto-heal vía USUARIOS!Z1.');
+  let canonicalUrl = '';
+  try {
+    const token = getToken();
+    const r = await fetch(
+      'https://sheets.googleapis.com/v4/spreadsheets/' + empresa.sheetId + '/values/' + encodeURIComponent('USUARIOS!Z1'),
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(r.ok){
+      const data = await r.json();
+      canonicalUrl = (((data.values || [])[0] || [])[0] || '').trim();
+    } else {
+      console.warn('[_callASForEmpresa] read Z1 HTTP ' + r.status);
+    }
+  } catch(e){
+    console.warn('[_callASForEmpresa] read Z1 falló:', (e && e.message) || e);
+  }
+
+  // Decidir URL alternativa para retry.
+  let retryUrl = '';
+  let updateMode = '';
+  if(canonicalUrl && canonicalUrl !== initialUrl){
+    retryUrl = canonicalUrl;
+    updateMode = 'z1';
+  } else if(empresa.scriptUrl){
+    const central = getCentralScriptUrl();
+    if(central && central !== initialUrl){
+      retryUrl = central;
+      updateMode = 'central';
+    }
+  }
+
+  if(!retryUrl){
+    console.warn('[_callASForEmpresa] no hay URL alternativa para retry. Devuelvo error original.');
+    return res;
+  }
+
+  console.log('[_callASForEmpresa] retry "' + empresa.nombre + '" con ' + updateMode + ': ' + retryUrl);
+  const retryRes = await _doCall(retryUrl);
+
+  if(retryRes && !retryRes.error){
+    // Persistir el cambio en local.
+    if(updateMode === 'central'){
+      empresa.scriptUrl = ''; // que herede la central
+    } else {
+      empresa.scriptUrl = retryUrl;
+    }
+    try { upsertCompany(empresa); } catch(e){ console.warn('[_callASForEmpresa] upsert falló:', e.message); }
+    console.log('[_callASForEmpresa] ✓ auto-healed "' + empresa.nombre + '" → ' + (updateMode === 'central' ? '(central)' : retryUrl));
+    return retryRes;
+  }
+
+  // Retry también falló. Devolver error original con hint.
+  console.warn('[_callASForEmpresa] retry falló para "' + empresa.nombre + '". Error original devuelto.');
+  return {error: errStr + ' (auto-heal intentado, sin éxito)'};
+}
+
 // v.0192: backfill one-shot para super_admin. Recorre TODAS las empresas del
 // super_admin y agrega readers faltantes a fotos consolidadas pre-v.0181 (cuando
 // sharePhotoWithAdmins solo compartía con rol ADMIN). Idempotente. Tarda ~1-5
@@ -11426,6 +11527,10 @@ async function contarFacturasSinConsolidar(){
 //
 // El AS pagina (batchSize=10) para no exceder timeout 6min del Web App. La
 // PWA hace loop por batches mostrando progreso vivo en el loader.
+//
+// v.0193: usa _callASForEmpresa para auto-heal cuando una empresa apunta a un
+// deploy del AS más viejo. Esto evita errores "Acción desconocida" que pasaban
+// con empresas legacy cuya scriptUrl quedó hardcodeada antes de v.0180.
 async function backfillSharesLegacy(){
   if(!isSuperAdmin()){ toast('Solo SUPER_ADMIN', 'err'); return; }
   const companies = getCompanies();
@@ -11434,7 +11539,8 @@ async function backfillSharesLegacy(){
     return;
   }
 
-  const conScript = companies.filter(c => c.scriptUrl);
+  // Ahora una empresa "tiene AS" si tiene scriptUrl propio O si hay central.
+  const conScript = companies.filter(c => getEffectiveScriptUrl(c));
   if(!conScript.length){
     toast('Ninguna empresa tiene Apps Script configurado', 'err');
     return;
@@ -11452,11 +11558,13 @@ async function backfillSharesLegacy(){
 
   const totals = {empresas: 0, archivos: 0, sharesAgregados: 0, anyoneAplicado: 0, errores: 0, archivosNoOwner: 0};
   const empresasErroneas = [];
+  let healed = 0;
 
   loading(true, 'Backfill', 'Iniciando...');
 
   for(let i = 0; i < conScript.length; i++){
     const c = conScript[i];
+    const urlBefore = getEffectiveScriptUrl(c);
     let batchStart = 0;
     let totalEmpresa = 0;
     let safety = 500; // hard limit: 500 batches × 10 = 5000 archivos por empresa
@@ -11468,28 +11576,16 @@ async function backfillSharesLegacy(){
         totals.sharesAgregados + ' shares · ' + totals.errores + ' errores'
       );
 
-      let res;
-      try {
-        const r = await fetch(c.scriptUrl, {
-          method: 'POST',
-          headers: {'Content-Type': 'text/plain;charset=utf-8'},
-          body: JSON.stringify({
-            action: 'backfillShares',
-            sheetId: c.sheetId,
-            batchStart: batchStart,
-            batchSize: 10
-          })
-        });
-        if(!r.ok){
-          empresasErroneas.push({nombre: c.nombre, error: 'HTTP ' + r.status});
-          break;
-        }
-        res = await r.json();
-      } catch(e){
-        empresasErroneas.push({nombre: c.nombre, error: e.message || String(e)});
+      const res = await _callASForEmpresa(c, {
+        action: 'backfillShares',
+        batchStart: batchStart,
+        batchSize: 10
+      });
+
+      if(!res || res.error){
+        empresasErroneas.push({nombre: c.nombre, error: (res && res.error) || 'unknown'});
         break;
       }
-
       if(!res.ok){
         empresasErroneas.push({nombre: c.nombre, error: res.error || 'unknown'});
         break;
@@ -11512,6 +11608,11 @@ async function backfillSharesLegacy(){
     if(safety <= 0){
       empresasErroneas.push({nombre: c.nombre, error: 'safety limit alcanzado (>5000 archivos)'});
     }
+
+    // Si la URL efectiva cambió durante este loop (auto-heal mid-flight),
+    // contarlo para reportar al super_admin.
+    const urlAfter = getEffectiveScriptUrl(c);
+    if(urlAfter !== urlBefore) healed++;
   }
 
   loading(false);
@@ -11524,17 +11625,21 @@ async function backfillSharesLegacy(){
     'Skipped (no super_admin owner): ' + totals.archivosNoOwner,
     'Errores: ' + totals.errores
   ];
+  if(healed > 0){
+    lines.push('URLs auto-corregidas: ' + healed);
+  }
   let summary = lines.join('\n');
   if(empresasErroneas.length){
     summary += '\n\nEmpresas con error:\n' +
       empresasErroneas.map(e => '  • ' + e.nombre + ': ' + e.error).join('\n');
+    summary += '\n\nSi alguna empresa sigue dando "Acción desconocida" tras el auto-heal, su Sheet probablemente no tiene URL en USUARIOS!Z1 ni hay URL central. Fix manual:\n  1. Activa esa empresa.\n  2. Configuración → Apps Script → pegá la URL del AS v.0098.\n  3. Click "Guardar URL".\n  4. Re-corre el backfill.';
   }
 
-  console.log('[backfillShares] resultado:', {totals, empresasErroneas});
+  console.log('[backfillShares] resultado:', {totals, empresasErroneas, healed});
 
   showModal(
     '<h3>Resultado del backfill</h3>' +
-    '<div style="font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;font-family:var(--mono);background:var(--bg2);padding:10px;border-radius:8px;margin-top:10px;max-height:300px;overflow-y:auto">' +
+    '<div style="font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;font-family:var(--mono);background:var(--bg2);padding:10px;border-radius:8px;margin-top:10px;max-height:340px;overflow-y:auto">' +
       escapeHtml(summary) +
     '</div>' +
     '<button class="btn btn-amber" onclick="closeModal()" style="margin-top:14px">Cerrar</button>'
