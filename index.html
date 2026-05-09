@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0205';
+const APP_VERSION = '0206';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3651,39 +3651,12 @@ async function eliminarEmpresaConfirmada(nombre){
       // con admins) quedan persistidos en Drive aunque la carpeta esté en
       // Papelera, y el invitado puede seguir viendo entradas fantasma en su
       // "Compartido conmigo".
+      // v.0206: revoke unificado de TODA la jerarquía (carpeta + subcarpetas
+      // + obras + Sheet). El helper cubre el Sheet con includeSheet:true.
       if(empresa.folderId){
-        await _revokeAllSharesUnderEmpresa(empresa.folderId).catch(e => {
-          console.warn('[eliminarEmpresa] revoke estructura falló:', e.message);
+        await _revokeAllSharesUnderEmpresa(empresa.folderId, {includeSheet: true}).catch(e => {
+          console.warn('[eliminarEmpresa] revoke jerarquía:', e.message);
         });
-      }
-
-      // v.0205: revocar TODOS los permisos no-owner del Sheet. Sin esto,
-      // trashear solo la carpeta padre deja el Sheet accesible para invitados
-      // (Sheets API → 200), y el detector del invitado no lo marca como
-      // eliminado. Tras revoke directo, Sheets API → 403 para invitados →
-      // detector dispara cleanup correctamente.
-      if(empresa.sheetId){
-        try {
-          const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
-          const r = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${empresa.sheetId}/permissions?fields=permissions(id,role,emailAddress)&supportsAllDrives=true`,
-            {headers: {'Authorization': 'Bearer ' + token}}
-          );
-          if(r.ok){
-            const j = await r.json();
-            for(const p of (j.permissions || [])){
-              if(p.role === 'owner') continue;
-              const pe = (p.emailAddress || '').toLowerCase();
-              if(pe && pe === myEmail) continue;
-              try {
-                await fetch(
-                  `https://www.googleapis.com/drive/v3/files/${empresa.sheetId}/permissions/${p.id}?supportsAllDrives=true`,
-                  {method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}}
-                );
-              } catch(_){}
-            }
-          }
-        } catch(e){ console.warn('[eliminarEmpresa] revoke sheet:', e.message); }
       }
 
       // 1. Mover carpeta de la empresa a Papelera de Drive
@@ -5713,22 +5686,31 @@ async function _cleanupOrphanedUserFiles(opts){
 //   - Al eliminar empresa (`eliminarEmpresaConfirmada`): asegura que el
 //     invitado deje de ver la estructura cuando el super_admin borra.
 //   - Cleanup automático one-shot post-deploy v.0200 (flag local).
-async function _revokeAllSharesUnderEmpresa(empresaFolderId){
+// v.0206: revoca permisos directos NO-owner en TODA la jerarquía de una empresa.
+// Cubre carpeta empresa + subcarpetas (Base de datos, Proyectos, Reportes) +
+// obras dentro de Proyectos + opcionalmente el Sheet dentro de Base de datos.
+//
+// opts.includeSheet:
+//   - false (default): NO toca permisos del Sheet. Para empresas ACTIVAS
+//     donde el Sheet sigue legítimamente compartido con users.
+//   - true: incluye el Sheet en el revoke. Para empresas ELIMINADAS donde
+//     hay que cortar el acceso de invitados completamente.
+async function _revokeAllSharesUnderEmpresa(empresaFolderId, opts){
   const token = getToken();
-  if(!token || !empresaFolderId) return {revoked: 0, errors: 0, foldersScanned: 0};
-  const stats = {revoked: 0, errors: 0, foldersScanned: 0};
+  if(!token || !empresaFolderId) return {revoked: 0, errors: 0, scanned: 0};
+  const stats = {revoked: 0, errors: 0, scanned: 0};
   const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
+  const includeSheet = !!(opts && opts.includeSheet);
 
-  // Recorrer: empresa → hijos directos → si hijo es "Proyectos" entrar a obras.
-  const targetsToScan = [empresaFolderId];
-
-  // Helper local: lista hijos folder-only de un parent.
-  async function _listChildFolders(parentId){
-    const q = encodeURIComponent(
-      `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-    );
+  // Helper: lista hijos (folders y/o files) de un parent.
+  // Pasa filtro mimeType para listar solo lo necesario.
+  async function _listChildren(parentId, mimeFilter){
+    const conds = [`'${parentId}' in parents`, 'trashed=false'];
+    if(mimeFilter === 'folder') conds.push(`mimeType='application/vnd.google-apps.folder'`);
+    if(mimeFilter === 'file')   conds.push(`mimeType!='application/vnd.google-apps.folder'`);
+    const q = encodeURIComponent(conds.join(' and '));
     const r = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=200`,
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType)&pageSize=500`,
       {headers: {'Authorization': 'Bearer ' + token}}
     );
     if(!r.ok) return [];
@@ -5736,7 +5718,7 @@ async function _revokeAllSharesUnderEmpresa(empresaFolderId){
     return j.files || [];
   }
 
-  // Helper local: revoca permisos directos NO-owner de un fileId.
+  // Helper: revoca permisos directos NO-owner de un fileId.
   async function _revokePermsOf(fileId){
     try {
       const r = await fetch(
@@ -5761,31 +5743,38 @@ async function _revokeAllSharesUnderEmpresa(empresaFolderId){
     } catch(e){ stats.errors++; }
   }
 
-  // Nivel 1: hijos directos de la carpeta empresa (Base de datos, Proyectos, etc.).
+  const targets = [empresaFolderId];
+
+  // Nivel 1: subcarpetas directas (Base de datos, Proyectos, Reportes, etc.).
   let level1 = [];
-  try { level1 = await _listChildFolders(empresaFolderId); }
+  try { level1 = await _listChildren(empresaFolderId, 'folder'); }
   catch(e){ console.warn('[revoke estructura] list nivel1:', e.message); }
 
   for(const child of level1){
-    targetsToScan.push(child.id);
-    if((child.name || '').toLowerCase() === 'proyectos'){
+    targets.push(child.id);
+    const name = (child.name || '').toLowerCase();
+    if(name === 'proyectos'){
       // Nivel 2: obras dentro de Proyectos.
       try {
-        const obras = await _listChildFolders(child.id);
-        for(const obra of obras){
-          targetsToScan.push(obra.id);
-        }
+        const obras = await _listChildren(child.id, 'folder');
+        for(const obra of obras) targets.push(obra.id);
       } catch(e){ console.warn('[revoke estructura] list obras:', e.message); }
+    }
+    if(includeSheet && name === 'base de datos'){
+      // Archivos dentro de Base de datos (típicamente solo el Sheet).
+      try {
+        const sheets = await _listChildren(child.id, 'file');
+        for(const s of sheets) targets.push(s.id);
+      } catch(e){ console.warn('[revoke estructura] list sheets:', e.message); }
     }
   }
 
-  // Revocar en cada folder reunido.
-  for(const fid of targetsToScan){
-    stats.foldersScanned++;
+  for(const fid of targets){
+    stats.scanned++;
     await _revokePermsOf(fid);
   }
 
-  console.log(`[revoke estructura] folders=${stats.foldersScanned}, revocados=${stats.revoked}, errores=${stats.errors}`);
+  console.log(`[revoke estructura] scanned=${stats.scanned}, revocados=${stats.revoked}, errores=${stats.errors}, includeSheet=${includeSheet}`);
   return stats;
 }
 
@@ -5963,39 +5952,90 @@ async function _trashHuerfanosCajaChicaMaster(){
   return {trashed};
 }
 
-// v.0200: cleanup one-shot post-deploy del super_admin. Limpia shares legacy
-// directos en subcarpetas (Proyectos, Base de datos, obras) que se crearon
-// con flows previos a v.0200. Idempotente — si nada está compartido, pasa
-// sin tocar nada. Solo se ejecuta una vez (flag local).
-const LS_CLEANUP_STRUCT_DONE = 'cc_cleanup_struct_done_v200';
-async function _cleanupSharesEstructuraLegacy(){
+// v.0206: barrido unificado de shares legacy en el Drive del super_admin.
+// Reemplaza el `_cleanupSharesEstructuraLegacy` de v.0200 (que era one-shot
+// con flag y solo cubría empresas activas).
+//
+// Cubre 2 casos en una pasada:
+//   1) Empresas ACTIVAS (en lista local, no trashed): revoca shares directos
+//      en subcarpetas legacy (Proyectos, Base de datos, obras). NO toca el
+//      Sheet — sigue compartido legítimamente con users.
+//   2) Empresas ELIMINADAS (carpeta trashed en Caja Chica Master/): revoca
+//      jerarquía completa INCLUYENDO el Sheet. Cierra el caso "el admin
+//      eliminó pero el Sheet sigue accesible al invitado" sin importar
+//      cuándo se eliminó (legacy pre-v.0205 o post).
+//
+// Idempotente, sin flag — corre cada boot del super_admin. Si no hay nada
+// que revocar, pasa sin tocar nada.
+async function _revokeLegacyShares(){
   if(!isSuperAdmin()) return;
-  if(localStorage.getItem(LS_CLEANUP_STRUCT_DONE) === '1') return;
   const token = getToken();
   if(!token) return;
 
-  const companies = getCompanies().filter(c => c.folderId);
-  if(companies.length === 0){
-    // Sin empresas con folderId → marcar como hecho para no reintentar.
-    localStorage.setItem(LS_CLEANUP_STRUCT_DONE, '1');
+  const masterId = await getMasterFolderId().catch(() => null);
+  if(!masterId) return;
+
+  // Listar TODAS las carpetas en Caja Chica Master (activas + trashed).
+  // Drive query no soporta "trashed=any", pero por default lista solo
+  // trashed=false. Para incluir trashed hay que combinar 2 listings.
+  const fields = 'files(id,name,trashed)&pageSize=200';
+  let allFolders = [];
+  try {
+    const qActive = encodeURIComponent(
+      `'${masterId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+    );
+    const r1 = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${qActive}&fields=${fields}`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(r1.ok){
+      const j = await r1.json();
+      allFolders = allFolders.concat(j.files || []);
+    }
+    const qTrashed = encodeURIComponent(
+      `'${masterId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=true`
+    );
+    const r2 = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${qTrashed}&fields=${fields}`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(r2.ok){
+      const j = await r2.json();
+      allFolders = allFolders.concat(j.files || []);
+    }
+  } catch(e){
+    console.warn('[revoke-legacy] list folders:', e.message);
     return;
   }
 
-  let totalRevoked = 0, totalFolders = 0, totalErrors = 0;
-  for(const c of companies){
+  if(allFolders.length === 0) return;
+
+  const activeNames = new Set(getCompanies().map(c => (c.nombre || '').trim()));
+
+  let totalRevoked = 0, totalScanned = 0, totalErrors = 0;
+  let countActive = 0, countTrashed = 0;
+
+  for(const f of allFolders){
+    const name = (f.name || '').trim();
+    const isTrashed = !!f.trashed;
+    const isActive = !isTrashed && activeNames.has(name);
+    // includeSheet: false para activas (Sheet sigue compartido), true para
+    // trashed (cortar acceso completo).
+    const includeSheet = isTrashed;
+
     try {
-      const stats = await _revokeAllSharesUnderEmpresa(c.folderId);
+      const stats = await _revokeAllSharesUnderEmpresa(f.id, {includeSheet});
       totalRevoked += stats.revoked;
-      totalFolders += stats.foldersScanned;
+      totalScanned += stats.scanned;
       totalErrors += stats.errors;
+      if(isTrashed) countTrashed++; else if(isActive) countActive++;
     } catch(e){
-      console.warn('[cleanup struct legacy]', c.nombre, e.message);
+      console.warn('[revoke-legacy]', name, e.message);
       totalErrors++;
     }
   }
 
-  console.log(`[cleanup struct legacy] empresas=${companies.length}, folders=${totalFolders}, revocados=${totalRevoked}, errores=${totalErrors}`);
-  localStorage.setItem(LS_CLEANUP_STRUCT_DONE, '1');
+  console.log(`[revoke-legacy] activas=${countActive}, trashed=${countTrashed}, scanned=${totalScanned}, revocados=${totalRevoked}, errores=${totalErrors}`);
 }
 
 // v.0182: distribuye los archivos master (en Drive del super_admin) al Drive
@@ -12749,10 +12789,10 @@ function rewireClickable(root){
         })();
       }
 
-      // v.0200: cleanup one-shot post-deploy de shares legacy (super_admin).
-      // Idempotente. Background — corre 1 vez en la vida de esta instalación.
+      // v.0206: barrido unificado de shares legacy + empresas trashed sin
+      // revoke (super_admin). Idempotente, cada boot.
       if(isSuperAdmin()){
-        _cleanupSharesEstructuraLegacy().catch(e => console.warn('[init] cleanup-struct:', e.message));
+        _revokeLegacyShares().catch(e => console.warn('[init] revoke-legacy:', e.message));
       }
     } catch(e){
       console.warn('[init] Sync desde Drive falló:', e.message);
