@@ -1240,6 +1240,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO, URL_COMPROBANTE) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
       <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="padding:10px;font-size:12px;margin-top:10px">Sincronizar archivos con Sheet</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
+      <button class="btn btn-amber" id="btn-backfill-shares" onclick="backfillSharesLegacy()" style="padding:10px;font-size:12px;margin-top:10px;display:none">Backfill share fotos legacy</button>
+      <div id="backfill-shares-help" style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4;display:none">Comparte fotos consolidadas pre-v.0181 con todos los usuarios (incluido rol USUARIO). One-shot, idempotente. Solo SUPER_ADMIN.</div>
       <button class="btn btn-red" onclick="resetApp()" style="padding:10px;font-size:12px;margin-top:10px">Borrar todo y empezar de cero</button>
       <div style="font-size:11px;color:#fca5a5;margin-top:6px;line-height:1.4;opacity:.85">⚠️ Borra TODA la configuración local de este dispositivo: token de Google, clave de Gemini, empresa activa, proyectos cacheados, balances cacheados, e IndexedDB (registros pendientes sin sincronizar). NO toca tus datos en Google Drive ni en los Sheets — esos quedan intactos. Útil si quieres empezar limpio o si la app se rompió.</div>
     </div>
@@ -1688,7 +1690,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0191';
+const APP_VERSION = '0192';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -4996,6 +4998,15 @@ function applyRoleUI(){
   const admin = isAdmin();
   document.querySelectorAll('[data-admin-only]').forEach(el => {
     el.style.display = admin ? '' : 'none';
+  });
+  // v.0192: elementos restringidos a SUPER_ADMIN (sólo el dueño del script).
+  // El panel donde viven es admin-only, así que un admin no super_admin
+  // tampoco los vería; aún así limpiamos explícitamente para que no se
+  // muestren si el panel se abre por accidente desde otro path.
+  const superAdmin = isSuperAdmin();
+  ['btn-backfill-shares', 'backfill-shares-help'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.style.display = superAdmin ? '' : 'none';
   });
 }
 
@@ -11408,6 +11419,128 @@ async function contarFacturasSinConsolidar(){
 // Consolidación delegada al Apps Script (corre en servidores de Google, sin CORS).
 // El admin debe configurar una vez la URL del Web App desde Settings → Gestión de usuarios.
 // La URL se guarda dentro de la empresa activa (getCurrentCompany().scriptUrl).
+// v.0192: backfill one-shot para super_admin. Recorre TODAS las empresas del
+// super_admin y agrega readers faltantes a fotos consolidadas pre-v.0181 (cuando
+// sharePhotoWithAdmins solo compartía con rol ADMIN). Idempotente. Tarda ~1-5
+// min según volumen.
+//
+// El AS pagina (batchSize=10) para no exceder timeout 6min del Web App. La
+// PWA hace loop por batches mostrando progreso vivo en el loader.
+async function backfillSharesLegacy(){
+  if(!isSuperAdmin()){ toast('Solo SUPER_ADMIN', 'err'); return; }
+  const companies = getCompanies();
+  if(!companies || !companies.length){
+    toast('No hay empresas para procesar', 'err');
+    return;
+  }
+
+  const conScript = companies.filter(c => c.scriptUrl);
+  if(!conScript.length){
+    toast('Ninguna empresa tiene Apps Script configurado', 'err');
+    return;
+  }
+
+  const okConfirm = confirm(
+    'Backfill share fotos legacy\n\n' +
+    'Recorrerá TUS ' + conScript.length + ' empresa(s) con AS configurado y agregará permisos de lectura a fotos consolidadas que aún no se compartieron con todos los usuarios.\n\n' +
+    '• No borra ni renombra nada\n' +
+    '• Idempotente (si ya está compartido, skip)\n' +
+    '• Tarda ~1-5 min según volumen\n\n' +
+    '¿Continuar?'
+  );
+  if(!okConfirm) return;
+
+  const totals = {empresas: 0, archivos: 0, sharesAgregados: 0, anyoneAplicado: 0, errores: 0, archivosNoOwner: 0};
+  const empresasErroneas = [];
+
+  loading(true, 'Backfill', 'Iniciando...');
+
+  for(let i = 0; i < conScript.length; i++){
+    const c = conScript[i];
+    let batchStart = 0;
+    let totalEmpresa = 0;
+    let safety = 500; // hard limit: 500 batches × 10 = 5000 archivos por empresa
+
+    while(safety-- > 0){
+      loading(true, 'Backfill',
+        'Empresa ' + (i+1) + '/' + conScript.length + ' · ' + c.nombre.slice(0, 24) +
+        ' · ' + (totals.archivos + batchStart) + ' archivos · ' +
+        totals.sharesAgregados + ' shares · ' + totals.errores + ' errores'
+      );
+
+      let res;
+      try {
+        const r = await fetch(c.scriptUrl, {
+          method: 'POST',
+          headers: {'Content-Type': 'text/plain;charset=utf-8'},
+          body: JSON.stringify({
+            action: 'backfillShares',
+            sheetId: c.sheetId,
+            batchStart: batchStart,
+            batchSize: 10
+          })
+        });
+        if(!r.ok){
+          empresasErroneas.push({nombre: c.nombre, error: 'HTTP ' + r.status});
+          break;
+        }
+        res = await r.json();
+      } catch(e){
+        empresasErroneas.push({nombre: c.nombre, error: e.message || String(e)});
+        break;
+      }
+
+      if(!res.ok){
+        empresasErroneas.push({nombre: c.nombre, error: res.error || 'unknown'});
+        break;
+      }
+
+      totalEmpresa = res.total;
+      totals.sharesAgregados += res.sharesAgregados || 0;
+      totals.anyoneAplicado += res.anyoneAplicado || 0;
+      totals.errores += res.errores || 0;
+      totals.archivosNoOwner += res.archivosNoOwner || 0;
+
+      if(res.done){
+        totals.archivos += totalEmpresa;
+        totals.empresas++;
+        break;
+      }
+      batchStart = res.batchEnd;
+    }
+
+    if(safety <= 0){
+      empresasErroneas.push({nombre: c.nombre, error: 'safety limit alcanzado (>5000 archivos)'});
+    }
+  }
+
+  loading(false);
+
+  const lines = [
+    'Empresas procesadas: ' + totals.empresas + ' / ' + conScript.length,
+    'Archivos analizados: ' + totals.archivos,
+    'Shares agregados: ' + totals.sharesAgregados,
+    'Anyone-with-link aplicados: ' + totals.anyoneAplicado,
+    'Skipped (no super_admin owner): ' + totals.archivosNoOwner,
+    'Errores: ' + totals.errores
+  ];
+  let summary = lines.join('\n');
+  if(empresasErroneas.length){
+    summary += '\n\nEmpresas con error:\n' +
+      empresasErroneas.map(e => '  • ' + e.nombre + ': ' + e.error).join('\n');
+  }
+
+  console.log('[backfillShares] resultado:', {totals, empresasErroneas});
+
+  showModal(
+    '<h3>Resultado del backfill</h3>' +
+    '<div style="font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;font-family:var(--mono);background:var(--bg2);padding:10px;border-radius:8px;margin-top:10px;max-height:300px;overflow-y:auto">' +
+      escapeHtml(summary) +
+    '</div>' +
+    '<button class="btn btn-amber" onclick="closeModal()" style="margin-top:14px">Cerrar</button>'
+  );
+}
+
 async function consolidarFacturas(){
   const scriptUrl = getActiveScriptUrl();
   if(!scriptUrl){
