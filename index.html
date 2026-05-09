@@ -436,11 +436,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       Nueva empresa
     </button>
 
-    <button class="btn" onclick="recargarEmpresas()" style="margin-top:8px;font-size:13px">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-      Recargar desde Drive
-    </button>
-
     <div style="margin-top:20px;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text2);line-height:1.5">
       Tus empresas se sincronizan automáticamente entre dispositivos vía Google Drive. Al iniciar sesión en cualquier dispositivo con tu cuenta, verás las mismas empresas.
     </div>
@@ -1185,10 +1180,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <div id="set-ssid" style="font-family:var(--mono);font-size:10px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</div>
         </div>
       </div>
-      <div class="grid2">
-        <button class="btn" onclick="openSheet()" style="padding:8px;font-size:12px">Abrir Sheet</button>
-        <button class="btn btn-blue" onclick="refreshData()" style="padding:8px;font-size:12px">↻ Refrescar</button>
-      </div>
+      <button class="btn" onclick="openSheet()" style="padding:8px;font-size:12px">Abrir Sheet</button>
     </div>
 
     <!-- 4. Gemini API -->
@@ -1750,7 +1742,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0218';
+const APP_VERSION = '0219';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
