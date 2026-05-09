@@ -1252,6 +1252,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Agrega columnas faltantes (NO_REPORTE, ELIMINADO, URL_COMPROBANTE) y actualiza las fórmulas. Úsalo tras actualizar la app o si el balance muestra valores incorrectos.</div>
       <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="padding:10px;font-size:12px;margin-top:10px">Sincronizar archivos con Sheet</button>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
+      <button class="btn btn-blue" onclick="forzarBarridoDrive()" style="padding:10px;font-size:12px;margin-top:10px">Forzar barrido del Drive</button>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Limpia ahora archivos huérfanos (no referenciados en ningún Sheet) sin esperar al sync automático. Útil tras eliminar facturas o si Drive muestra fotos viejas.</div>
       <button class="btn btn-amber" id="btn-backfill-shares" onclick="backfillSharesLegacy()" style="padding:10px;font-size:12px;margin-top:10px;display:none">Backfill share fotos legacy</button>
       <div id="backfill-shares-help" style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4;display:none">Comparte fotos consolidadas pre-v.0181 con todos los usuarios (incluido rol USUARIO). One-shot, idempotente. Solo SUPER_ADMIN.</div>
       <button class="btn btn-red" onclick="resetApp()" style="padding:10px;font-size:12px;margin-top:10px">Borrar todo y empezar de cero</button>
@@ -1702,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0197';
+const APP_VERSION = '0198';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -10599,15 +10601,34 @@ async function eliminarFacturaPermanente(idx){
     const token = getToken();
     const ssid = getActiveSheetId();
 
-    // 1) Borrar foto de Drive (si existe)
+    // 1) Borrar foto de Drive (si existe). v.0198: fallback al AS cuando el
+    // DELETE directo falla — pasa cuando el master fue creado por el AS y el
+    // user tiene scope drive.file (no puede tocar archivos de otra app).
+    // Importante: borrar el archivo ANTES que la fila del Sheet, porque la
+    // validación anti-exfiltración del AS requiere que el fileId siga
+    // referenciado en URL_FACTURA al momento del call.
     const url = r[H.URL_FACTURA];
     if(url){
       const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if(m){
-        await fetch(`https://www.googleapis.com/drive/v3/files/${m[1]}`, {
-          method: 'DELETE',
-          headers: {'Authorization': 'Bearer ' + token}
-        });
+        const fid = m[1];
+        let deleted = false;
+        try {
+          const r1 = await fetch(`https://www.googleapis.com/drive/v3/files/${fid}`, {
+            method: 'DELETE',
+            headers: {'Authorization': 'Bearer ' + token}
+          });
+          if(r1.ok || r1.status === 204) deleted = true;
+        } catch(_){}
+        if(!deleted){
+          const empresa = getCurrentCompany();
+          if(empresa){
+            const res = await _callASForEmpresa(empresa, {action: 'eliminarMaster', fileId: fid});
+            if(!res || !res.ok){
+              throw new Error('No se pudo borrar la foto del Drive del super_admin: ' + ((res && res.error) || 'sin acceso'));
+            }
+          }
+        }
       }
     }
 
@@ -11947,6 +11968,51 @@ async function backfillSharesLegacy(){
     '</div>' +
     '<button class="btn btn-amber" onclick="closeModal()" style="margin-top:14px">Cerrar</button>'
   );
+}
+
+// v.0198: barrido on-demand. Para super_admin llama AS cleanupMastersHuerfanos
+// (su PWA con scope drive.file no ve los masters consolidados). Para resto de
+// users: resetea throttles y dispara cleanup orphan + distribute.
+async function forzarBarridoDrive(){
+  if(!confirm('Limpia archivos huérfanos en tu Drive ahora mismo. No borra nada referenciado en los Sheets. ¿Continuar?')) return;
+  loading(true, 'Barriendo', 'Buscando huérfanos...');
+  try {
+    if(isSuperAdmin()){
+      const sheetIds = getCompanies().filter(c => c.sheetId).map(c => c.sheetId);
+      if(!sheetIds.length){ loading(false); toast('Sin empresas con sheetId', 'err'); return; }
+      const empresa = getCurrentCompany();
+      if(!empresa || !getEffectiveScriptUrl(empresa)){
+        loading(false); toast('Empresa activa sin AS configurado', 'err'); return;
+      }
+      const res = await _callASForEmpresa(empresa, {action: 'cleanupMastersHuerfanos', sheetIds});
+      loading(false);
+      if(!res || !res.ok){ toast('Error: ' + ((res && res.error) || 'sin respuesta'), 'err'); return; }
+      const lines = [
+        'Sheets validados: ' + (res.sheetsValidados || 0),
+        'Referenciados: ' + (res.referenciados || 0),
+        'Analizados: ' + (res.analizados || 0),
+        'Trasheados: ' + (res.trasheados || 0),
+        'Errores: ' + (res.errores || 0)
+      ];
+      showModal(
+        '<h3>Barrido completo</h3>' +
+        '<div style="font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;font-family:var(--mono);background:var(--bg2);padding:10px;border-radius:8px;margin-top:10px">' + escapeHtml(lines.join('\n')) + '</div>' +
+        '<div style="font-size:11px;color:var(--text2);margin-top:10px">Los archivos van a Papelera de Drive (recoverable 30 días).</div>' +
+        '<button class="btn btn-amber" onclick="closeModal()" style="margin-top:14px">Cerrar</button>'
+      );
+    } else {
+      localStorage.removeItem(LS_DISTRIBUTE_AT);
+      localStorage.removeItem(LS_ORPHAN_CLEANUP_AT);
+      await _cleanupOrphanedUserFiles().catch(e => console.warn('[forzar] cleanup:', e.message));
+      await _distributeMastersToUserDrive().catch(e => console.warn('[forzar] distribute:', e.message));
+      loading(false);
+      toast('Barrido completo. Refrescá Drive si seguís viendo cosas raras.', 'ok');
+    }
+  } catch(e){
+    loading(false);
+    toast('Error: ' + e.message, 'err');
+    console.error('[forzarBarridoDrive]', e);
+  }
 }
 
 async function consolidarFacturas(){
