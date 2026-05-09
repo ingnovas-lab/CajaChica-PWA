@@ -1713,7 +1713,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0208';
+const APP_VERSION = '0209';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3666,33 +3666,20 @@ async function eliminarEmpresaConfirmada(nombre){
       // 2. Remover del Admin Index (Drive)
       await removeCompanyFromIndex(nombre);
 
-      // v.0208: revocar permisos no-owner del Sheet directamente desde la
-      // PWA. Drive API con scope `drive.file` cubre el sheet (la PWA lo
-      // creó al crear la empresa). Sin esto, el Sheet sigue accesible
-      // para invitados aunque la carpeta padre esté en Papelera, y el
-      // detector del invitado no la detecta como eliminada.
+      // v.0209: trashear el Sheet directamente. Cuando el sheet está en
+      // Papelera del owner, Sheets API responde 404/403 a los users no-owner
+      // → el detector del invitado lo capta inmediatamente y limpia. Más
+      // robusto que revocar permisos uno por uno (que con scope drive.file
+      // puede tener limitaciones invisibles). Drive.file scope SÍ permite
+      // PATCH a archivos creados por la app, sin importar trashed state.
       if(empresa.sheetId){
         try {
-          const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
-          const r = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${empresa.sheetId}/permissions?fields=permissions(id,role,emailAddress)&supportsAllDrives=true`,
-            {headers: {'Authorization': 'Bearer ' + token}}
-          );
-          if(r.ok){
-            const j = await r.json();
-            for(const p of (j.permissions || [])){
-              if(p.role === 'owner') continue;
-              const pe = (p.emailAddress || '').toLowerCase();
-              if(pe && pe === myEmail) continue;
-              try {
-                await fetch(
-                  `https://www.googleapis.com/drive/v3/files/${empresa.sheetId}/permissions/${p.id}?supportsAllDrives=true`,
-                  {method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}}
-                );
-              } catch(_){}
-            }
-          }
-        } catch(e){ console.warn('[eliminarEmpresa] revoke sheet:', e.message); }
+          await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.sheetId}`, {
+            method: 'PATCH',
+            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify({trashed: true})
+          });
+        } catch(e){ console.warn('[eliminarEmpresa] trash sheet:', e.message); }
       }
     }
 
@@ -5875,115 +5862,94 @@ async function _detectarEmpresasEliminadas(){
   return {eliminadas: eliminadas.length, nombres: eliminadas.map(e => e.nombre)};
 }
 
-// v.0208: cleanup retroactivo de shares en empresas eliminadas (super_admin).
-// PWA-only — no requiere AS. Lista los Sheets que la PWA creó (vía drive.file
-// scope, que SÍ ve archivos propios incluso si están trashed). Para cada
-// Sheet, identifica si pertenece a una empresa eliminada (Sheet trashed, su
-// parent trashed, o el grand-parent trashed). Si sí, revoca permisos no-owner.
-// Idempotente, corre cada boot. Cubre legacy + futuras.
+// v.0209: cleanup retroactivo de empresas eliminadas (super_admin). PWA-only.
+// Lista Sheets que la PWA creó. Para cada Sheet, si su parent (Base de datos)
+// o grand-parent (carpeta empresa) está trashed → empresa eliminada → trashea
+// el Sheet. Cuando el Sheet está trashed, Sheets API responde 404/403 a los
+// users no-owner → el detector del invitado limpia. Más robusto que revocar
+// permisos individualmente con scope drive.file. Idempotente, corre cada boot.
 async function _revokeSharesEmpresasEliminadas(){
   if(!isSuperAdmin()) return null;
   const token = getToken();
   if(!token) return null;
 
-  const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
-  let revoked = 0, processed = 0;
+  let trashedSheets = 0, processed = 0;
 
-  // Listar Sheets creados por la app (con scope drive.file, son visibles).
-  // Hacer 2 listings (trashed=false y trashed=true) para capturar ambos casos.
-  const baseQ = "mimeType='application/vnd.google-apps.spreadsheet' and 'me' in owners";
-  const fields = encodeURIComponent('files(id,name,trashed,parents)');
+  // Listar Sheets activos creados por la app (drive.file ve sheets propios
+  // incluso si están dentro de carpetas trashed — el sheet en sí queda
+  // trashed=false cuando la PWA solo trashea su carpeta padre).
+  const baseQ = "mimeType='application/vnd.google-apps.spreadsheet' and 'me' in owners and trashed=false";
   const allSheets = [];
-  for(const trashedFlag of ['false', 'true']){
-    let pageToken = '';
-    do {
-      const q = encodeURIComponent(`${baseQ} and trashed=${trashedFlag}`);
-      const tok = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
-      try {
-        const r = await fetch(
-          `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,trashed,parents),nextPageToken&pageSize=200${tok}`,
-          {headers: {'Authorization': 'Bearer ' + token}}
-        );
-        if(!r.ok) break;
-        const j = await r.json();
-        for(const f of (j.files || [])) allSheets.push(f);
-        pageToken = j.nextPageToken || '';
-      } catch(e){
-        console.warn('[revoke-empresas-eliminadas] list:', e.message);
-        break;
-      }
-    } while(pageToken);
-  }
+  let pageToken = '';
+  do {
+    const q = encodeURIComponent(baseQ);
+    const tok = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+    try {
+      const r = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,parents),nextPageToken&pageSize=200${tok}`,
+        {headers: {'Authorization': 'Bearer ' + token}}
+      );
+      if(!r.ok) break;
+      const j = await r.json();
+      for(const f of (j.files || [])) allSheets.push(f);
+      pageToken = j.nextPageToken || '';
+    } catch(e){
+      console.warn('[revoke-empresas-eliminadas] list:', e.message);
+      break;
+    }
+  } while(pageToken);
 
   for(const sheet of allSheets){
-    // Solo Sheets de CajaChica.
     if(!(sheet.name || '').startsWith('CajaChica_')) continue;
 
+    // Verificar si parent (Base de datos) o grand-parent (carpeta empresa)
+    // está trashed.
     let isFromDeleted = false;
-
-    if(sheet.trashed === true){
-      isFromDeleted = true;
-    } else {
-      // Verificar si parent (Base de datos) o grand-parent (empresa) está trashed.
-      const parentId = (sheet.parents || [])[0];
-      if(parentId){
-        try {
-          const pr = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${parentId}?fields=trashed,parents`,
-            {headers: {'Authorization': 'Bearer ' + token}}
-          );
-          if(pr.ok){
-            const pj = await pr.json();
-            if(pj.trashed === true){
-              isFromDeleted = true;
-            } else {
-              const grandparentId = (pj.parents || [])[0];
-              if(grandparentId){
-                const gpr = await fetch(
-                  `https://www.googleapis.com/drive/v3/files/${grandparentId}?fields=trashed`,
-                  {headers: {'Authorization': 'Bearer ' + token}}
-                );
-                if(gpr.ok){
-                  const gpj = await gpr.json();
-                  if(gpj.trashed === true) isFromDeleted = true;
-                }
+    const parentId = (sheet.parents || [])[0];
+    if(parentId){
+      try {
+        const pr = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${parentId}?fields=trashed,parents`,
+          {headers: {'Authorization': 'Bearer ' + token}}
+        );
+        if(pr.ok){
+          const pj = await pr.json();
+          if(pj.trashed === true){
+            isFromDeleted = true;
+          } else {
+            const grandparentId = (pj.parents || [])[0];
+            if(grandparentId){
+              const gpr = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${grandparentId}?fields=trashed`,
+                {headers: {'Authorization': 'Bearer ' + token}}
+              );
+              if(gpr.ok){
+                const gpj = await gpr.json();
+                if(gpj.trashed === true) isFromDeleted = true;
               }
             }
           }
-        } catch(_){}
-      }
+        }
+      } catch(_){}
     }
 
     if(!isFromDeleted) continue;
     processed++;
 
-    // Revocar permisos no-owner.
+    // Trashear el Sheet directamente. Drive.file scope permite PATCH a
+    // archivos creados por la app.
     try {
-      const r = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${sheet.id}/permissions?fields=permissions(id,role,emailAddress)&supportsAllDrives=true`,
-        {headers: {'Authorization': 'Bearer ' + token}}
-      );
-      if(!r.ok) continue;
-      const j = await r.json();
-      for(const p of (j.permissions || [])){
-        if(p.role === 'owner') continue;
-        const pe = (p.emailAddress || '').toLowerCase();
-        if(pe && pe === myEmail) continue;
-        try {
-          const dr = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${sheet.id}/permissions/${p.id}?supportsAllDrives=true`,
-            {method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}}
-          );
-          if(dr.ok) revoked++;
-        } catch(_){}
-      }
+      const dr = await fetch(`https://www.googleapis.com/drive/v3/files/${sheet.id}`, {
+        method: 'PATCH',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({trashed: true})
+      });
+      if(dr.ok){ trashedSheets++; console.log(`[revoke-empresas-eliminadas] Sheet "${sheet.name}" trashed`); }
     } catch(_){}
   }
 
-  if(processed > 0 || revoked > 0){
-    console.log(`[revoke-empresas-eliminadas] sheets=${allSheets.length}, eliminadas=${processed}, perms revocados=${revoked}`);
-  }
-  return {sheets: allSheets.length, processed, revoked};
+  console.log(`[revoke-empresas-eliminadas] activos analizados=${allSheets.length}, de eliminadas=${processed}, sheets trashed=${trashedSheets}`);
+  return {sheets: allSheets.length, processed, trashedSheets};
 }
 
 const LS_DISTRIBUTE_AT = 'cc_distribute_at_global';
