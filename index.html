@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0200';
+const APP_VERSION = '0201';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -12636,12 +12636,17 @@ function rewireClickable(root){
         console.log(`[init] Sync OK: ${cfg.empresas.length} empresa(s) total`);
       }
 
-      // v.0200: detectar empresas eliminadas por el admin (para invitados).
-      // Trashea copias distribuidas locales + quita la empresa de la lista.
-      // Background — no bloquea boot, no falla si offline.
-      if(!isSuperAdmin()){
-        _detectarEmpresasEliminadas().catch(e => console.warn('[init] detect-eliminadas:', e.message));
-      }
+      // v.0201: HOTFIX — `_detectarEmpresasEliminadas` deshabilitado en boot.
+      // Bug v.0200: usaba `drive/v3/files/<sheetId>` para chequear si el Sheet
+      // sigue accesible. Pero el invitado tiene scope `drive.file` — Drive API
+      // solo ve archivos "created or opened by the app". Sheets recién compartidos
+      // dan 404 falso positivo → la app marcaba como eliminadas empresas válidas
+      // y trasheaba copias buenas + deslogueaba al user. Re-habilitar SOLO
+      // cuando el check use Sheets API (auth/spreadsheets) y sea conservador.
+      //
+      // if(!isSuperAdmin()){
+      //   _detectarEmpresasEliminadas().catch(e => console.warn('[init] detect-eliminadas:', e.message));
+      // }
 
       // v.0200: cleanup one-shot post-deploy de shares legacy (super_admin).
       // Idempotente. Background — corre 1 vez en la vida de esta instalación.
