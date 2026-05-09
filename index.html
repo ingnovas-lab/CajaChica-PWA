@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0178';
+const APP_VERSION = '0179';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -9632,9 +9632,14 @@ async function saveEdit(){
 
 // Renombra el archivo en Drive al nuevo formato (fecha + suplidor + id).
 // Si mover=true, también lo mueve a la carpeta del proyecto nuevo.
+//
+// v.0179: ahora chequea r.ok del PATCH directo. Si falla (típicamente porque
+// el archivo es del super_admin tras consolidar y el invitado solo tiene scope
+// `drive.file` sobre archivos creados con su propia app), cae al Apps Script
+// que corre como super_admin y SÍ puede renombrar/mover el archivo.
 async function renameOrMoveFacturaFile(url, opts){
   const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if(!m) return;
+  if(!m) throw new Error('URL de Drive inválida');
   const fileId = m[1];
   const token = getToken();
 
@@ -9669,11 +9674,48 @@ async function renameOrMoveFacturaFile(url, opts){
   if(removeParents) qs.push('removeParents=' + removeParents);
   if(qs.length) url2 += '?' + qs.join('&');
 
-  await fetch(url2, {
+  // 1) Intento directo (rápido — funciona cuando el archivo es del usuario actual,
+  // típicamente cuando aún no se ha consolidado o cuando edita el super_admin).
+  const r = await fetch(url2, {
     method: 'PATCH',
     headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
     body: JSON.stringify({name: newName})
   });
+
+  if(r.ok) return;
+
+  // 2) Fallback Apps Script (caso típico: invitado editando factura ya
+  // consolidada — archivo es del super_admin). El Apps Script corre como
+  // super_admin y SÍ puede renombrar/mover.
+  const status = r.status;
+  console.warn(`[renameOrMove] PATCH directo falló con ${status}. Probando Apps Script...`);
+
+  const scriptUrl = getActiveScriptUrl();
+  if(!scriptUrl){
+    throw new Error(`Drive rechazó el rename (HTTP ${status}) y no hay Apps Script configurado para fallback. ` +
+                    `Pídele al super_admin que configure Apps Script en Configuración.`);
+  }
+
+  const asRes = await fetch(scriptUrl, {
+    method: 'POST',
+    headers: {'Content-Type': 'text/plain;charset=utf-8'},
+    body: JSON.stringify({
+      action: 'renombrarFactura',
+      sheetId: getActiveSheetId(),
+      fileId: fileId,
+      newName: newName,
+      addParents: addParents,
+      removeParents: removeParents
+    })
+  });
+
+  if(!asRes.ok){
+    throw new Error(`Apps Script HTTP ${asRes.status} al renombrar archivo`);
+  }
+  const asData = await asRes.json();
+  if(!asData.ok){
+    throw new Error('Apps Script no pudo renombrar: ' + (asData.error || 'error desconocido'));
+  }
 }
 
 // ============================================================
