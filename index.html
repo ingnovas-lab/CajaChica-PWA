@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0187';
+const APP_VERSION = '0188';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5646,6 +5646,49 @@ async function _distributeMastersToUserDrive(){
         if(r.ok){
           stats.deleted++;
           console.log(`[distribute] Dedup: trashed duplicado "${dup.name}"`);
+        } else {
+          stats.errors++;
+        }
+      } catch(e){
+        stats.errors++;
+      }
+    }
+
+    // v.0188: detectar y trashear huérfanos post-consolidación. Cuando un
+    // invitado sube una factura, su archivo queda en su Drive (sin marca).
+    // Apps Script consolida → master en Drive del super_admin → URL del
+    // sheet apunta al master. El sync luego crea una copia distribuida
+    // (con marca) en la misma carpeta del invitado. Resultado: 2 archivos
+    // con mismo nombre en la misma carpeta — el original sin marca queda
+    // huérfano. `_cleanupOrphanedUserFiles` lo limpia tras 1h, pero hay
+    // ventana donde el usuario ve duplicados. Aquí lo trasheamos
+    // inmediatamente cuando el matching es seguro: si en la misma carpeta
+    // hay otro archivo con `ccCopyOf` y mismo nombre, el sin-marca es
+    // huérfano post-consolidación y se trashea sin esperar 1h.
+    const distributedByLocation = new Map(); // (parentId::name) → file
+    for(const f of allMyFiles){
+      if(f.appProperties && f.appProperties.ccCopyOf){
+        const parent = (f.parents || [])[0];
+        if(parent) distributedByLocation.set(parent + '::' + f.name, f);
+      }
+    }
+    for(const f of allMyFiles){
+      if(f.appProperties && f.appProperties.ccCopyOf) continue;
+      const parent = (f.parents || [])[0];
+      if(!parent) continue;
+      if(!distributedByLocation.has(parent + '::' + f.name)) continue;
+      try {
+        const r = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${f.id}`,
+          {
+            method: 'PATCH',
+            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify({trashed: true})
+          }
+        );
+        if(r.ok){
+          stats.deleted++;
+          console.log(`[distribute] Huérfano post-consolidación trashed: "${f.name}"`);
         } else {
           stats.errors++;
         }
