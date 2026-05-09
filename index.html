@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0184';
+const APP_VERSION = '0185';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5464,9 +5464,19 @@ async function _cleanupOrphanedUserFiles(){
 // también las excluye explícitamente para no borrarlas.
 //
 // Throttle: 5 minutos por empresa (key cc_distribute_at:<sheetId>).
+// v.0185: in-memory lock para prevenir ejecuciones concurrentes en la misma
+// sesión. Drive tiene eventual consistency en listings — sin lock, dos
+// invocaciones paralelas (ej. auto-trigger desde loadMasters + comando
+// manual desde DevTools) cada una listaba sin ver lo que la otra creó y
+// generaban duplicados.
 const LS_DISTRIBUTE_AT = 'cc_distribute_at';
+let _distributingNow = false;
 async function _distributeMastersToUserDrive(){
   if(isSuperAdmin()) return;
+  if(_distributingNow){
+    console.log('[distribute] ya está ejecutándose, skip concurrente');
+    return;
+  }
   const token = getToken();
   if(!token) return;
 
@@ -5478,6 +5488,7 @@ async function _distributeMastersToUserDrive(){
   const lastRun = parseInt(localStorage.getItem(throttleKey) || '0', 10);
   if(Date.now() - lastRun < 5*60*1000) return;
 
+  _distributingNow = true;
   try {
     // 1. Leer REGISTRO completo
     const rows = await sheetsGet('REGISTRO!A1:Z');
@@ -5513,7 +5524,7 @@ async function _distributeMastersToUserDrive(){
     const q = "mimeType contains 'image/' and 'me' in owners and trashed=false";
     const listRes = await fetch(
       'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
-      '&fields=files(id,name,appProperties,parents)&pageSize=1000',
+      '&fields=files(id,name,appProperties,parents,createdTime)&pageSize=1000',
       {headers: {'Authorization': 'Bearer ' + token}}
     );
     if(!listRes.ok){
@@ -5523,11 +5534,26 @@ async function _distributeMastersToUserDrive(){
     }
     const allMyFiles = (await listRes.json()).files || [];
     const copiesByMasterId = new Map();
+    const dupesToTrash = []; // v.0185: duplicados detectados (mismo ccCopyOf)
     for(const f of allMyFiles){
       const masterId = f.appProperties && f.appProperties.ccCopyOf;
-      if(masterId) copiesByMasterId.set(masterId, f);
+      if(!masterId) continue;
+      const existing = copiesByMasterId.get(masterId);
+      if(existing){
+        // Duplicado. Mantener la más antigua (estable), trashear la más nueva.
+        const existingTime = new Date(existing.createdTime || 0).getTime();
+        const newTime = new Date(f.createdTime || 0).getTime();
+        if(newTime < existingTime){
+          dupesToTrash.push(existing);
+          copiesByMasterId.set(masterId, f);
+        } else {
+          dupesToTrash.push(f);
+        }
+      } else {
+        copiesByMasterId.set(masterId, f);
+      }
     }
-    console.log(`[distribute] copias locales con marca ccCopyOf: ${copiesByMasterId.size}`);
+    console.log(`[distribute] copias locales con marca ccCopyOf: ${copiesByMasterId.size}${dupesToTrash.length ? `, ${dupesToTrash.length} duplicado(s) detectado(s)` : ''}`);
 
     // 4. Resolver: copiar faltantes, renombrar desactualizadas
     // v.0184: la PWA del invitado NO puede leer archivos creados por Apps
@@ -5541,6 +5567,30 @@ async function _distributeMastersToUserDrive(){
       return;
     }
     const stats = {copied: 0, renamed: 0, deleted: 0, errors: 0};
+
+    // v.0185: trashear duplicados detectados ANTES del loop principal — así
+    // las stats reflejan la limpieza y futuros rename/copy operan sobre la
+    // copia canónica conservada.
+    for(const dup of dupesToTrash){
+      try {
+        const r = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${dup.id}`,
+          {
+            method: 'PATCH',
+            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify({trashed: true})
+          }
+        );
+        if(r.ok){
+          stats.deleted++;
+          console.log(`[distribute] Dedup: trashed duplicado "${dup.name}"`);
+        } else {
+          stats.errors++;
+        }
+      } catch(e){
+        stats.errors++;
+      }
+    }
 
     for(const [masterId, info] of expectedMasters){
       const mine = copiesByMasterId.get(masterId);
@@ -5642,6 +5692,8 @@ async function _distributeMastersToUserDrive(){
     localStorage.setItem(throttleKey, String(Date.now()));
   } catch(e){
     console.warn('[distribute] error general:', e.message);
+  } finally {
+    _distributingNow = false;
   }
 }
 
