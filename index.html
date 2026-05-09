@@ -1702,7 +1702,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0196';
+const APP_VERSION = '0197';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1942,6 +1942,13 @@ function removeCompany(nombre){
 function getActiveSheetId(){
   const c = getCurrentCompany();
   return c ? c.sheetId : null;
+}
+
+// v.0197: cache de balance keyed por (sheetId, cod) para no confundir empresas
+// con mismo cod (ej. OBR-0001 en A y B).
+function _balKey(p){
+  if(!p || !p.cod) return '';
+  return (getActiveSheetId() || '_') + '::' + p.cod;
 }
 
 // Obtiene la URL del Apps Script de la empresa activa
@@ -6212,12 +6219,13 @@ async function refreshHome(){
   // automático sin bloquear el render — así al cambiar de empresa o proyecto,
   // el balance se calcula solo en lugar de quedarse en "RD$ --".
   const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
-  if(proj && cache[proj.cod]){
-    const v = cache[proj.cod].value + netoPendiente;
+  const bk = _balKey(proj);
+  if(proj && cache[bk]){
+    const v = cache[bk].value + netoPendiente;
     const el = document.getElementById('balance-amt');
     el.textContent = fmt(v);
     el.className = 'balance-amt ' + (v >= 0 ? 'pos' : 'neg');
-    const age = Math.floor((Date.now() - cache[proj.cod].at) / 60000);
+    const age = Math.floor((Date.now() - cache[bk].at) / 60000);
     document.getElementById('balance-status').textContent = age === 0 ? 'Recién actualizado' : `Hace ${age} min`;
   } else if(proj && !window._refreshingBalance){
     // Guard contra loops: refreshBalance llama refreshHome, que podría volver acá.
@@ -6276,7 +6284,7 @@ async function refreshBalance(forceRemote){
     const balance = row ? parseFloat(row[1]) || 0 : 0;
 
     const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
-    cache[proj.cod] = {value: balance, at: Date.now()};
+    cache[_balKey(proj)] = {value: balance, at: Date.now()};
     localStorage.setItem(LS.BALCACHE, JSON.stringify(cache));
     refreshHome();
     // v.0115: si pg-balance está visible, sincronizar su card también
@@ -6363,7 +6371,7 @@ function selectProject(p){
   // Sin esto, refreshHome mostraría el último balance cacheado de este proyecto
   // (potencialmente stale si otros usuarios registraron gastos/abonos desde entonces).
   const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
-  delete cache[p.cod];
+  delete cache[_balKey(p)];
   localStorage.setItem(LS.BALCACHE, JSON.stringify(cache));
   show('pg-home');
   // Check de versión silencioso (v.0093) — recarga si hay update.
@@ -6531,6 +6539,7 @@ async function saveEntry(){
   const entry = {
     id: uid(),
     tipo_registro: 'GASTO',
+    sheetId: getActiveSheetId(),
     proyecto: proj.cod,
     no_reporte: document.getElementById('f-reporte').value.trim(),
     fecha_registro: new Date().toISOString(),
@@ -6690,6 +6699,7 @@ async function saveAbono(){
   const entry = {
     id: abonoEditingId || ('I-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,6).toUpperCase()),
     tipo_registro: 'ABONO',
+    sheetId: getActiveSheetId(),
     proyecto: proj.cod,
     fecha: document.getElementById('ab-fecha').value,
     tipo: document.getElementById('ab-tipo').value,
@@ -6724,8 +6734,12 @@ async function renderHistory(){
   // masters.projects ya está scoped a la empresa activa, así que filtrar
   // contra él da los pendientes "de esta empresa". Los demás existen pero
   // pertenecen a otras empresas — el usuario los ve cambiando de empresa.
+  // v.0197: filtro robusto. Pending nuevos traen e.sheetId snapshot — usar
+  // ese cuando exista. Pending legacy (sin sheetId) caen al filtro por cod
+  // contra validCods de la empresa activa.
+  const sid = getActiveSheetId();
   const validCods = new Set(masters.projects.map(p => p.cod));
-  const all = allRaw.filter(e => validCods.has(e.proyecto));
+  const all = allRaw.filter(e => e.sheetId ? e.sheetId === sid : validCods.has(e.proyecto));
   const ocultosOtraEmpresa = allRaw.length - all.length;
   const subText = all.length + ' pendientes' +
     (ocultosOtraEmpresa > 0 ? ' (' + ocultosOtraEmpresa + ' en otras empresas)' : '');
@@ -6795,11 +6809,14 @@ async function syncAll(){
     const allRaw = await dbGetAll('pending');
     if(allRaw.length === 0){ toast('Nada que sincronizar', 'ok'); return; }
 
-    // v.0105: filtrar por proyectos válidos en la empresa activa. Sin esto,
-    // un pendiente con cod de obra de OTRA empresa rompe syncAll con
-    // "Proyecto no encontrado: OBR-XXXX-XXX" en uploadImage.
+    // v.0197: filtro robusto. Pending nuevos traen e.sheetId snapshot — si
+    // está y no matchea con la empresa activa, skip (queda en cola para cuando
+    // el usuario active esa empresa). Legacy (sin sheetId) caen al filtro por
+    // cod contra validCods. Esto cierra el caso de cods iguales en empresas
+    // distintas que harían que syncAll subiera al wrong sheet.
+    const sid = getActiveSheetId();
     const validCods = new Set(masters.projects.map(p => p.cod));
-    const all = allRaw.filter(e => validCods.has(e.proyecto));
+    const all = allRaw.filter(e => e.sheetId ? e.sheetId === sid : validCods.has(e.proyecto));
     const otraEmpresa = allRaw.length - all.length;
     if(all.length === 0){
       toast('Ningún pendiente pertenece a esta empresa. Cambia de empresa para sincronizar.', 'err');
