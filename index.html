@@ -1688,7 +1688,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0189';
+const APP_VERSION = '0190';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5606,35 +5606,15 @@ async function _distributeMastersToUserDrive(){
       } catch(e){ stats.errors++; }
     }
 
-    // 5. Trashear huérfanos post-consolidación. Si en la misma carpeta hay
-    // un archivo CON marca y otro SIN marca con mismo nombre, el sin-marca
-    // es huérfano post-consolidación → trashear sin esperar 1h.
+    // 5. Construir tracker de copias distribuidas por (parent::name).
+    // Se actualiza cuando se crean copias en el loop main para que la
+    // detección final de huérfanos incluya las recién creadas.
     const distributedByLocation = new Map();
     for(const f of allMyFiles){
       if(f.appProperties && f.appProperties.ccCopyOf){
         const parent = (f.parents || [])[0];
         if(parent) distributedByLocation.set(parent + '::' + f.name, f);
       }
-    }
-    for(const f of allMyFiles){
-      if(f.appProperties && f.appProperties.ccCopyOf) continue;
-      const parent = (f.parents || [])[0];
-      if(!parent) continue;
-      if(!distributedByLocation.has(parent + '::' + f.name)) continue;
-      try {
-        const r = await fetch(
-          `https://www.googleapis.com/drive/v3/files/${f.id}`,
-          {
-            method: 'PATCH',
-            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-            body: JSON.stringify({trashed: true})
-          }
-        );
-        if(r.ok){
-          stats.deleted++;
-          console.log(`[distribute] Huérfano post-consolidación trashed: "${f.name}"`);
-        } else stats.errors++;
-      } catch(e){ stats.errors++; }
     }
 
     // 6. Procesar TODAS las empresas (no solo la activa). Para cada empresa:
@@ -5728,9 +5708,11 @@ async function _distributeMastersToUserDrive(){
         if(!mine){
           try {
             const fotosId = await resolveFotosFolderForCompany(info.projCod);
-            await _createDistributedCopy(fotosId, masterFile.name, masterFile.mimeType, masterFile.base64, masterId, company.sheetId);
+            const newFile = await _createDistributedCopy(fotosId, masterFile.name, masterFile.mimeType, masterFile.base64, masterId, company.sheetId);
             stats.copied++;
             console.log(`[distribute] [${company.nombre}] Copiado: ${masterFile.name}`);
+            // v.0190: trackear la copia recién creada para detección de huérfanos
+            distributedByLocation.set(fotosId + '::' + masterFile.name, {id: newFile && newFile.id, name: masterFile.name});
           } catch(e){
             stats.errors++;
             console.warn(`[distribute] [${company.nombre}] copia falló:`, e.message);
@@ -5775,6 +5757,54 @@ async function _distributeMastersToUserDrive(){
           } else stats.errors++;
         } catch(e){ stats.errors++; }
       }
+    }
+
+    // 8. Detectar y trashear huérfanos post-consolidación. v.0190: ahora corre
+    // AL FINAL del sync (después de crear copias), no al principio. Esto
+    // permite detectar huérfanos cuyos masters fueron consolidados durante
+    // ESTA ejecución del sync. Re-listamos archivos para tener data fresca
+    // (incluye archivos subidos por el usuario muy recientemente que el
+    // primer listing pudo haber missed por eventual consistency de Drive).
+    try {
+      const refreshRes = await fetch(
+        'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
+        '&fields=files(id,name,appProperties,parents)&pageSize=1000',
+        {headers: {'Authorization': 'Bearer ' + token}}
+      );
+      if(refreshRes.ok){
+        const freshFiles = (await refreshRes.json()).files || [];
+        // Reconstruir tracker con data fresca + tracker en memoria de creadas.
+        for(const f of freshFiles){
+          if(f.appProperties && f.appProperties.ccCopyOf){
+            const parent = (f.parents || [])[0];
+            if(parent) distributedByLocation.set(parent + '::' + f.name, f);
+          }
+        }
+        // Detectar huérfanos: archivos sin marca con (parent + name) que
+        // matchea con una copia distribuida.
+        for(const f of freshFiles){
+          if(f.appProperties && f.appProperties.ccCopyOf) continue;
+          const parent = (f.parents || [])[0];
+          if(!parent) continue;
+          if(!distributedByLocation.has(parent + '::' + f.name)) continue;
+          try {
+            const r = await fetch(
+              `https://www.googleapis.com/drive/v3/files/${f.id}`,
+              {
+                method: 'PATCH',
+                headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                body: JSON.stringify({trashed: true})
+              }
+            );
+            if(r.ok){
+              stats.deleted++;
+              console.log(`[distribute] Huérfano post-consolidación trashed: "${f.name}"`);
+            } else stats.errors++;
+          } catch(e){ stats.errors++; }
+        }
+      }
+    } catch(e){
+      console.warn('[distribute] re-listing falló:', e.message);
     }
 
     if(stats.copied + stats.renamed + stats.deleted + stats.errors > 0){
