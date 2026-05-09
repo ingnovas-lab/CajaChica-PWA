@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0203';
+const APP_VERSION = '0204';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -5875,6 +5875,62 @@ async function _detectarEmpresasEliminadas(){
   } catch(_){}
 
   return {eliminadas: eliminadas.length, nombres: eliminadas.map(e => e.nombre)};
+}
+
+// v.0204: barrido de carpetas huérfanas dentro de `Caja Chica Master/` en el
+// Drive del invitado. Cualquier subcarpeta cuyo nombre NO matchea una empresa
+// activa en su lista actual es trasheada. Cubre dos casos:
+//   - Empresas eliminadas por el admin antes de v.0203 (carpeta física quedó).
+//   - Cualquier divergencia futura entre lista y estructura física en Drive.
+// Corre tras `_detectarEmpresasEliminadas` en boot. No throttle independiente
+// — usa el mismo flag de tiempo (LS_DETECT_DELETED_AT).
+async function _trashHuerfanosCajaChicaMaster(){
+  if(isSuperAdmin()) return null;
+  const token = getToken();
+  if(!token) return null;
+
+  const masterId = await getMasterFolderId().catch(() => null);
+  if(!masterId) return null;
+
+  // Listar subcarpetas de Caja Chica Master.
+  const q = encodeURIComponent(
+    `'${masterId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+  );
+  let files = [];
+  try {
+    const r = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=100`,
+      {headers: {'Authorization': 'Bearer ' + token}}
+    );
+    if(!r.ok) return null;
+    const j = await r.json();
+    files = j.files || [];
+  } catch(e){
+    console.warn('[trash-huerfanos] list:', e.message);
+    return null;
+  }
+
+  if(files.length === 0) return {trashed: 0};
+
+  // Set de nombres de empresas activas en la lista local.
+  const validNames = new Set(getCompanies().map(c => (c.nombre || '').trim()));
+
+  let trashed = 0;
+  for(const f of files){
+    const name = (f.name || '').trim();
+    if(!name) continue;
+    if(validNames.has(name)) continue;
+    try {
+      const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
+        method: 'PATCH',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({trashed: true})
+      });
+      if(r.ok){ trashed++; console.log(`[trash-huerfanos] "${name}" trashed`); }
+    } catch(_){}
+  }
+
+  return {trashed};
 }
 
 // v.0200: cleanup one-shot post-deploy del super_admin. Limpia shares legacy
@@ -12653,8 +12709,14 @@ function rewireClickable(root){
       }
 
       // v.0202: detector re-habilitado con check vía Sheets API.
+      // v.0204: tras detectar, barre carpetas huérfanas en Caja Chica Master.
       if(!isSuperAdmin()){
-        _detectarEmpresasEliminadas().catch(e => console.warn('[init] detect-eliminadas:', e.message));
+        (async () => {
+          try {
+            await _detectarEmpresasEliminadas();
+            await _trashHuerfanosCajaChicaMaster();
+          } catch(e){ console.warn('[init] detect+huerfanos:', e.message); }
+        })();
       }
 
       // v.0200: cleanup one-shot post-deploy de shares legacy (super_admin).
