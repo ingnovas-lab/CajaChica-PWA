@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0204';
+const APP_VERSION = '0205';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3655,6 +3655,35 @@ async function eliminarEmpresaConfirmada(nombre){
         await _revokeAllSharesUnderEmpresa(empresa.folderId).catch(e => {
           console.warn('[eliminarEmpresa] revoke estructura falló:', e.message);
         });
+      }
+
+      // v.0205: revocar TODOS los permisos no-owner del Sheet. Sin esto,
+      // trashear solo la carpeta padre deja el Sheet accesible para invitados
+      // (Sheets API → 200), y el detector del invitado no lo marca como
+      // eliminado. Tras revoke directo, Sheets API → 403 para invitados →
+      // detector dispara cleanup correctamente.
+      if(empresa.sheetId){
+        try {
+          const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
+          const r = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${empresa.sheetId}/permissions?fields=permissions(id,role,emailAddress)&supportsAllDrives=true`,
+            {headers: {'Authorization': 'Bearer ' + token}}
+          );
+          if(r.ok){
+            const j = await r.json();
+            for(const p of (j.permissions || [])){
+              if(p.role === 'owner') continue;
+              const pe = (p.emailAddress || '').toLowerCase();
+              if(pe && pe === myEmail) continue;
+              try {
+                await fetch(
+                  `https://www.googleapis.com/drive/v3/files/${empresa.sheetId}/permissions/${p.id}?supportsAllDrives=true`,
+                  {method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}}
+                );
+              } catch(_){}
+            }
+          }
+        } catch(e){ console.warn('[eliminarEmpresa] revoke sheet:', e.message); }
       }
 
       // 1. Mover carpeta de la empresa a Papelera de Drive
@@ -5782,9 +5811,10 @@ async function _detectarEmpresasEliminadas(){
   const token = getToken();
   if(!token) return null;
 
-  // Throttle: 1 vez cada 30 minutos.
+  // Throttle: 30 segundos. Suficiente para evitar martilleo en force-reloads
+  // back-to-back, pero no atrasa la propagación de eliminaciones reales.
   const lastRun = parseInt(localStorage.getItem(LS_DETECT_DELETED_AT) || '0', 10);
-  if(Date.now() - lastRun < 30*60*1000) return null;
+  if(Date.now() - lastRun < 30*1000) return null;
 
   const companies = getCompanies().filter(c => c.sheetId);
   if(companies.length === 0) return null;
