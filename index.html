@@ -58,6 +58,7 @@ input[type=date]{color-scheme:dark}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px}
+.section-label{font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;padding:6px 4px 0;margin-top:4px}
 
 .alert{padding:11px 14px;border-radius:var(--r);font-size:13px;line-height:1.5}
 .alert-red{background:#450a0a;border:1px solid #991b1b;color:#fca5a5}
@@ -1116,7 +1117,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div><div class="topbar-title">Configuración</div></div>
   </div>
   <div class="body">
-    <!-- Cuenta Google: row compacto con "Salir" como link discreto -->
+
+    <!-- ── Sesión ── -->
+    <div class="section-label">Sesión</div>
+
     <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px">
       <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1128,7 +1132,49 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button onclick="logoutGoogle()" style="background:transparent;border:none;color:var(--red);font-size:12px;font-weight:500;cursor:pointer;padding:0;flex-shrink:0">Salir</button>
     </div>
 
-    <!-- Base de datos: row compacto con 2 acciones inline -->
+    <div onclick="showAuthDiagnostico()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
+      <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Auth · <span id="set-auth-mode" style="color:var(--text)">—</span></div>
+        <div id="set-auth-summary" style="font-size:11px;color:var(--text2);margin-top:1px">Toca para diagnóstico</div>
+      </div>
+      <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+
+    <!-- ── Datos y app ── -->
+    <div class="section-label">Datos y app</div>
+
+    <!-- 1. App / Forzar actualización -->
+    <div style="padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text)">v.0067</span></div>
+          <div style="font-size:11px;color:var(--text2);margin-top:1px">Trae la última versión sin perder sesión</div>
+        </div>
+      </div>
+      <button class="btn btn-blue" onclick="forceAppUpdate()" style="padding:8px;font-size:12px">↻ Forzar actualización</button>
+    </div>
+
+    <!-- 2. Usuarios (admin only) -->
+    <div data-admin-only>
+      <div onclick="show('pg-users')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Usuarios</div>
+          <div id="set-users-count" style="font-size:13px;font-weight:500;margin-top:1px">—</div>
+        </div>
+        <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    </div>
+
+    <!-- 3. Base de datos -->
     <div style="padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
@@ -1145,7 +1191,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
-    <!-- Gemini API: row con tap para abrir modal de cambio -->
+    <!-- 4. Gemini API -->
     <div onclick="openGeminiUpdater()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
       <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
@@ -1157,49 +1203,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
     </div>
 
-    <!-- Gestión de usuarios: row tap-to-detail (admin only).
-         Wrapper div tiene data-admin-only para que applyRoleUI controle visibilidad
-         sin pisar el display:flex del row interno. -->
-    <div data-admin-only>
-      <div onclick="show('pg-users')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
-        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-        </div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Usuarios</div>
-          <div id="set-users-count" style="font-size:13px;font-weight:500;margin-top:1px">—</div>
-        </div>
-        <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>
-    </div>
+    <!-- ── Acciones ── -->
+    <div class="section-label">Acciones</div>
 
-    <!-- App: row con icono + descripción + botón inline (movido arriba de Consolidar) -->
-    <div style="padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-        </div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">App · <span id="settings-version" style="font-family:var(--mono);color:var(--text)">v.0067</span></div>
-          <div style="font-size:11px;color:var(--text2);margin-top:1px">Trae la última versión sin perder sesión</div>
-        </div>
-      </div>
-      <button class="btn btn-blue" onclick="forceAppUpdate()" style="padding:8px;font-size:12px">↻ Forzar actualización</button>
-    </div>
-
-    <!-- v.0196: row de diagnóstico de auth (validación Opción D) -->
-    <div onclick="showAuthDiagnostico()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
-      <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-      </div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Auth · <span id="set-auth-mode" style="color:var(--text)">—</span></div>
-        <div id="set-auth-summary" style="font-size:11px;color:var(--text2);margin-top:1px">Toca para diagnóstico</div>
-      </div>
-      <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-    </div>
-
-    <!-- Consolidar facturas: queda detallada (config one-time + acción) -->
+    <!-- Consolidar facturas (admin only) -->
     <div class="card" data-admin-only>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
         <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
@@ -1226,11 +1233,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div id="consolidar-status" style="font-size:11px;color:var(--text2);margin-top:8px"></div>
     </div>
 
-    <!-- Gestión de categorías y cuentas contables (v.0092) -->
+    <!-- Categorías (admin only) -->
     <div class="card" data-admin-only>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
         <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
         </div>
         <h3 style="margin:0">Categorías y cuentas contables</h3>
       </div>
@@ -1241,41 +1248,59 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </button>
     </div>
 
+    <!-- ── Mantenimiento ── -->
+    <div class="section-label">Mantenimiento</div>
+
+    <!-- Drive: forzar barrido (visible para todos) -->
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--blue)">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
         </div>
-        <h3 style="margin:0">Drive</h3>
+        <h3 style="margin:0">Forzar barrido del Drive</h3>
       </div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.45">Limpia archivos huérfanos (no referenciados en ningún Sheet) sin esperar al sync automático. Útil tras eliminar facturas o si Drive muestra fotos viejas.</div>
       <button class="btn btn-blue" onclick="forzarBarridoDrive()" style="padding:10px;font-size:12px">Forzar barrido del Drive</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Limpia archivos huérfanos (no referenciados en ningún Sheet) sin esperar al sync automático. Útil tras eliminar facturas o si Drive muestra fotos viejas.</div>
     </div>
 
+    <!-- Sincronizar archivos con Sheet (admin only) -->
     <div class="card" data-admin-only>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
         <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.121 2.121 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 12l2 2 4-4"/></svg>
         </div>
-        <h3 style="margin:0">Mantenimiento</h3>
+        <h3 style="margin:0">Sincronizar archivos con Sheet</h3>
       </div>
-      <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="padding:10px;font-size:12px">Sincronizar archivos con Sheet</button>
-      <div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.4">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
-      <button class="btn btn-red" onclick="resetApp()" style="padding:10px;font-size:12px;margin-top:10px">Borrar todo y empezar de cero</button>
-      <div style="font-size:11px;color:#fca5a5;margin-top:6px;line-height:1.4;opacity:.85">⚠️ Borra TODA la configuración local de este dispositivo: token de Google, clave de Gemini, empresa activa, proyectos cacheados, balances cacheados, e IndexedDB (registros pendientes sin sincronizar). NO toca tus datos en Google Drive ni en los Sheets — esos quedan intactos. Útil si quieres empezar limpio o si la app se rompió.</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.45">Si editaste manualmente fechas, suplidores o proyectos en el Sheet, esto renombra y mueve los archivos en Drive para que coincidan.</div>
+      <button class="btn btn-blue" onclick="syncDriveFilesWithSheet()" style="padding:10px;font-size:12px">Sincronizar</button>
     </div>
+
+    <!-- Borrar todo y empezar de cero -->
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--red)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <h3 style="margin:0;color:var(--red)">Borrar todo y empezar de cero</h3>
+      </div>
+      <div style="font-size:11px;color:#fca5a5;margin-bottom:10px;line-height:1.45;opacity:.85">Borra TODA la configuración local de este dispositivo: token de Google, clave de Gemini, empresa activa, proyectos cacheados, balances cacheados, e IndexedDB (registros pendientes sin sincronizar). NO toca tus datos en Google Drive ni en los Sheets — esos quedan intactos. Útil si quieres empezar limpio o si la app se rompió.</div>
+      <button class="btn btn-red" onclick="resetApp()" style="padding:10px;font-size:12px">Borrar todo</button>
+    </div>
+
+    <!-- ── Ayuda ── -->
+    <div class="section-label">Ayuda</div>
 
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
         <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         </div>
         <h3 style="margin:0">Ayuda · Contacto</h3>
       </div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.5">
-        👤 <span style="color:var(--amber);font-weight:600">Ing. Joel Novas</span><br>
-        📞 <a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a><br>
-        ✉️ <a href="mailto:ingnovas@gmail.com" style="color:var(--amber);text-decoration:none;font-weight:600">ingnovas@gmail.com</a>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6">
+        <div style="display:flex;align-items:center;gap:8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--amber);flex-shrink:0"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span style="color:var(--amber);font-weight:600">Ing. Joel Novas</span></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--amber);flex-shrink:0"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg><a href="tel:+18099755757" style="color:var(--amber);text-decoration:none;font-weight:600">+1 (809) 975-5757</a></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--amber);flex-shrink:0"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg><a href="mailto:ingnovas@gmail.com" style="color:var(--amber);text-decoration:none;font-weight:600">ingnovas@gmail.com</a></div>
       </div>
       <button class="btn btn-blue" onclick="show('pg-help')" style="padding:8px;font-size:12px">
         Ver guía de uso
@@ -1709,7 +1734,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0215';
+const APP_VERSION = '0216';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
