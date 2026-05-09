@@ -1704,7 +1704,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0206';
+const APP_VERSION = '0199';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3644,20 +3644,6 @@ async function eliminarEmpresaConfirmada(nombre){
     // ni Admin Index del admin.
     if(superAdmin){
       const token = getToken();
-
-      // v.0200: revocar shares directos en estructura (subcarpetas y obras)
-      // antes de trashear la carpeta padre. Sin esto, los permisos directos
-      // creados por flows legacy (Proyectos, Base de datos, obras compartidas
-      // con admins) quedan persistidos en Drive aunque la carpeta esté en
-      // Papelera, y el invitado puede seguir viendo entradas fantasma en su
-      // "Compartido conmigo".
-      // v.0206: revoke unificado de TODA la jerarquía (carpeta + subcarpetas
-      // + obras + Sheet). El helper cubre el Sheet con includeSheet:true.
-      if(empresa.folderId){
-        await _revokeAllSharesUnderEmpresa(empresa.folderId, {includeSheet: true}).catch(e => {
-          console.warn('[eliminarEmpresa] revoke jerarquía:', e.message);
-        });
-      }
 
       // 1. Mover carpeta de la empresa a Papelera de Drive
       if(empresa.folderId){
@@ -5676,368 +5662,6 @@ async function _cleanupOrphanedUserFiles(opts){
   }
 }
 
-// v.0200: revoca permisos directos en TODA la jerarquía de una empresa para
-// limpiar shares legacy (carpeta empresa, Base de datos, Proyectos, cada
-// obra dentro de Proyectos). Solo super_admin puede usarlo (es el dueño de
-// las carpetas). Idempotente — si una carpeta ya no tiene shares directos,
-// pasa sin error. Best-effort — errores individuales se loguean y se siguen.
-//
-// Uso:
-//   - Al eliminar empresa (`eliminarEmpresaConfirmada`): asegura que el
-//     invitado deje de ver la estructura cuando el super_admin borra.
-//   - Cleanup automático one-shot post-deploy v.0200 (flag local).
-// v.0206: revoca permisos directos NO-owner en TODA la jerarquía de una empresa.
-// Cubre carpeta empresa + subcarpetas (Base de datos, Proyectos, Reportes) +
-// obras dentro de Proyectos + opcionalmente el Sheet dentro de Base de datos.
-//
-// opts.includeSheet:
-//   - false (default): NO toca permisos del Sheet. Para empresas ACTIVAS
-//     donde el Sheet sigue legítimamente compartido con users.
-//   - true: incluye el Sheet en el revoke. Para empresas ELIMINADAS donde
-//     hay que cortar el acceso de invitados completamente.
-async function _revokeAllSharesUnderEmpresa(empresaFolderId, opts){
-  const token = getToken();
-  if(!token || !empresaFolderId) return {revoked: 0, errors: 0, scanned: 0};
-  const stats = {revoked: 0, errors: 0, scanned: 0};
-  const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
-  const includeSheet = !!(opts && opts.includeSheet);
-
-  // Helper: lista hijos (folders y/o files) de un parent.
-  // Pasa filtro mimeType para listar solo lo necesario.
-  async function _listChildren(parentId, mimeFilter){
-    const conds = [`'${parentId}' in parents`, 'trashed=false'];
-    if(mimeFilter === 'folder') conds.push(`mimeType='application/vnd.google-apps.folder'`);
-    if(mimeFilter === 'file')   conds.push(`mimeType!='application/vnd.google-apps.folder'`);
-    const q = encodeURIComponent(conds.join(' and '));
-    const r = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType)&pageSize=500`,
-      {headers: {'Authorization': 'Bearer ' + token}}
-    );
-    if(!r.ok) return [];
-    const j = await r.json();
-    return j.files || [];
-  }
-
-  // Helper: revoca permisos directos NO-owner de un fileId.
-  async function _revokePermsOf(fileId){
-    try {
-      const r = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${fileId}/permissions?fields=permissions(id,role,type,emailAddress)&supportsAllDrives=true`,
-        {headers: {'Authorization': 'Bearer ' + token}}
-      );
-      if(!r.ok) return;
-      const j = await r.json();
-      const perms = j.permissions || [];
-      for(const p of perms){
-        if(p.role === 'owner') continue;
-        const pe = (p.emailAddress || '').toLowerCase();
-        if(pe && pe === myEmail) continue;
-        try {
-          const dr = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${fileId}/permissions/${p.id}?supportsAllDrives=true`,
-            {method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}}
-          );
-          if(dr.ok) stats.revoked++; else stats.errors++;
-        } catch(e){ stats.errors++; }
-      }
-    } catch(e){ stats.errors++; }
-  }
-
-  const targets = [empresaFolderId];
-
-  // Nivel 1: subcarpetas directas (Base de datos, Proyectos, Reportes, etc.).
-  let level1 = [];
-  try { level1 = await _listChildren(empresaFolderId, 'folder'); }
-  catch(e){ console.warn('[revoke estructura] list nivel1:', e.message); }
-
-  for(const child of level1){
-    targets.push(child.id);
-    const name = (child.name || '').toLowerCase();
-    if(name === 'proyectos'){
-      // Nivel 2: obras dentro de Proyectos.
-      try {
-        const obras = await _listChildren(child.id, 'folder');
-        for(const obra of obras) targets.push(obra.id);
-      } catch(e){ console.warn('[revoke estructura] list obras:', e.message); }
-    }
-    if(includeSheet && name === 'base de datos'){
-      // Archivos dentro de Base de datos (típicamente solo el Sheet).
-      try {
-        const sheets = await _listChildren(child.id, 'file');
-        for(const s of sheets) targets.push(s.id);
-      } catch(e){ console.warn('[revoke estructura] list sheets:', e.message); }
-    }
-  }
-
-  for(const fid of targets){
-    stats.scanned++;
-    await _revokePermsOf(fid);
-  }
-
-  console.log(`[revoke estructura] scanned=${stats.scanned}, revocados=${stats.revoked}, errores=${stats.errors}, includeSheet=${includeSheet}`);
-  return stats;
-}
-
-// v.0200: detecta empresas en la lista local del invitado cuyo Sheet ya no es
-// accesible (super_admin la trasheó o revocó permisos). Para cada una:
-//   - Trashea las copias distribuidas (`appProperties.ccCompany == sheetId`).
-//   - Quita la empresa de su lista local + User Config.
-//   - Si era la activa, cambia a otra.
-// Sin botón. Corre una vez post-boot, después del sync de empresas.
-//
-// v.0202: check vía Sheets API (no Drive API). Bug v.0200: invitado tiene
-// scope `drive.file` — Drive API solo ve archivos creados/abiertos por la app.
-// Sheets recién compartidos daban 404 falso. Sheets API usa scope
-// `auth/spreadsheets` que sí ve cualquier sheet con permiso de lectura.
-//
-// Códigos:
-//   200      → existe y accesible. NO eliminada.
-//   404, 403 → no existe o sin permiso. ELIMINADA.
-//   otros    → error de transporte. NO marcar (no es señal de Drive).
-const LS_DETECT_DELETED_AT = 'cc_detect_deleted_at';
-async function _detectarEmpresasEliminadas(){
-  if(isSuperAdmin()) return null;
-  const token = getToken();
-  if(!token) return null;
-
-  // Throttle: 30 segundos. Suficiente para evitar martilleo en force-reloads
-  // back-to-back, pero no atrasa la propagación de eliminaciones reales.
-  const lastRun = parseInt(localStorage.getItem(LS_DETECT_DELETED_AT) || '0', 10);
-  if(Date.now() - lastRun < 30*1000) return null;
-
-  const companies = getCompanies().filter(c => c.sheetId);
-  if(companies.length === 0) return null;
-
-  const eliminadas = [];
-
-  for(const c of companies){
-    try {
-      const r = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${c.sheetId}?fields=spreadsheetId`,
-        {headers: {'Authorization': 'Bearer ' + token}}
-      );
-      if(r.status === 404 || r.status === 403){
-        eliminadas.push(c);
-      }
-      // 200 = accesible, no marcar. Otros (5xx, network) = error de
-      // transporte, no es señal de Drive — no marcar.
-    } catch(e){
-      // Error de red — no marcar.
-      console.warn('[detect-eliminadas] check', c.nombre, e.message);
-    }
-  }
-
-  if(eliminadas.length === 0){
-    localStorage.setItem(LS_DETECT_DELETED_AT, String(Date.now()));
-    return {eliminadas: 0};
-  }
-
-  // Trashear la carpeta empresa entera en Mi unidad del invitado. Drive
-  // cascadea: archivos y subcarpetas dentro van a Papelera junto con el
-  // padre. Más limpio que trashear archivos uno por uno (que dejaba carpetas
-  // huérfanas vacías visibles).
-  for(const c of eliminadas){
-    try {
-      const masterId = await getMasterFolderId().catch(() => null);
-      if(masterId){
-        const safeName = (c.nombre || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const q = encodeURIComponent(
-          `'${masterId}' in parents and name='${safeName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
-        );
-        const r = await fetch(
-          `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=10`,
-          {headers: {'Authorization': 'Bearer ' + token}}
-        );
-        if(r.ok){
-          const j = await r.json();
-          for(const f of (j.files || [])){
-            try {
-              await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
-                method: 'PATCH',
-                headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-                body: JSON.stringify({trashed: true})
-              });
-            } catch(_){}
-          }
-          console.log(`[detect-eliminadas] "${c.nombre}" eliminada por admin — ${(j.files || []).length} carpeta(s) empresa trashed`);
-        }
-      }
-    } catch(e){
-      console.warn('[detect-eliminadas] trash empresa folder:', e.message);
-    }
-
-    // Quitar de lista local.
-    removeCompany(c.nombre);
-    if(localStorage.getItem('cc_last_saved_active_company') === c.nombre){
-      localStorage.removeItem('cc_last_saved_active_company');
-    }
-  }
-
-  // Persistir lista nueva en User Config.
-  try { await saveCompaniesToUserConfig(getCompanies()); }
-  catch(e){ console.warn('[detect-eliminadas] saveUserConfig:', e.message); }
-
-  // Si la activa fue eliminada, activar la primera disponible.
-  const current = getCurrentCompany();
-  const stillExists = current && getCompanies().some(c => c.nombre === current.nombre);
-  if(!stillExists){
-    const remaining = getCompanies();
-    if(remaining.length > 0) setCurrentCompany(remaining[0].nombre);
-  }
-
-  localStorage.setItem(LS_DETECT_DELETED_AT, String(Date.now()));
-
-  // Toast resumen para el usuario.
-  try {
-    const nombres = eliminadas.map(e => e.nombre).join(', ');
-    toast(`${eliminadas.length} empresa(s) eliminada(s) por el admin: ${nombres}`, 'ok');
-  } catch(_){}
-
-  return {eliminadas: eliminadas.length, nombres: eliminadas.map(e => e.nombre)};
-}
-
-// v.0204: barrido de carpetas huérfanas dentro de `Caja Chica Master/` en el
-// Drive del invitado. Cualquier subcarpeta cuyo nombre NO matchea una empresa
-// activa en su lista actual es trasheada. Cubre dos casos:
-//   - Empresas eliminadas por el admin antes de v.0203 (carpeta física quedó).
-//   - Cualquier divergencia futura entre lista y estructura física en Drive.
-// Corre tras `_detectarEmpresasEliminadas` en boot. No throttle independiente
-// — usa el mismo flag de tiempo (LS_DETECT_DELETED_AT).
-async function _trashHuerfanosCajaChicaMaster(){
-  if(isSuperAdmin()) return null;
-  const token = getToken();
-  if(!token) return null;
-
-  const masterId = await getMasterFolderId().catch(() => null);
-  if(!masterId) return null;
-
-  // Listar subcarpetas de Caja Chica Master.
-  const q = encodeURIComponent(
-    `'${masterId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-  );
-  let files = [];
-  try {
-    const r = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=100`,
-      {headers: {'Authorization': 'Bearer ' + token}}
-    );
-    if(!r.ok) return null;
-    const j = await r.json();
-    files = j.files || [];
-  } catch(e){
-    console.warn('[trash-huerfanos] list:', e.message);
-    return null;
-  }
-
-  if(files.length === 0) return {trashed: 0};
-
-  // Set de nombres de empresas activas en la lista local.
-  const validNames = new Set(getCompanies().map(c => (c.nombre || '').trim()));
-
-  let trashed = 0;
-  for(const f of files){
-    const name = (f.name || '').trim();
-    if(!name) continue;
-    if(validNames.has(name)) continue;
-    try {
-      const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
-        method: 'PATCH',
-        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-        body: JSON.stringify({trashed: true})
-      });
-      if(r.ok){ trashed++; console.log(`[trash-huerfanos] "${name}" trashed`); }
-    } catch(_){}
-  }
-
-  return {trashed};
-}
-
-// v.0206: barrido unificado de shares legacy en el Drive del super_admin.
-// Reemplaza el `_cleanupSharesEstructuraLegacy` de v.0200 (que era one-shot
-// con flag y solo cubría empresas activas).
-//
-// Cubre 2 casos en una pasada:
-//   1) Empresas ACTIVAS (en lista local, no trashed): revoca shares directos
-//      en subcarpetas legacy (Proyectos, Base de datos, obras). NO toca el
-//      Sheet — sigue compartido legítimamente con users.
-//   2) Empresas ELIMINADAS (carpeta trashed en Caja Chica Master/): revoca
-//      jerarquía completa INCLUYENDO el Sheet. Cierra el caso "el admin
-//      eliminó pero el Sheet sigue accesible al invitado" sin importar
-//      cuándo se eliminó (legacy pre-v.0205 o post).
-//
-// Idempotente, sin flag — corre cada boot del super_admin. Si no hay nada
-// que revocar, pasa sin tocar nada.
-async function _revokeLegacyShares(){
-  if(!isSuperAdmin()) return;
-  const token = getToken();
-  if(!token) return;
-
-  const masterId = await getMasterFolderId().catch(() => null);
-  if(!masterId) return;
-
-  // Listar TODAS las carpetas en Caja Chica Master (activas + trashed).
-  // Drive query no soporta "trashed=any", pero por default lista solo
-  // trashed=false. Para incluir trashed hay que combinar 2 listings.
-  const fields = 'files(id,name,trashed)&pageSize=200';
-  let allFolders = [];
-  try {
-    const qActive = encodeURIComponent(
-      `'${masterId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-    );
-    const r1 = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${qActive}&fields=${fields}`,
-      {headers: {'Authorization': 'Bearer ' + token}}
-    );
-    if(r1.ok){
-      const j = await r1.json();
-      allFolders = allFolders.concat(j.files || []);
-    }
-    const qTrashed = encodeURIComponent(
-      `'${masterId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=true`
-    );
-    const r2 = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${qTrashed}&fields=${fields}`,
-      {headers: {'Authorization': 'Bearer ' + token}}
-    );
-    if(r2.ok){
-      const j = await r2.json();
-      allFolders = allFolders.concat(j.files || []);
-    }
-  } catch(e){
-    console.warn('[revoke-legacy] list folders:', e.message);
-    return;
-  }
-
-  if(allFolders.length === 0) return;
-
-  const activeNames = new Set(getCompanies().map(c => (c.nombre || '').trim()));
-
-  let totalRevoked = 0, totalScanned = 0, totalErrors = 0;
-  let countActive = 0, countTrashed = 0;
-
-  for(const f of allFolders){
-    const name = (f.name || '').trim();
-    const isTrashed = !!f.trashed;
-    const isActive = !isTrashed && activeNames.has(name);
-    // includeSheet: false para activas (Sheet sigue compartido), true para
-    // trashed (cortar acceso completo).
-    const includeSheet = isTrashed;
-
-    try {
-      const stats = await _revokeAllSharesUnderEmpresa(f.id, {includeSheet});
-      totalRevoked += stats.revoked;
-      totalScanned += stats.scanned;
-      totalErrors += stats.errors;
-      if(isTrashed) countTrashed++; else if(isActive) countActive++;
-    } catch(e){
-      console.warn('[revoke-legacy]', name, e.message);
-      totalErrors++;
-    }
-  }
-
-  console.log(`[revoke-legacy] activas=${countActive}, trashed=${countTrashed}, scanned=${totalScanned}, revocados=${totalRevoked}, errores=${totalErrors}`);
-}
-
 // v.0182: distribuye los archivos master (en Drive del super_admin) al Drive
 // del usuario invitado, copiándolos a la carpeta `Fotos/` de la obra
 // correspondiente. Idempotente — al activar empresa o refrescar balance:
@@ -7618,12 +7242,43 @@ async function _recoverPrivatePhoto(img, fileId){
   }
 }
 
-// v.0200: ELIMINADA `shareFolderWithAdmins`. Antes saveNewProj compartía la
-// carpeta de cada obra nueva con admins+super_admin para que la vieran en
-// "Compartido conmigo". Razón del retiro: los admins ya tienen acceso a los
-// datos de la obra vía el Sheet (compartido directo), y a las fotos vía
-// _distributeMastersToUserDrive (copias en su Mi unidad). La carpeta de la
-// obra solo añadía ruido en su Drive sin payoff funcional.
+// Comparte una CARPETA con todos los admins + SUPER_ADMIN. Las carpetas Drive
+// propagan permisos a hijos automáticamente, así que compartir la carpeta de
+// una obra basta para que admins vean Fotos/Comprobantes/Reportes/Papelera.
+// Usado en saveNewProj para que cuando un USUARIO cree una obra, su admin la
+// vea aparecer en "Compartido conmigo" en su Drive sin acción manual.
+async function shareFolderWithAdmins(folderId, role = 'writer'){
+  try {
+    const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
+    const targets = new Set();
+    (masters.users || []).forEach(u => {
+      if((u.rol || '').toUpperCase() === 'ADMIN' && u.email) targets.add(u.email.toLowerCase());
+    });
+    targets.add(SUPER_ADMIN_EMAIL.toLowerCase());
+    targets.delete(myEmail);  // no compartir conmigo mismo
+
+    if(targets.size === 0) return;
+
+    const token = getToken();
+    if(!token) return;
+    for(const email of targets){
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=false&supportsAllDrives=true`, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({role, type: 'user', emailAddress: email})
+        });
+      } catch(e){
+        console.warn(`[shareFolder] No se pudo compartir folder ${folderId} con ${email}:`, e);
+      }
+    }
+  } catch(e){
+    console.warn('[shareFolder] Error general:', e);
+  }
+}
 
 // ============================================================
 // UTILIDADES
@@ -10067,9 +9722,12 @@ async function createProject(){
     await ensureFolder('Reportes', obraFolderId);
     await ensureFolder('Papelera', obraFolderId);
 
-    // v.0200: ya NO se comparte la carpeta de obra con admins. Los admins
-    // acceden a los datos vía Sheet (compartido directo) y a fotos vía
-    // distribución a su Drive (_distributeMastersToUserDrive).
+    // 3.5) Compartir la carpeta de la obra con admins/SUPER_ADMIN automáticamente.
+    // Drive propaga permisos a hijos: con compartir el folder de la obra, todas
+    // las subcarpetas (Fotos, Comprobantes, etc.) quedan visibles para el admin
+    // en "Compartido conmigo". Sin esto, el admin nunca ve la estructura nueva.
+    loading(true, 'Creando obra', 'Compartiendo carpetas con admins...');
+    await shareFolderWithAdmins(obraFolderId);
 
     // 4) Refrescar masters y seleccionar la nueva obra
     await loadMasters();
@@ -12776,23 +12434,6 @@ function rewireClickable(root){
       }
       if(cfg && cfg.empresas){
         console.log(`[init] Sync OK: ${cfg.empresas.length} empresa(s) total`);
-      }
-
-      // v.0202: detector re-habilitado con check vía Sheets API.
-      // v.0204: tras detectar, barre carpetas huérfanas en Caja Chica Master.
-      if(!isSuperAdmin()){
-        (async () => {
-          try {
-            await _detectarEmpresasEliminadas();
-            await _trashHuerfanosCajaChicaMaster();
-          } catch(e){ console.warn('[init] detect+huerfanos:', e.message); }
-        })();
-      }
-
-      // v.0206: barrido unificado de shares legacy + empresas trashed sin
-      // revoke (super_admin). Idempotente, cada boot.
-      if(isSuperAdmin()){
-        _revokeLegacyShares().catch(e => console.warn('[init] revoke-legacy:', e.message));
       }
     } catch(e){
       console.warn('[init] Sync desde Drive falló:', e.message);
