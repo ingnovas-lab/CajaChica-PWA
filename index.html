@@ -1713,7 +1713,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0212';
+const APP_VERSION = '0213';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3666,18 +3666,11 @@ async function eliminarEmpresaConfirmada(nombre){
       // 2. Remover del Admin Index (Drive)
       await removeCompanyFromIndex(nombre);
 
-      // v.0212: trashear Sheet + revocar TODOS los permisos no-owner.
-      // Drive trashed sin revoke deja a non-owners con acceso vía Sheets
-      // API. Revocar permisos corta el acceso definitivamente.
+      // v.0213: REVOCAR permisos PRIMERO, TRASHEAR DESPUÉS. Drive devuelve
+      // 403 al modificar permisos de archivos trashed. Orden inverso.
       if(empresa.sheetId){
         try {
-          // 1. Trashear sheet (queda en tu Papelera, recoverable 30 días).
-          await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.sheetId}`, {
-            method: 'PATCH',
-            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-            body: JSON.stringify({trashed: true})
-          });
-          // 2. Revocar permisos no-owner (corta acceso de invitados).
+          // 1. Revocar permisos no-owner (mientras sheet sigue activo).
           const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
           const r = await fetch(
             `https://www.googleapis.com/drive/v3/files/${empresa.sheetId}/permissions?fields=permissions(id,role,emailAddress)&supportsAllDrives=true`,
@@ -3697,7 +3690,13 @@ async function eliminarEmpresaConfirmada(nombre){
               } catch(_){}
             }
           }
-        } catch(e){ console.warn('[eliminarEmpresa] trash+revoke sheet:', e.message); }
+          // 2. Trashear sheet después.
+          await fetch(`https://www.googleapis.com/drive/v3/files/${empresa.sheetId}`, {
+            method: 'PATCH',
+            headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+            body: JSON.stringify({trashed: true})
+          });
+        } catch(e){ console.warn('[eliminarEmpresa] revoke+trash sheet:', e.message); }
       }
     }
 
@@ -5924,7 +5923,7 @@ async function _revokeSharesEmpresasEliminadas(){
     } while(pageToken);
   }
 
-  let trashedSheets = 0, processed = 0, permsRevoked = 0;
+  let trashedSheets = 0, processed = 0, permsRevoked = 0, restored = 0;
   const myEmail = (localStorage.getItem(LS.EMAIL) || '').toLowerCase();
 
   for(const sheet of allSheets){
@@ -5933,23 +5932,20 @@ async function _revokeSharesEmpresasEliminadas(){
 
     processed++;
 
-    // Sheet `CajaChica_*` no en lista activa = empresa eliminada.
-    // 1) Trashear (si no está ya).
-    if(!sheet.trashed){
+    // v.0213: si el sheet ya está trashed (de versiones previas), restaurar
+    // primero. Drive devuelve 403 al modificar permissions de archivos trashed.
+    if(sheet.trashed === true){
       try {
-        const dr = await fetch(`https://www.googleapis.com/drive/v3/files/${sheet.id}`, {
+        const rr = await fetch(`https://www.googleapis.com/drive/v3/files/${sheet.id}`, {
           method: 'PATCH',
           headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-          body: JSON.stringify({trashed: true})
+          body: JSON.stringify({trashed: false})
         });
-        if(dr.ok){ trashedSheets++; }
+        if(rr.ok) restored++;
       } catch(_){}
     }
 
-    // 2) Revocar permisos no-owner. v.0212: trashear no es suficiente —
-    // Drive permite a non-owners con permission seguir accediendo a un
-    // sheet trashed vía Sheets API. Revocar permisos corta el acceso
-    // definitivamente → Sheets API → 403 → detector del invitado limpia.
+    // Revocar permisos no-owner (sheet activo, sin trashed lock).
     try {
       const r = await fetch(
         `https://www.googleapis.com/drive/v3/files/${sheet.id}/permissions?fields=permissions(id,role,emailAddress)&supportsAllDrives=true`,
@@ -5972,11 +5968,21 @@ async function _revokeSharesEmpresasEliminadas(){
       }
     } catch(_){}
 
-    console.log(`[revoke-empresas-eliminadas] "${sheet.name}" procesado (trashed + permisos revocados)`);
+    // Trashear el sheet al final.
+    try {
+      const dr = await fetch(`https://www.googleapis.com/drive/v3/files/${sheet.id}`, {
+        method: 'PATCH',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({trashed: true})
+      });
+      if(dr.ok) trashedSheets++;
+    } catch(_){}
+
+    console.log(`[revoke-empresas-eliminadas] "${sheet.name}" procesado`);
   }
 
-  console.log(`[revoke-empresas-eliminadas] sheets en mi Drive=${allSheets.length}, en lista actual=${activeIds.size}, de eliminadas=${processed}, trashed=${trashedSheets}, permisos revocados=${permsRevoked}`);
-  return {sheets: allSheets.length, processed, trashedSheets, permsRevoked};
+  console.log(`[revoke-empresas-eliminadas] sheets en mi Drive=${allSheets.length}, en lista actual=${activeIds.size}, de eliminadas=${processed}, restaurados=${restored}, permisos revocados=${permsRevoked}, trashed=${trashedSheets}`);
+  return {sheets: allSheets.length, processed, restored, permsRevoked, trashedSheets};
 }
 
 const LS_DISTRIBUTE_AT = 'cc_distribute_at_global';
