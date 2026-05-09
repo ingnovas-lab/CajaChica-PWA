@@ -1382,11 +1382,21 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <li style="margin-bottom:6px">Llena el <strong>nombre</strong> de la empresa (obligatorio — se usa como nombre de carpeta y sheet en Drive).</li>
           <li style="margin-bottom:6px"><strong>Datos contables (opcionales):</strong> razón social legal, RNC, dirección, "Revisado por" y "Aprobado por" (firmantes). Aparecen en el reporte fiscal. Se pueden dejar vacíos y completar después en "Editar empresa".</li>
           <li style="margin-bottom:6px">Toca "Crear empresa". La app crea las carpetas y el sheet automáticamente.</li>
-          <li>Último paso: asociar el Apps Script (instrucciones aparecen en pantalla).</li>
+          <li><strong>Solo la primera vez:</strong> al crear tu primera empresa, asocias el Apps Script central (instrucciones aparecen en pantalla). Las empresas nuevas heredan esa URL automáticamente, sin pasos extra.</li>
         </ol>
 
         <div style="font-weight:600;margin-top:14px;margin-bottom:6px">Editar datos de una empresa</div>
         <div style="color:var(--text2)">Pantalla "Seleccionar empresa" → toca el ícono de lápiz al lado de la empresa. Puedes cambiar el nombre y los datos contables. Los reportes ya generados mantienen el nombre anterior como registro histórico.</div>
+
+        <div style="font-weight:600;margin-top:14px;margin-bottom:6px">Eliminar empresa (solo SUPER_ADMIN)</div>
+        <ol style="margin:0 0 0 20px;padding:0">
+          <li style="margin-bottom:6px">Pantalla "Seleccionar empresa" → toca el ícono 🗑️ Eliminar al lado de la empresa.</li>
+          <li style="margin-bottom:6px">Confirma escribiendo el nombre exacto de la empresa.</li>
+          <li>La carpeta de Drive se mueve a Papelera (recuperable 30 días) y los usuarios invitados pierden acceso automáticamente — su próxima apertura de la app limpia su lista, su carpeta local y su Drive de esa empresa.</li>
+        </ol>
+        <div style="background:rgba(239,68,68,0.10);border-left:3px solid var(--red);padding:10px 12px;margin-top:8px;font-size:12px;border-radius:4px">
+          <strong>No puedes eliminar la empresa activa.</strong> Cambia a otra primero, después eliminas.
+        </div>
       </div>
     </div>
 
@@ -1422,6 +1432,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         </ol>
         <div style="background:rgba(245,158,11,0.08);border-left:3px solid var(--amber);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
           <strong>Fotos buenas:</strong> superficie plana, buena luz, sin sombras, enfocada. Si la factura está arrugada, estírala primero.
+        </div>
+        <div style="background:rgba(59,130,246,0.08);border-left:3px solid var(--blue);padding:10px 12px;margin-top:8px;font-size:12px;border-radius:4px">
+          <strong>Personalizar categorías:</strong> si quieres agregar, renombrar o asignar cuenta contable a las categorías (Materiales, Mano de obra, etc.), Configuración → Acciones → Gestionar categorías. Solo admin. La cuenta contable solo aparece en el reporte fiscal.
         </div>
       </div>
     </div>
@@ -1588,7 +1601,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           </li>
         </ol>
         <div style="background:rgba(245,158,11,0.08);border-left:3px solid var(--amber);padding:10px 12px;margin-top:12px;font-size:12px;border-radius:4px">
-          <strong>Datos contables vacíos:</strong> si no llenaste razón social, RNC, etc. al crear la empresa, el reporte fiscal saldrá con "—" o líneas en blanco para firmar a mano. Puedes completarlos en Configuración → Cambiar empresa → Editar.
+          <strong>Datos contables vacíos:</strong> si no llenaste razón social, RNC, etc. al crear la empresa, el reporte fiscal saldrá con "—" o líneas en blanco para firmar a mano. Puedes completarlos en Cambiar empresa (chip en el home) → ✏️ Editar.
         </div>
 
         <div style="font-weight:600;margin-top:14px;margin-bottom:6px">Mientras se genera el PDF</div>
@@ -1653,7 +1666,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <h3 style="color:var(--amber);margin-bottom:10px">13. Problemas comunes</h3>
       <div style="font-size:13px;line-height:1.6">
         <div style="font-weight:600;margin-bottom:4px">La app me pide iniciar sesión otra vez</div>
-        <div style="margin-bottom:12px;color:var(--text2)">Pasa cuando expira el acceso (típicamente cada 7 días en iPhone, o si revocas permisos manualmente). Aparece la pantalla "Sesión expirada" con tu email pre-llenado. Toca <strong>"Reconectar con Google"</strong> — un solo toque, sin selector de cuentas — y vuelves a donde estabas. NO pierdes datos ni configuración.</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Pasa ocasionalmente cuando expira el acceso (depende del sistema operativo y patrón de uso). Aparece la pantalla "Sesión expirada" con tu email pre-llenado. Toca <strong>"Reconectar con Google"</strong> — un solo toque, sin selector de cuentas — y vuelves a donde estabas. NO pierdes datos ni configuración. Si te pasa muy seguido, revisá Configuración → Sesión → Auth para ver el patrón real.</div>
 
         <div style="font-weight:600;margin-bottom:4px">El reporte se queda generando indefinido (iPhone)</div>
         <div style="margin-bottom:12px;color:var(--text2)">Pasa cuando intentas generar un segundo reporte sin cerrar la app entre uno y otro. iOS satura la memoria interna del navegador. <strong>Solución:</strong> toca "✕ Cancelar generación" en el overlay, cierra la app por completo (selector de apps → desliza la app hacia arriba), reabre y reintenta. El reporte sale en segundos.</div>
@@ -1665,13 +1678,16 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
         <div style="margin-bottom:12px;color:var(--text2)">Corrígelos tú mismo antes de guardar. Si pasa seguido, mejora la luz y toma la foto de nuevo.</div>
 
         <div style="font-weight:600;margin-bottom:4px">No veo una obra que debería tener</div>
-        <div style="margin-bottom:12px;color:var(--text2)">Configuración → Base de datos → <strong style="color:var(--text)">↻ Refrescar</strong>. Eso vuelve a leer obras, suplidores y categorías desde el Sheet. Si aún no aparece, llama al Ing. Joel para que te asigne la obra.</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Configuración → Datos y app → Base de datos → <strong style="color:var(--text)">↻ Refrescar</strong>. Eso vuelve a leer obras, suplidores y categorías desde el Sheet. Si aún no aparece, llama al Ing. Joel para que te asigne la obra.</div>
 
         <div style="font-weight:600;margin-bottom:4px">El balance no está actualizado</div>
         <div style="margin-bottom:12px;color:var(--text2)">Toca el icono ↻ sobre el card de balance en el home para forzar recálculo desde el Sheet.</div>
 
         <div style="font-weight:600;margin-bottom:4px">La app está lenta o muestra una versión vieja</div>
-        <div style="margin-bottom:12px;color:var(--text2)">Configuración → App → "Forzar actualización". Limpia caché y trae la última versión publicada sin perder tu sesión ni datos locales.</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Configuración → Datos y app → App → "Forzar actualización". Limpia caché y trae la última versión publicada sin perder tu sesión ni datos locales.</div>
+
+        <div style="font-weight:600;margin-bottom:4px">Drive muestra fotos viejas o archivos huérfanos</div>
+        <div style="margin-bottom:12px;color:var(--text2)">Configuración → Mantenimiento → "Forzar barrido del Drive". Manda a Papelera archivos de tu Drive que ya no están referenciados en ningún Sheet (típicamente fotos de facturas eliminadas que quedaron sin asociación). Recoverable 30 días desde Papelera.</div>
 
         <div style="font-weight:600;margin-bottom:4px">Me dice "Sesión expirada"</div>
         <div style="margin-bottom:12px;color:var(--text2)">Toca "Conectar con Google" cuando te lo pida.</div>
@@ -1734,7 +1750,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0216';
+const APP_VERSION = '0217';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
