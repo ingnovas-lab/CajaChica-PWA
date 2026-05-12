@@ -1175,6 +1175,20 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       </div>
     </div>
 
+    <!-- 2b. Telemetría (admin only) — v.0224 -->
+    <div data-admin-only>
+      <div onclick="showTelemetria()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;cursor:pointer">
+        <div style="width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--amber)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Telemetría</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:1px">Versiones de usuarios · errores · uso</div>
+        </div>
+        <svg style="color:var(--text3);flex-shrink:0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    </div>
+
     <!-- 3. Base de datos -->
     <div style="padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -1748,7 +1762,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0223';
+const APP_VERSION = '0224';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1773,6 +1787,8 @@ const LS = {
   REPORTE_TIPO: 'cc_reporte_tipo', // 'ejecutivo' | 'contabilidad' — última selección del tipo de informe
   SESSION_ID: 'cc_session_id',     // v.0123: UUID retornado por Apps Script en exchange_code, requerido para refresh_access_token
   AUTH_HISTORY: 'cc_auth_history', // v.0196: array de últimos 30 eventos auth para validar Opción D (login_success, refresh_ok, reauth_required)
+  TELEMETRY_QUEUE: 'cc_telemetry_queue', // v.0224: cola local de eventos pendientes de flush al AS
+  TELEMETRY_AS_VERSION: 'cc_telemetry_as_version', // v.0224: última versión AS conocida (devuelta en el response de telemetry)
 };
 
 // Email del SUPER_ADMIN (pasaporte universal, crea y ve todas las empresas)
@@ -2351,6 +2367,134 @@ function showAuthDiagnostico(){
   );
 }
 
+// v.0224: modal de telemetría — tabla de usuarios + versiones + errores 24h.
+// Solo super_admin. Llama a `telemetry_summary` del AS, agrupa por usuario.
+function _escTel(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _humanizeAgoTel(iso){
+  if(!iso) return '—';
+  const t = Date.parse(iso);
+  if(!t || isNaN(t)) return '—';
+  const sec = Math.floor((Date.now() - t) / 1000);
+  if(sec < 60) return 'hace ' + sec + 's';
+  if(sec < 3600) return 'hace ' + Math.floor(sec/60) + 'm';
+  if(sec < 86400) return 'hace ' + Math.floor(sec/3600) + 'h';
+  return 'hace ' + Math.floor(sec/86400) + 'd';
+}
+async function showTelemetria(){
+  if(!isSuperAdmin()){ toast('Solo el admin puede ver telemetría', 'err'); return; }
+  showModal(
+    '<h3 style="margin-bottom:8px">Telemetría</h3>' +
+    '<div id="tel-content" style="font-size:13px;color:var(--text2);padding:14px 0;text-align:center">Cargando…</div>' +
+    '<div style="display:flex;gap:8px;margin-top:8px">' +
+      '<button class="btn" onclick="_loadTelemetria(true)" style="flex:1;padding:10px;font-size:12px">↻ Refrescar</button>' +
+      '<button class="btn btn-amber" onclick="closeModal()" style="flex:1;padding:10px;font-size:12px">Cerrar</button>' +
+    '</div>'
+  );
+  await _loadTelemetria(false);
+}
+async function _loadTelemetria(forceFlush){
+  const contentEl = document.getElementById('tel-content');
+  if(!contentEl) return;
+  contentEl.innerHTML = '<div style="padding:14px 0;color:var(--text2)">Cargando…</div>';
+  try {
+    // Flusheamos primero la cola local para incluir eventos recientes en el summary.
+    if(forceFlush) await _flushTelemetry();
+
+    const empresa = getCurrentCompany();
+    const scriptUrl = (empresa && empresa.scriptUrl) ? empresa.scriptUrl : getCentralScriptUrl();
+    if(!scriptUrl){
+      contentEl.innerHTML = '<div style="padding:12px;color:var(--red);font-size:12px">Sin Apps Script configurado. Configurá Apps Script primero.</div>';
+      return;
+    }
+    const token = getToken();
+    if(!token){
+      contentEl.innerHTML = '<div style="padding:12px;color:var(--red);font-size:12px">Sesión expirada. Volvé a iniciar sesión.</div>';
+      return;
+    }
+
+    const r = await fetch(scriptUrl, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({action: 'telemetry_summary', access_token: token, sheetId: empresa && empresa.sheetId})
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    if(!data || data.ok === false){
+      contentEl.innerHTML = '<div style="padding:12px;color:var(--red);font-size:12px">' + _escTel((data && data.error) || 'Error desconocido') + '</div>';
+      return;
+    }
+
+    const users = data.users || [];
+    const errs = data.errors24h_sample || [];
+    const versions = data.versions || {};
+
+    // Resumen
+    const usersActives24h = users.filter(u => Date.parse(u.last_seen) >= Date.now() - 24*3600*1000).length;
+    const versionsKeys = Object.keys(versions).sort();
+    const versionsLine = versionsKeys.length
+      ? versionsKeys.map(v => '<span style="display:inline-block;margin:0 6px 4px 0;padding:2px 8px;background:var(--bg3);border-radius:6px;font-family:var(--mono);font-size:11px">v.' + _escTel(v) + ' · ' + versions[v] + '</span>').join('')
+      : '<span style="color:var(--text3)">—</span>';
+
+    // Tabla de usuarios
+    const userRows = users.length === 0
+      ? '<div style="padding:12px;color:var(--text3);font-size:12px;text-align:center">Sin eventos en los últimos 7 días</div>'
+      : users.map(u => {
+          const errBadge = u.errors24h > 0
+            ? '<span class="badge badge-bad">' + u.errors24h + ' err</span>'
+            : '<span class="badge badge-ok">ok</span>';
+          return (
+            '<div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px">' +
+              '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
+                '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500">' + _escTel(u.email) + '</div>' +
+                errBadge +
+              '</div>' +
+              '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:2px;color:var(--text2);font-size:11px">' +
+                '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _escTel(u.empresa || '—') + ' · v.' + _escTel(u.version_pwa || '?') + '</span>' +
+                '<span style="font-family:var(--mono);font-size:10px;flex-shrink:0">' + _humanizeAgoTel(u.last_seen) + '</span>' +
+              '</div>' +
+              '<div style="color:var(--text3);font-size:10px;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _escTel(u.platform || '') + '</div>' +
+            '</div>'
+          );
+        }).join('');
+
+    // Lista de errores
+    const errsList = errs.length === 0
+      ? ''
+      : '<div class="section-label" style="margin-top:14px;margin-bottom:6px">Errores recientes (24h)</div>' +
+        '<div style="max-height:180px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:8px">' +
+          errs.map(e =>
+            '<div style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:11px">' +
+              '<div style="font-family:var(--mono);color:var(--red);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _escTel(e.msg) + '</div>' +
+              '<div style="color:var(--text3);font-size:10px;margin-top:1px">' + _escTel(e.email) + ' · ' + _humanizeAgoTel(e.ts) + '</div>' +
+            '</div>'
+          ).join('') +
+        '</div>';
+
+    contentEl.innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">' +
+        '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">' +
+          '<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Usuarios 24h</div>' +
+          '<div style="font-size:18px;font-weight:600;margin-top:2px">' + usersActives24h + '</div>' +
+        '</div>' +
+        '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">' +
+          '<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Errores 24h</div>' +
+          '<div style="font-size:18px;font-weight:600;margin-top:2px;color:' + ((data.errors24h_count || 0) > 0 ? 'var(--red)' : 'var(--text)') + '">' + (data.errors24h_count || 0) + '</div>' +
+        '</div>' +
+        '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">' +
+          '<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">Eventos 7d</div>' +
+          '<div style="font-size:18px;font-weight:600;margin-top:2px">' + (data.total_events_7d || 0) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="section-label" style="margin-bottom:6px">Versiones activas</div>' +
+      '<div style="margin-bottom:10px">' + versionsLine + '</div>' +
+      '<div class="section-label" style="margin-bottom:6px">Usuarios (últimos 7 días)</div>' +
+      '<div style="max-height:280px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:8px">' + userRows + '</div>' +
+      errsList;
+  } catch(e){
+    contentEl.innerHTML = '<div style="padding:12px;color:var(--red);font-size:12px">Error: ' + _escTel(e.message) + '</div>';
+  }
+}
+
 async function copiarLogAuth(){
   const log = (window._authTrace || []).join('\n');
   if(!log){ toast('No hay log para copiar', 'err'); return; }
@@ -2703,6 +2847,12 @@ function initGoogleAuth(){
     if(name) localStorage.setItem(LS.NAME, name);
     document.getElementById('gauth-status').textContent = '✓ Conectado: ' + (email || '(email pendiente)');
     document.getElementById('gauth-status').style.color = 'var(--green)';
+
+    // v.0224: boot event — saber qué versión + plataforma corre cada usuario.
+    _telemetry('boot', 'info', 'auth-success', {
+      mode: isSuperAdmin() ? 'super_admin' : 'invitado',
+      flow: emailFromExchange ? 'apps_script_proxy' : 'token_client_fallback'
+    });
 
     // Sincronizar con Drive — v.0138: super_admin usa Admin Index (empresas
     // que él creó) + User Config (empresas a las que fue invitado por otros
@@ -3722,7 +3872,7 @@ async function eliminarEmpresaConfirmada(nombre){
                   `https://www.googleapis.com/drive/v3/files/${empresa.sheetId}/permissions/${p.id}?supportsAllDrives=true`,
                   {method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}}
                 );
-              } catch(_){}
+              } catch(e){ _telemetry('error', 'warn', 'eliminar-empresa-revoke-permission-failed', {empresa: empresa.nombre, error: (e && e.message) || String(e)}); }
             }
           }
           // 2. Trashear sheet después.
@@ -3751,10 +3901,12 @@ async function eliminarEmpresaConfirmada(nombre){
     loading(false);
     toast(superAdmin ? `Empresa "${nombre}" eliminada` : `Saliste de "${nombre}"`, 'ok');
     await renderCompanyList();
+    _telemetry('feature', 'info', superAdmin ? 'eliminarEmpresa-admin-ok' : 'salirEmpresa-invitado-ok', {empresa: nombre});
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
     console.error('[eliminarEmpresa]', e);
+    _telemetry('feature', 'error', 'eliminarEmpresa-failed', {empresa: nombre, error: (e && e.message) || String(e)});
   }
 }
 
@@ -4861,12 +5013,14 @@ async function crearEmpresa(){
     document.getElementById('newcomp-script-card').style.display = 'block';
     document.getElementById('newcomp-script-card').scrollIntoView({behavior:'smooth'});
     toast('Estructura de empresa creada', 'ok');
+    _telemetry('feature', 'info', 'crearEmpresa-ok', {});
 
   } catch(e){
     progressEl.innerHTML = `✗ Error: ${e.message}`;
     btn.disabled = false;
     toast('Error: ' + e.message, 'err');
     console.error('[crearEmpresa]', e);
+    _telemetry('feature', 'error', 'crearEmpresa-failed', {error: (e && e.message) || String(e)});
   }
 }
 
@@ -5448,7 +5602,7 @@ async function closeCategoriasModal(){
     loading(true, 'Guardando', 'Guardando cambios pendientes...');
     for(const row of dirtyRows){
       const inp = row.querySelector('.cat-input-cuenta');
-      try { await autoSaveCatRow(inp); } catch(_){}
+      try { await autoSaveCatRow(inp); } catch(e){ _telemetry('error', 'warn', 'autoSaveCatRow-failed', {error: (e && e.message) || String(e)}); }
     }
     loading(false);
   }
@@ -5658,6 +5812,7 @@ async function _cleanupOrphanedUserFiles(opts){
   if(allCompanies.length === 0) return null;
 
   const stats = {listed: 0, candidatos: 0, refsTotal: 0, trashed: 0, errors: 0};
+  const __cleanT0 = Date.now();
 
   try {
     // 1. Listar TODAS las imágenes vivas del usuario. v.0195: paginado para
@@ -5736,9 +5891,26 @@ async function _cleanupOrphanedUserFiles(opts){
     }
 
     localStorage.setItem(LS_ORPHAN_CLEANUP_AT, String(Date.now()));
+    // v.0224: telemetría
+    _telemetry('metric', 'info', 'cleanupOrphanedUserFiles', {
+      duration_ms: Date.now() - __cleanT0,
+      empresas: allCompanies.length,
+      candidatos: stats.candidatos,
+      refsTotal: stats.refsTotal,
+      trashed: stats.trashed,
+      errors: stats.errors,
+      ok: true
+    });
     return stats;
   } catch(e){
-    console.warn('[cleanup orphan] Error general:', e.message);
+    const __err = (e && e.message) || String(e);
+    console.warn('[cleanup orphan] Error general:', __err);
+    _telemetry('metric', 'error', 'cleanupOrphanedUserFiles', {
+      duration_ms: Date.now() - __cleanT0,
+      empresas: allCompanies.length,
+      ok: false,
+      error: __err
+    });
     return stats;
   }
 }
@@ -5822,7 +5994,7 @@ async function _detectarEmpresasEliminadas(){
                 headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
                 body: JSON.stringify({trashed: true})
               });
-            } catch(_){}
+            } catch(e){ _telemetry('error', 'warn', 'detect-eliminadas-trash-folder-failed', {empresa: c.nombre, error: (e && e.message) || String(e)}); }
           }
           console.log(`[detect-eliminadas] "${c.nombre}" eliminada — ${(j.files || []).length} carpeta(s) trashed en Mi unidad`);
         }
@@ -5920,7 +6092,7 @@ async function _revokeSharesEmpresasEliminadas(){
           body: JSON.stringify({trashed: false})
         });
         if(rr.ok) restored++;
-      } catch(_){}
+      } catch(e){ _telemetry('error', 'warn', 'revoke-shares-restore-trashed-failed', {sheet: sheet.name, error: (e && e.message) || String(e)}); }
     }
 
     // Revocar permisos no-owner (sheet activo, sin trashed lock).
@@ -5941,10 +6113,10 @@ async function _revokeSharesEmpresasEliminadas(){
               {method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}}
             );
             if(dr.ok) permsRevoked++;
-          } catch(_){}
+          } catch(e){ _telemetry('error', 'warn', 'revoke-shares-delete-perm-failed', {sheet: sheet.name, error: (e && e.message) || String(e)}); }
         }
       }
-    } catch(_){}
+    } catch(e){ _telemetry('error', 'warn', 'revoke-shares-list-perms-failed', {sheet: sheet.name, error: (e && e.message) || String(e)}); }
 
     // Trashear el sheet al final.
     try {
@@ -5954,7 +6126,7 @@ async function _revokeSharesEmpresasEliminadas(){
         body: JSON.stringify({trashed: true})
       });
       if(dr.ok) trashedSheets++;
-    } catch(_){}
+    } catch(e){ _telemetry('error', 'warn', 'revoke-shares-trash-sheet-failed', {sheet: sheet.name, error: (e && e.message) || String(e)}); }
 
     console.log(`[revoke-empresas-eliminadas] "${sheet.name}" procesado`);
   }
@@ -5985,6 +6157,8 @@ async function _distributeMastersToUserDrive(){
   }
 
   _distributingNow = true;
+  const __distT0 = Date.now();
+  let __distOk = false, __distErr = '', __distCompanies = 0, __distMasters = 0;
   try {
     // 1. Lee REGISTRO + PROYECTOS + INGRESOS de TODAS las empresas del invitado.
     const allCompanies = getCompanies().filter(c => c.sheetId);
@@ -6359,10 +6533,22 @@ async function _distributeMastersToUserDrive(){
     }
 
     localStorage.setItem(LS_DISTRIBUTE_AT, String(Date.now()));
+    __distCompanies = allCompanies.length;
+    __distMasters = allExpectedMasterIds.size;
+    __distOk = true;
   } catch(e){
+    __distErr = (e && e.message) || String(e);
     console.warn('[distribute] error general:', e.message);
   } finally {
     _distributingNow = false;
+    // v.0224: telemetría
+    _telemetry('metric', __distOk ? 'info' : 'error', 'distributeMastersToUserDrive', {
+      duration_ms: Date.now() - __distT0,
+      empresas: __distCompanies,
+      masters_expected: __distMasters,
+      ok: __distOk,
+      error: __distErr
+    });
   }
 }
 
@@ -7109,9 +7295,11 @@ async function syncAll(){
   const btn = document.getElementById('btn-sync');
   btn.disabled = true;
   btn.textContent = 'Sincronizando...';
+  const __syncT0 = Date.now();
+  let __syncCount = 0, __syncOk = false, __syncErr = '';
   try {
     const allRaw = await dbGetAll('pending');
-    if(allRaw.length === 0){ toast('Nada que sincronizar', 'ok'); return; }
+    if(allRaw.length === 0){ toast('Nada que sincronizar', 'ok'); __syncOk = true; return; }
 
     // v.0197: filtro robusto. Pending nuevos traen e.sheetId snapshot — si
     // está y no matchea con la empresa activa, skip (queda en cola para cuando
@@ -7224,11 +7412,21 @@ async function syncAll(){
     // v.0159: tras sync exitoso, regresar al home automáticamente. El usuario
     // pidió este comportamiento — antes quedaba en pg-history viendo "0 pendientes".
     show('pg-home');
+    __syncCount = all.length;
+    __syncOk = true;
   } catch(e){
+    __syncErr = (e && e.message) || String(e);
     toast('Error: ' + e.message, 'err');
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Sincronizar con Google Sheets';
+    // v.0224: telemetría — duración + count + ok/error
+    _telemetry('metric', __syncOk ? 'info' : 'error', 'syncAll', {
+      duration_ms: Date.now() - __syncT0,
+      count: __syncCount,
+      ok: __syncOk,
+      error: __syncErr
+    });
   }
 }
 
@@ -7821,6 +8019,187 @@ function _withTimeout(promise, ms, label){
   ]);
 }
 
+// ============================================================
+// v.0224: TELEMETRÍA
+// ============================================================
+// Helper para enviar eventos al sheet TELEMETRIA_CC vía AS. Los eventos
+// quedan en una cola local y se flushean en batch (cada 5 min o al pasar
+// la app a background). Si el AS no responde, la cola se mantiene; en el
+// próximo flush se reintenta. La telemetría NUNCA debe romper la app:
+// todos los errores se tragan en silencio (mostrar un toast por un fallo
+// de telemetría sería peor que la propia falta de telemetría).
+
+const TELEMETRY_FLUSH_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+const TELEMETRY_FLUSH_THRESHOLD = 20;              // flushear al llegar a N eventos
+const TELEMETRY_QUEUE_CAP = 500;                   // máx eventos en cola local
+const TELEMETRY_BATCH_CAP = 100;                   // máx por POST al AS
+
+function _detectPlatform(){
+  try {
+    const ua = navigator.userAgent || '';
+    const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+      || (navigator.standalone === true);
+    let os = 'Unknown';
+    if(/iPhone|iPad|iPod/.test(ua)){
+      os = 'iOS';
+      const m = ua.match(/OS (\d+)[._](\d+)/);
+      if(m) os = 'iOS ' + m[1] + '.' + m[2];
+    } else if(/Android/.test(ua)){
+      const m = ua.match(/Android ([\d.]+)/);
+      os = m ? 'Android ' + m[1] : 'Android';
+    } else if(/Mac OS X/.test(ua)){ os = 'macOS'; }
+    else if(/Windows/.test(ua)){ os = 'Windows'; }
+    else if(/Linux/.test(ua)){ os = 'Linux'; }
+
+    let browser = 'Unknown';
+    if(/Edg\//.test(ua)) browser = 'Edge';
+    else if(/Chrome\//.test(ua)) browser = 'Chrome';
+    else if(/Firefox\//.test(ua)) browser = 'Firefox';
+    else if(/Safari\//.test(ua)) browser = 'Safari';
+
+    return os + ' · ' + browser + (standalone ? ' · standalone' : ' · browser');
+  } catch(e){ return 'unknown'; }
+}
+
+// Sanitiza un detail object: stringify, slice, remueve tokens si aparecen.
+function _telemetrySanitize(detail){
+  if(detail == null) return '';
+  let s;
+  try { s = typeof detail === 'string' ? detail : JSON.stringify(detail); }
+  catch(e){ s = String(detail); }
+  // Defensiva: nunca filtrar tokens si por error caen en el detail.
+  s = s.replace(/ya29\.[A-Za-z0-9_-]+/g, '<token>');
+  s = s.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '<jwt>');
+  return s.slice(0, 1000);
+}
+
+function _telemetryActiveCompanyName(){
+  try {
+    const cod = localStorage.getItem(LS.CURRENT_COMPANY) || '';
+    if(!cod) return '';
+    const list = JSON.parse(localStorage.getItem(LS.COMPANIES) || '[]');
+    const c = list.find(x => x && x.cod === cod);
+    return c ? (c.nombre || '') : '';
+  } catch(e){ return ''; }
+}
+
+function _telemetry(category, level, msg, detail){
+  try {
+    const evt = {
+      ts: new Date().toISOString(),
+      email: localStorage.getItem(LS.EMAIL) || '',
+      empresa: _telemetryActiveCompanyName(),
+      version_pwa: APP_VERSION,
+      version_as: localStorage.getItem(LS.TELEMETRY_AS_VERSION) || '',
+      platform: _detectPlatform(),
+      level: level || 'info',
+      category: category || 'info',
+      msg: String(msg == null ? '' : msg).slice(0, 500),
+      detail: _telemetrySanitize(detail)
+    };
+    let queue;
+    try { queue = JSON.parse(localStorage.getItem(LS.TELEMETRY_QUEUE) || '[]'); }
+    catch(e){ queue = []; }
+    queue.push(evt);
+    if(queue.length > TELEMETRY_QUEUE_CAP){
+      queue = queue.slice(-TELEMETRY_QUEUE_CAP);
+    }
+    localStorage.setItem(LS.TELEMETRY_QUEUE, JSON.stringify(queue));
+    if(queue.length >= TELEMETRY_FLUSH_THRESHOLD){
+      // Disparar flush sin bloquear al caller.
+      _flushTelemetry().catch(() => {});
+    }
+  } catch(e){
+    // Telemetría no debe romper. Drop.
+  }
+}
+
+let _flushingTelemetry = false;
+async function _flushTelemetry(){
+  if(_flushingTelemetry) return;
+  let queue;
+  try { queue = JSON.parse(localStorage.getItem(LS.TELEMETRY_QUEUE) || '[]'); }
+  catch(e){ return; }
+  if(!queue || queue.length === 0) return;
+
+  const token = (typeof getToken === 'function') ? getToken() : null;
+  if(!token) return; // sin sesión, no podemos llamar al AS
+
+  const scriptUrl = (typeof getActiveScriptUrl === 'function' && getActiveScriptUrl())
+    || (typeof getCentralScriptUrl === 'function' && getCentralScriptUrl())
+    || '';
+  if(!scriptUrl) return;
+
+  _flushingTelemetry = true;
+  try {
+    // Tomar hasta TELEMETRY_BATCH_CAP del frente de la cola.
+    const batch = queue.slice(0, TELEMETRY_BATCH_CAP);
+    const rest = queue.slice(batch.length);
+    const r = await fetch(scriptUrl, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({action: 'telemetry', access_token: token, events: batch})
+    });
+    if(!r.ok){
+      // Mantener cola para reintentar luego.
+      return;
+    }
+    let data = null;
+    try { data = await r.json(); } catch(e){ return; }
+    if(data && data.ok){
+      if(data.version_as){
+        localStorage.setItem(LS.TELEMETRY_AS_VERSION, data.version_as);
+      }
+      localStorage.setItem(LS.TELEMETRY_QUEUE, JSON.stringify(rest));
+    }
+  } catch(e){
+    // Drop silent. Reintento en el próximo flush.
+  } finally {
+    _flushingTelemetry = false;
+  }
+}
+
+// Flush periódico
+setInterval(() => { _flushTelemetry().catch(() => {}); }, TELEMETRY_FLUSH_INTERVAL_MS);
+
+// Flush cuando la app va a background (Safari/iOS cierra timers).
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden'){
+    _flushTelemetry().catch(() => {});
+  }
+});
+
+// Errores globales no manejados.
+window.addEventListener('error', (e) => {
+  _telemetry('error', 'error', e.message || 'window.error', {
+    filename: (e.filename || '').slice(-80),
+    lineno: e.lineno || 0,
+    colno: e.colno || 0
+  });
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const reason = e.reason;
+  const msg = (reason && (reason.message || String(reason))) || 'unhandledrejection';
+  const stack = (reason && reason.stack) || '';
+  _telemetry('error', 'error', String(msg).slice(0, 500), {stack: stack.slice(0, 800)});
+});
+
+// Helper para medir tiempos de operaciones.
+async function _telemetryTimed(category, name, fn, extraDetail){
+  const t0 = Date.now();
+  let ok = true, errMsg = '';
+  try {
+    return await fn();
+  } catch(e){
+    ok = false;
+    errMsg = (e && e.message) || String(e);
+    throw e;
+  } finally {
+    const dur = Date.now() - t0;
+    _telemetry(category, ok ? 'info' : 'error', name, Object.assign({duration_ms: dur, ok: ok, error: errMsg}, extraDetail || {}));
+  }
+}
+
 function _updateCopyLog(){
   const header = `=== LOG forceAppUpdate — ${new Date().toISOString()} ===\nApp v.${APP_VERSION}\nuserAgent: ${navigator.userAgent}\nstandalone: ${window.matchMedia('(display-mode: standalone)').matches}\nlocation.href: ${location.href}\n\n`;
   const body = (window._updateTrace || []).join('\n');
@@ -7846,6 +8225,12 @@ function _updateCopyFallback(txt){
 
 async function forceAppUpdate(){
   if(!confirm('Limpiar caché y recargar para aplicar la última versión publicada?')) return;
+
+  _telemetry('feature', 'info', 'forceAppUpdate-invoked', {});
+
+  // Flush telemetría antes de recargar (la cola sobrevive en LS, pero
+  // si podemos llegar al servidor ya, mejor sumar el evento ahora).
+  try { await _flushTelemetry(); } catch(_){}
 
   // Reset del trace y overlay visible inmediato (sync, sin await previo)
   window._updateTrace = [];
@@ -10902,7 +11287,7 @@ async function eliminarFacturaPermanente(idx){
             headers: {'Authorization': 'Bearer ' + token}
           });
           if(r1.ok || r1.status === 204) deleted = true;
-        } catch(_){}
+        } catch(e){ _telemetry('error', 'warn', 'eliminar-master-direct-delete-failed', {fileId: fid, error: (e && e.message) || String(e)}); }
         if(!deleted){
           const empresa = getCurrentCompany();
           if(empresa){
@@ -11826,11 +12211,13 @@ async function guardarInvitacion(){
     await loadMasters();
     loading(false);
     toast('Guardado. Comparte el link si es necesario.', 'ok');
+    _telemetry('feature', 'info', 'guardarInvitacion-ok', {});
   } catch(e){
     loading(false);
     err.textContent = 'Error: ' + e.message;
     err.style.display = 'block';
     console.error(e);
+    _telemetry('feature', 'error', 'guardarInvitacion-failed', {error: (e && e.message) || String(e)});
   }
 }
 
@@ -12243,10 +12630,12 @@ async function consolidarFacturas(){
     }
 
     checkConsolidarStatus();
+    _telemetry('feature', errores > 0 ? 'warn' : 'info', 'consolidarFacturas-ok', {consolidadas, omitidas, errores});
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
     console.error('[consolidar via script]', e);
+    _telemetry('feature', 'error', 'consolidarFacturas-failed', {error: (e && e.message) || String(e)});
   }
 }
 
