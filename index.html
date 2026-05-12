@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0228';
+const APP_VERSION = '0229';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1814,11 +1814,21 @@ const _PREVIEW_ENABLED = (function(){
 // Activado YA, antes de que cualquier función toque token/LS/fetch.
 if (_PREVIEW_ENABLED) {
   // 1) Bloquear fetch a APIs externas (devolver mocks 200 OK neutros).
+  // El mock cuenta los `ranges=` del query string para devolver el mismo
+  // número de `valueRanges`, evitando que el destructuring del caller
+  // (ej. loadMasters: `const [proj, sup, cat, usr, urlCell] = batch.map(...)`)
+  // termine con `undefined` y rompa el flow.
   const _realFetch = window.fetch.bind(window);
   window.fetch = function(input, init){
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     if(/googleapis\.com|script\.google\.com|drive\.google\.com|oauth2\.googleapis\.com/.test(url)){
-      const body = JSON.stringify({ok: true, values: [], valueRanges: [], files: [], permissions: [], preview_mock: true});
+      let valueRanges = [];
+      try {
+        const m = url.match(/ranges=/g);
+        const n = m ? m.length : 0;
+        if(n > 0) valueRanges = Array.from({length: n}, () => ({values: []}));
+      } catch(e){}
+      const body = JSON.stringify({ok: true, values: [], valueRanges, files: [], permissions: [], preview_mock: true});
       return Promise.resolve(new Response(body, {status: 200, headers: {'Content-Type': 'application/json'}}));
     }
     return _realFetch(input, init);
