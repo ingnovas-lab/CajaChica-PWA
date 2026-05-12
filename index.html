@@ -7,12 +7,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Caja Chica">
 <meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="./manifest.json">
 <title>Control de Caja Chica</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
@@ -1747,7 +1748,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0222';
+const APP_VERSION = '0223';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -3308,7 +3309,7 @@ async function compartirSheetConUsuario(email){
     const res = await fetch(url, {
       method: 'POST',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({action: 'compartirSheet', email: email, sheetId: getActiveSheetId()})
+      body: JSON.stringify({action: 'compartirSheet', email: email, sheetId: getActiveSheetId(), access_token: getToken()})
     });
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
@@ -3326,7 +3327,7 @@ async function revocarAccesoSheet(email){
     const res = await fetch(url, {
       method: 'POST',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({action: 'revocarSheet', email: email, sheetId: getActiveSheetId()})
+      body: JSON.stringify({action: 'revocarSheet', email: email, sheetId: getActiveSheetId(), access_token: getToken()})
     });
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
@@ -5685,8 +5686,9 @@ async function _cleanupOrphanedUserFiles(opts){
 
     // 3. Leer URLs de TODOS los sheets de empresas del usuario.
     //    REGISTRO!P (URL_FACTURA) + INGRESOS!G (URL_COMPROBANTE).
+    // v.0223: lectura paralela. Set.add es seguro en concurrencia JS single-threaded.
     const referencedIds = new Set();
-    for(const company of allCompanies){
+    await Promise.all(allCompanies.map(async (company) => {
       try {
         const ranges = ['REGISTRO!P2:P', 'INGRESOS!G2:G']
           .map(r => 'ranges=' + encodeURIComponent(r))
@@ -5695,7 +5697,7 @@ async function _cleanupOrphanedUserFiles(opts){
           `https://sheets.googleapis.com/v4/spreadsheets/${company.sheetId}/values:batchGet?${ranges}`,
           {headers: {'Authorization': 'Bearer ' + token}}
         );
-        if(!sheetRes.ok) continue;
+        if(!sheetRes.ok) return;
         const sheetData = await sheetRes.json();
         (sheetData.valueRanges || []).forEach(vr => {
           (vr.values || []).forEach(row => {
@@ -5709,7 +5711,7 @@ async function _cleanupOrphanedUserFiles(opts){
       } catch(e){
         console.warn('[cleanup orphan] error en', company.nombre, e.message);
       }
-    }
+    }));
 
     stats.refsTotal = referencedIds.size;
 
@@ -5995,7 +5997,9 @@ async function _distributeMastersToUserDrive(){
     // identificar archivos del usuario que ya NO son referenciados → huérfanos.
     const allReferencedFileIds = new Set();
 
-    for(const company of allCompanies){
+    // v.0223: lectura paralela de todas las empresas (antes era secuencial).
+    // Set.add/Map.set son seguras en concurrencia JS single-threaded.
+    await Promise.all(allCompanies.map(async (company) => {
       const m = new Map();
       const projNames = new Map();
       try {
@@ -6008,9 +6012,7 @@ async function _distributeMastersToUserDrive(){
         );
         if(!r.ok){
           console.warn(`[distribute] no pude leer "${company.nombre}": HTTP ${r.status}`);
-          expectedByCompany.set(company.sheetId, m);
-          projNamesByCompany.set(company.sheetId, projNames);
-          continue;
+          return;
         }
         const data = await r.json();
         const rows = (data.valueRanges && data.valueRanges[0] && data.valueRanges[0].values) || [];
@@ -6054,10 +6056,11 @@ async function _distributeMastersToUserDrive(){
         }
       } catch(e){
         console.warn(`[distribute] error leyendo "${company.nombre}":`, e.message);
+      } finally {
+        expectedByCompany.set(company.sheetId, m);
+        projNamesByCompany.set(company.sheetId, projNames);
       }
-      expectedByCompany.set(company.sheetId, m);
-      projNamesByCompany.set(company.sheetId, projNames);
-    }
+    }));
 
     console.log(`[distribute] ${allExpectedMasterIds.size} master(s) global en ${allCompanies.length} empresa(s)`);
 
@@ -7128,16 +7131,20 @@ async function syncAll(){
     const abonos = all.filter(e => e.tipo_registro === 'ABONO');
 
     // 1) Subir imágenes de gastos Y abonos (con comprobante) a Drive y obtener URLs
-    for(const e of gastos){
-      if(e.image_base64){
-        e.url_factura = await uploadImage(e);
+    // v.0223: paralelo con chunks de 3 para no asfixiar Drive API (rate limit ~10/s).
+    // Antes: secuencial (N×latencia). Ahora: ~3× más rápido sin riesgo de 429.
+    const _UPLOAD_CHUNK = 3;
+    const _runChunked = async (items, assignKey) => {
+      const withImg = items.filter(e => e.image_base64);
+      for(let i = 0; i < withImg.length; i += _UPLOAD_CHUNK){
+        const slice = withImg.slice(i, i + _UPLOAD_CHUNK);
+        await Promise.all(slice.map(async (e) => {
+          e[assignKey] = await uploadImage(e);
+        }));
       }
-    }
-    for(const e of abonos){
-      if(e.image_base64){
-        e.url_comprobante = await uploadImage(e);
-      }
-    }
+    };
+    await _runChunked(gastos, 'url_factura');
+    await _runChunked(abonos, 'url_comprobante');
 
     // 2) Preparar filas para REGISTRO (evita tocar W=MONTO_APROBADO que es fórmula)
     // Escribimos A:V (22 cols) + Y separado (ELIMINADO en col 25)
@@ -10736,7 +10743,8 @@ async function renameOrMoveFacturaFile(url, opts){
       fileId: fileId,
       newName: newName,
       addParents: addParents,
-      removeParents: removeParents
+      removeParents: removeParents,
+      access_token: getToken()
     })
   });
 
@@ -12042,10 +12050,11 @@ async function _callASForEmpresa(empresa, body){
 
   const _doCall = async (u) => {
     try {
+      // v.0223: incluimos access_token para que el AS valide al caller.
       const r = await fetch(u, {
         method: 'POST',
         headers: {'Content-Type': 'text/plain;charset=utf-8'},
-        body: JSON.stringify({...body, sheetId: empresa.sheetId})
+        body: JSON.stringify({...body, sheetId: empresa.sheetId, access_token: getToken()})
       });
       if(!r.ok) return {error: 'HTTP ' + r.status};
       return await r.json();
@@ -12207,7 +12216,7 @@ async function consolidarFacturas(){
     const res = await fetch(scriptUrl, {
       method: 'POST',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({action: 'consolidar', trigger: 'manual', sheetId: getActiveSheetId()})
+      body: JSON.stringify({action: 'consolidar', trigger: 'manual', sheetId: getActiveSheetId(), access_token: getToken()})
     });
 
     if(!res.ok){
