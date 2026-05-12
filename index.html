@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0232';
+const APP_VERSION = '0233';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1826,6 +1826,75 @@ if (!_PREVIEW_ENABLED && localStorage.getItem('cc_email') === 'demo@cajachica.ap
     try { indexedDB.deleteDatabase('cajachica'); } catch(e){}
     console.warn('[preview-cleanup] LS contaminado de preview detectado y limpiado. Login real requerido.');
   } catch(e){}
+}
+
+// v.0233: PURGE retroactivo de IDB contaminada por v.0225-v.0228 (versiones
+// del modo preview que escribían datos demo a la IDB real `cajachica` antes
+// del monkey-patch de aislamiento que llegó en v.0231). El safety gate
+// v.0230 solo se disparaba si cc_email === 'demo@cajachica.app', pero si
+// el LS ya se había limpiado y la IDB no, el gate nunca corría y las
+// facturas demo quedaban renderizándose en el home como pendientes reales.
+// Esta purga se ejecuta una vez (marcada por `cc_preview_idb_purged='0233'`)
+// y elimina:
+//   - DB `cajachica_preview` (residuo del aislamiento v.0231 si nunca se
+//     volvió a abrir ?preview=1)
+//   - records de `pending` con sheetId='preview_*' o usuario=demo@cajachica.app
+//   - records de `images` cuyos ids matchean el seed demo de v.0232
+// Si purga algo y refreshHome existe, lo dispara al finalizar para que el
+// usuario vea el home limpio sin tener que recargar.
+if (!_PREVIEW_ENABLED && localStorage.getItem('cc_preview_idb_purged') !== '0233') {
+  (function _purgeContaminatedIDB(){
+    try {
+      try { indexedDB.deleteDatabase('cajachica_preview'); } catch(e){}
+      const req = indexedDB.open('cajachica', 2);
+      // Mismo schema que openDB() de la app — para que si este es el
+      // primer open (usuario fresh sin contaminación) los stores existan
+      // cuando la app los necesite después.
+      req.onupgradeneeded = function(e){
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains('pending')) db.createObjectStore('pending', {keyPath: 'id'});
+        if(!db.objectStoreNames.contains('images')) db.createObjectStore('images', {keyPath: 'id'});
+      };
+      req.onsuccess = function(e){
+        const db = e.target.result;
+        const seedIds = ['R-260510-A1B2','R-260509-C3D4','R-260508-E5F6','R-260508-G7H8','R-260507-I9J0','R-260506-K1L2','I-260510-XYZ1','I-260505-XYZ2'];
+        const purgeStore = function(name, filter, cb){
+          if(!db.objectStoreNames.contains(name)){ cb(0); return; }
+          let n = 0;
+          try {
+            const tx = db.transaction(name, 'readwrite');
+            const store = tx.objectStore(name);
+            const all = store.getAll();
+            all.onsuccess = function(){
+              for(const r of all.result){
+                try { if(filter(r)){ store.delete(r.id); n++; } } catch(e){}
+              }
+            };
+            tx.oncomplete = function(){ cb(n); };
+            tx.onerror = function(){ cb(0); };
+          } catch(e){ cb(0); }
+        };
+        purgeStore('pending', r => String(r.sheetId||'').startsWith('preview_') || r.usuario === 'demo@cajachica.app', function(n1){
+          purgeStore('images', r => seedIds.indexOf(r.id) >= 0, function(n2){
+            const total = n1 + n2;
+            try { db.close(); } catch(e){}
+            try { localStorage.setItem('cc_preview_idb_purged', '0233'); } catch(e){}
+            if(total > 0){
+              console.warn('[v.0233 purge] limpiados', total, 'records demo de IDB. Refrescando home.');
+              if(typeof refreshHome === 'function'){
+                setTimeout(function(){ try { refreshHome(); } catch(e){} }, 100);
+              }
+            }
+          });
+        });
+      };
+      req.onerror = function(){
+        try { localStorage.setItem('cc_preview_idb_purged', '0233'); } catch(e){}
+      };
+    } catch(e){
+      try { localStorage.setItem('cc_preview_idb_purged', '0233'); } catch(e){}
+    }
+  })();
 }
 
 // Activado YA, antes de que cualquier función toque token/LS/fetch.
