@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0226';
+const APP_VERSION = '0227';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1889,12 +1889,18 @@ if (_PREVIEW_ENABLED) {
     {type: 'login_success', ts: _now, mode: 'opcion_d'}
   ]));
 
-  // 3) Cuando la app cargó por completo: popular IDB, mostrar banner.
-  // window.load se dispara DESPUÉS de DOMContentLoaded y garantiza que las
-  // funciones async (dbAdd etc.) ya estén definidas en el scope global.
+  // 3) Cuando la app cargó por completo: popular IDB, mostrar banner, navegar
+  // directamente al home (saltar pg-setup, que en modo preview se queda
+  // esperando un OAuth que nunca completa porque las APIs están mockeadas).
   window.addEventListener('load', function(){
     _previewShowBanner();
-    setTimeout(() => _previewPopulateIDB().catch(()=>{}), 200);
+    setTimeout(async () => {
+      try {
+        await _previewPopulateIDB();
+        if (typeof show === 'function') show('pg-home');
+        if (typeof refreshHome === 'function') { try { await refreshHome(); } catch(e){} }
+      } catch(e){}
+    }, 200);
   });
 }
 
