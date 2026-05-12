@@ -1762,7 +1762,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0224';
+const APP_VERSION = '0225';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1796,6 +1796,136 @@ const SUPER_ADMIN_EMAIL = 'ingnovas@gmail.com';
 
 // Carpeta raíz en Drive donde se organiza TODO el sistema multi-empresa
 const ROOT_MASTER = 'Caja Chica Master';
+
+// ============================================================
+// v.0225: MODO PREVIEW (?preview=1)
+// ============================================================
+// Carga la app sin OAuth, con datos demo en LS + IDB. Permite que Claude
+// (o cualquiera que quiera ver la app) la visualice sin necesidad de una
+// sesión real. NO escribe a Sheets/Drive/AS — todas las llamadas a APIs
+// externas reciben respuestas mock. Banner amarillo siempre visible.
+const _PREVIEW_ENABLED = (function(){
+  try { return new URLSearchParams(window.location.search).get('preview') === '1'; }
+  catch(e){ return false; }
+})();
+
+// Activado YA, antes de que cualquier función toque token/LS/fetch.
+if (_PREVIEW_ENABLED) {
+  // 1) Bloquear fetch a APIs externas (devolver mocks 200 OK neutros).
+  const _realFetch = window.fetch.bind(window);
+  window.fetch = function(input, init){
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if(/googleapis\.com|script\.google\.com|drive\.google\.com|oauth2\.googleapis\.com/.test(url)){
+      const body = JSON.stringify({ok: true, values: [], valueRanges: [], files: [], permissions: [], preview_mock: true});
+      return Promise.resolve(new Response(body, {status: 200, headers: {'Content-Type': 'application/json'}}));
+    }
+    return _realFetch(input, init);
+  };
+
+  // 2) Popular LS con datos demo (sincrónico, antes del primer uso).
+  const _now = Date.now();
+  const _yesterday = _now - 86400000;
+  const _weekAgo = _now - 7*86400000;
+
+  localStorage.setItem('cc_token', JSON.stringify({
+    access_token: 'preview_mock_token',
+    expires_at: _now + 7*86400000
+  }));
+  localStorage.setItem('cc_email', 'demo@cajachica.app');
+  localStorage.setItem('cc_name', 'Demo User');
+  localStorage.setItem('cc_companies', JSON.stringify([
+    {
+      nombre: 'Constructora Norte SA',
+      cod: 'EMP-001',
+      sheetId: 'preview_sheet_norte',
+      scriptUrl: '',
+      adminEmail: 'demo@cajachica.app'
+    },
+    {
+      nombre: 'Inmobiliaria Sur',
+      cod: 'EMP-002',
+      sheetId: 'preview_sheet_sur',
+      scriptUrl: '',
+      adminEmail: 'demo@cajachica.app'
+    }
+  ]));
+  localStorage.setItem('cc_current_company', 'EMP-001');
+  localStorage.setItem('cc_masters', JSON.stringify({
+    projects: [
+      {cod: 'OBR-2026-001', nombre: 'Edificio Residencial Norte', fondoApertura: 50000, activo: 'SI'},
+      {cod: 'OBR-2026-002', nombre: 'Reforma Local Centro', fondoApertura: 30000, activo: 'SI'},
+      {cod: 'OBR-2026-003', nombre: 'Casa Punta Cana', fondoApertura: 20000, activo: 'NO'}
+    ],
+    categories: [
+      {cod: 'MAT', nombre: 'Materiales', cuenta: '5001'},
+      {cod: 'MAN', nombre: 'Mano de obra', cuenta: '5002'},
+      {cod: 'COM', nombre: 'Combustible', cuenta: '5003'},
+      {cod: 'EQU', nombre: 'Equipos y herramientas', cuenta: '5004'},
+      {cod: 'TRA', nombre: 'Transporte', cuenta: '5005'},
+      {cod: 'OTR', nombre: 'Otros', cuenta: '5099'}
+    ],
+    users: [
+      {email: 'demo@cajachica.app', nombre: 'Demo User', rol: 'ADMIN'},
+      {email: 'asistente@cajachica.app', nombre: 'Asistente Demo', rol: 'USER'}
+    ],
+    at: _now
+  }));
+  localStorage.setItem('cc_bal', JSON.stringify({
+    sheetId: 'preview_sheet_norte',
+    cod: 'OBR-2026-001',
+    fondoApertura: 50000,
+    totalGastos: 25500,
+    totalAbonos: 0,
+    balance: 24500,
+    at: _now
+  }));
+  localStorage.setItem('cc_last_reporte', '0042');
+  localStorage.setItem('cc_auth_history', JSON.stringify([
+    {type: 'login_success', ts: _weekAgo, mode: 'opcion_d'},
+    {type: 'refresh_ok', ts: _yesterday, mode: 'opcion_d'},
+    {type: 'login_success', ts: _now, mode: 'opcion_d'}
+  ]));
+
+  // 3) Cuando el DOM esté listo: popular IDB, mostrar banner, navegar al home.
+  document.addEventListener('DOMContentLoaded', function(){
+    _previewPopulateIDB().catch(()=>{});
+    _previewShowBanner();
+  });
+}
+
+async function _previewPopulateIDB(){
+  try {
+    if(typeof dbPut !== 'function') return;
+    const _now = Date.now();
+    // 8 pendientes (6 gastos + 2 abonos) en la empresa EMP-001 / OBR-2026-001
+    const pendings = [
+      {id: 'R-260510-A1B2', tipo_registro: 'GASTO', proyecto: 'OBR-2026-001', sheetId: 'preview_sheet_norte', fecha_registro: '2026-05-10T10:00:00.000Z', fecha_factura: '2026-05-10', suplidor: 'FERRETERÍA BRAVO', rnc: '101234567', ncf: 'B0100000001', categoria: 'MAT', tipo: 'compra', monto: 3200, aprobado: 3200, observaciones: '', no_reporte: '0042', usuario: 'demo@cajachica.app', ocr_status: 'OK', ocr_confidence: 0.95, consolidado: 'NO'},
+      {id: 'R-260509-C3D4', tipo_registro: 'GASTO', proyecto: 'OBR-2026-001', sheetId: 'preview_sheet_norte', fecha_registro: '2026-05-09T14:00:00.000Z', fecha_factura: '2026-05-09', suplidor: 'CEMEX RD', rnc: '101111111', ncf: 'B0100000123', categoria: 'MAT', tipo: 'compra', monto: 8500, aprobado: 8500, observaciones: 'Cemento gris', no_reporte: '0042', usuario: 'demo@cajachica.app', ocr_status: 'OK', ocr_confidence: 0.92, consolidado: 'NO'},
+      {id: 'R-260508-E5F6', tipo_registro: 'GASTO', proyecto: 'OBR-2026-001', sheetId: 'preview_sheet_norte', fecha_registro: '2026-05-08T09:00:00.000Z', fecha_factura: '2026-05-08', suplidor: 'SHELL', rnc: '102222222', ncf: 'B0100000045', categoria: 'COM', tipo: 'compra', monto: 2400, aprobado: 2400, observaciones: 'Diesel camión', no_reporte: '0042', usuario: 'demo@cajachica.app', ocr_status: 'OK', ocr_confidence: 0.88, consolidado: 'NO'},
+      {id: 'R-260508-G7H8', tipo_registro: 'GASTO', proyecto: 'OBR-2026-001', sheetId: 'preview_sheet_norte', fecha_registro: '2026-05-08T11:00:00.000Z', fecha_factura: '2026-05-08', suplidor: 'EPA DOMINICANA', rnc: '103333333', ncf: 'B0100000078', categoria: 'EQU', tipo: 'compra', monto: 4800, aprobado: 4800, observaciones: 'Herramientas', no_reporte: '0042', usuario: 'demo@cajachica.app', ocr_status: 'OK', ocr_confidence: 0.91, consolidado: 'NO'},
+      {id: 'R-260507-I9J0', tipo_registro: 'GASTO', proyecto: 'OBR-2026-001', sheetId: 'preview_sheet_norte', fecha_registro: '2026-05-07T15:00:00.000Z', fecha_factura: '2026-05-07', suplidor: 'TALLER MECÁNICO LÓPEZ', rnc: '104444444', ncf: 'B0100000234', categoria: 'EQU', tipo: 'servicio', monto: 3800, aprobado: 3800, observaciones: 'Reparación retroexcavadora', no_reporte: '0042', usuario: 'demo@cajachica.app', ocr_status: 'MANUAL', ocr_confidence: 0, consolidado: 'NO'},
+      {id: 'R-260506-K1L2', tipo_registro: 'GASTO', proyecto: 'OBR-2026-002', sheetId: 'preview_sheet_norte', fecha_registro: '2026-05-06T10:00:00.000Z', fecha_factura: '2026-05-06', suplidor: 'PINTURAS POPULAR', rnc: '105555555', ncf: 'B0100000312', categoria: 'MAT', tipo: 'compra', monto: 2800, aprobado: 2800, observaciones: 'Pintura blanca', no_reporte: '0041', usuario: 'demo@cajachica.app', ocr_status: 'OK', ocr_confidence: 0.94, consolidado: 'NO'},
+      {id: 'I-260510-XYZ1', tipo_registro: 'ABONO', proyecto: 'OBR-2026-001', sheetId: 'preview_sheet_norte', fecha: '2026-05-10', tipo: 'REPOSICION', monto: 30000, referencia: 'Transferencia BHD', usuario: 'demo@cajachica.app'},
+      {id: 'I-260505-XYZ2', tipo_registro: 'ABONO', proyecto: 'OBR-2026-001', sheetId: 'preview_sheet_norte', fecha: '2026-05-05', tipo: 'APERTURA', monto: 20000, referencia: 'Caja inicial', usuario: 'demo@cajachica.app'}
+    ];
+    for(const p of pendings){
+      try { await dbPut('pending', p); } catch(e){}
+    }
+  } catch(e){
+    console.warn('[PREVIEW] populate IDB falló:', e && e.message);
+  }
+}
+
+function _previewShowBanner(){
+  if(document.getElementById('preview-banner')) return;
+  const b = document.createElement('div');
+  b.id = 'preview-banner';
+  b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#451a03;border-bottom:2px solid #f59e0b;color:#fcd34d;font-family:-apple-system,Inter,sans-serif;font-size:11px;font-weight:600;text-align:center;padding:6px 10px;letter-spacing:.04em;text-transform:uppercase;pointer-events:none';
+  b.textContent = '⚠ Modo demo · datos de ejemplo · no es tu cuenta';
+  document.body.appendChild(b);
+  // Empujar el contenido hacia abajo para que el banner no tape el topbar.
+  document.body.style.paddingTop = '28px';
+}
 
 // Regex NCF/e-CF oficial DGII (abril 2026)
 const NCF_REGEX = /^((B0[1-9]|B1[1-6])\d{8}|(E3[1-4]|E4[1-7])\d{10})$/;
@@ -8084,6 +8214,8 @@ function _telemetryActiveCompanyName(){
 }
 
 function _telemetry(category, level, msg, detail){
+  // v.0225: no emitir eventos en modo preview (datos demo, no contaminar sheet real).
+  if (typeof _PREVIEW_ENABLED !== 'undefined' && _PREVIEW_ENABLED) return;
   try {
     const evt = {
       ts: new Date().toISOString(),
