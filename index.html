@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0231';
+const APP_VERSION = '0232';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1973,14 +1973,36 @@ if (_PREVIEW_ENABLED) {
     {type: 'login_success', ts: _now, mode: 'opcion_d'}
   ]));
 
-  // 3) Cuando la app cargó por completo: popular IDB, mostrar banner, navegar
-  // directamente al home (saltar pg-setup, que en modo preview se queda
-  // esperando un OAuth que nunca completa porque las APIs están mockeadas).
+  // 3) Cuando la app cargó por completo: override loadMasters para que NO
+  // pise el LS demo (el mock fetch retornaba arrays vacíos y loadMasters
+  // sobreescribía masters.projects=[]/suppliers=[]/etc., dejando el home
+  // mostrando 0 pendientes aunque IDB tuviera 8). En preview, loadMasters
+  // simplemente hidrata desde el LS y populate los dropdowns.
+  // Luego: popular IDB, banner, navegar al home, refresh.
   window.addEventListener('load', function(){
     _previewShowBanner();
+    try {
+      if (typeof loadMasters === 'function') {
+        window.loadMasters = async function() {
+          try {
+            const c = localStorage.getItem('cc_masters');
+            if (c) {
+              const parsed = JSON.parse(c);
+              Object.assign(masters, parsed);
+              masters.myRole = 'ADMIN'; // demo es admin
+              masters.userEmail = 'demo@cajachica.app';
+              masters.accessIssue = null;
+            }
+            if (typeof populateDropdowns === 'function') populateDropdowns();
+            if (typeof applyRoleUI === 'function') applyRoleUI();
+          } catch(e){ console.warn('[preview loadMasters override]', e.message); }
+        };
+      }
+    } catch(e){}
     setTimeout(async () => {
       try {
         await _previewPopulateIDB();
+        if (typeof loadMasters === 'function') { try { await loadMasters(); } catch(e){} }
         if (typeof show === 'function') show('pg-home');
         if (typeof refreshHome === 'function') { try { await refreshHome(); } catch(e){} }
       } catch(e){}
