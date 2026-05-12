@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0235';
+const APP_VERSION = '0236';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2306,6 +2306,17 @@ function setCurrentCompany(nombre){
       });
     }
   }
+
+  // v.0236: invalidar el cache del badge "Por revisar" y ocultarlo
+  // inmediatamente. Sin esto, `revisarCache` (TTL 60s) seguía mostrando el
+  // count de la empresa anterior al cambiar — produciendo un badge stale
+  // (false positive en una empresa o false negative en otra) hasta que el
+  // usuario hacía Forzar actualización. Tras esta invalidación, el siguiente
+  // `refreshBadgeRevisar` (que dispara `refreshHome`) hace fetch fresco para
+  // la nueva empresa.
+  if(typeof invalidateRevisarCache === 'function') invalidateRevisarCache();
+  const badgeRevisar = document.getElementById('badge-revisar');
+  if(badgeRevisar) badgeRevisar.style.display = 'none';
 }
 
 // Elimina una empresa de la lista (no borra datos en Drive)
