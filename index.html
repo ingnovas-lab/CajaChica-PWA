@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0227';
+const APP_VERSION = '0228';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1869,6 +1869,13 @@ if (_PREVIEW_ENABLED) {
     users: [
       {email: 'demo@cajachica.app', nombre: 'Demo User', rol: 'ADMIN'},
       {email: 'asistente@cajachica.app', nombre: 'Asistente Demo', rol: 'USER'}
+    ],
+    suppliers: [
+      {rnc: '101234567', nombre: 'FERRETERÍA BRAVO', cat: 'MAT'},
+      {rnc: '101111111', nombre: 'CEMEX RD', cat: 'MAT'},
+      {rnc: '102222222', nombre: 'SHELL', cat: 'COM'},
+      {rnc: '103333333', nombre: 'EPA DOMINICANA', cat: 'EQU'},
+      {rnc: '105555555', nombre: 'PINTURAS POPULAR', cat: 'MAT'}
     ],
     at: _now
   }));
@@ -8371,9 +8378,11 @@ async function forceAppUpdate(){
 
   _telemetry('feature', 'info', 'forceAppUpdate-invoked', {});
 
-  // Flush telemetría antes de recargar (la cola sobrevive en LS, pero
-  // si podemos llegar al servidor ya, mejor sumar el evento ahora).
-  try { await _flushTelemetry(); } catch(_){}
+  // v.0228: flush en background SIN await — la cola de telemetría persiste
+  // en LS y sobrevive al reload, así que si el flush no completa, los eventos
+  // se mandan en el próximo boot. El await bloqueaba la UI ~3-7s cuando el AS
+  // tardaba o devolvía error (caso típico: AS sin la action `telemetry`).
+  _flushTelemetry().catch(()=>{});
 
   // Reset del trace y overlay visible inmediato (sync, sin await previo)
   window._updateTrace = [];
