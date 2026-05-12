@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0233';
+const APP_VERSION = '0234';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1842,7 +1842,7 @@ if (!_PREVIEW_ENABLED && localStorage.getItem('cc_email') === 'demo@cajachica.ap
 //   - records de `images` cuyos ids matchean el seed demo de v.0232
 // Si purga algo y refreshHome existe, lo dispara al finalizar para que el
 // usuario vea el home limpio sin tener que recargar.
-if (!_PREVIEW_ENABLED && localStorage.getItem('cc_preview_idb_purged') !== '0233') {
+if (!_PREVIEW_ENABLED && localStorage.getItem('cc_preview_idb_purged') !== '0234') {
   (function _purgeContaminatedIDB(){
     try {
       try { indexedDB.deleteDatabase('cajachica_preview'); } catch(e){}
@@ -1878,7 +1878,7 @@ if (!_PREVIEW_ENABLED && localStorage.getItem('cc_preview_idb_purged') !== '0233
           purgeStore('images', r => seedIds.indexOf(r.id) >= 0, function(n2){
             const total = n1 + n2;
             try { db.close(); } catch(e){}
-            try { localStorage.setItem('cc_preview_idb_purged', '0233'); } catch(e){}
+            try { localStorage.setItem('cc_preview_idb_purged', '0234'); } catch(e){}
             if(total > 0){
               console.warn('[v.0233 purge] limpiados', total, 'records demo de IDB. Refrescando home.');
               if(typeof refreshHome === 'function'){
@@ -1889,10 +1889,10 @@ if (!_PREVIEW_ENABLED && localStorage.getItem('cc_preview_idb_purged') !== '0233
         });
       };
       req.onerror = function(){
-        try { localStorage.setItem('cc_preview_idb_purged', '0233'); } catch(e){}
+        try { localStorage.setItem('cc_preview_idb_purged', '0234'); } catch(e){}
       };
     } catch(e){
-      try { localStorage.setItem('cc_preview_idb_purged', '0233'); } catch(e){}
+      try { localStorage.setItem('cc_preview_idb_purged', '0234'); } catch(e){}
     }
   })();
 }
@@ -1942,11 +1942,48 @@ if (_PREVIEW_ENABLED) {
     });
   } catch(e){ console.warn('[preview] no pudo overridear localStorage:', e.message); }
 
+  // v.0234: monkey-patch robusto para Safari Mac.
+  // v.0231-v.0233 usaba `window.indexedDB.open = function...` que falla
+  // silenciosamente en Safari Mac (IDBFactory.open viene como non-writable
+  // en la instancia → la asignación directa NO toma efecto pero tampoco
+  // tira error en sloppy mode). Resultado: el preview seguía escribiendo
+  // a `cajachica` REAL en Safari Mac (confirmado en DevTools de Joel:
+  // 8 records demo en cajachica, cajachica_preview vacía sin store
+  // 'pending'). Fix: tratar de Object.defineProperty primero (fuerza
+  // shadowing con configurable:true), fallback a asignación directa, y
+  // como último recurso reemplazar window.indexedDB completo con un Proxy.
   try {
     const _origIDBOpen = window.indexedDB.open.bind(window.indexedDB);
-    window.indexedDB.open = function(name, version){
+    const _patchedOpen = function(name, version){
       return _origIDBOpen(name === 'cajachica' ? 'cajachica_preview' : name, version);
     };
+    let _patched = false;
+    try {
+      Object.defineProperty(window.indexedDB, 'open', {
+        value: _patchedOpen, writable: true, configurable: true
+      });
+      _patched = (window.indexedDB.open === _patchedOpen);
+    } catch(e){ _patched = false; }
+    if(!_patched){
+      try { window.indexedDB.open = _patchedOpen; _patched = (window.indexedDB.open === _patchedOpen); } catch(e){ _patched = false; }
+    }
+    if(!_patched){
+      // Último recurso: Proxy sobre toda la factory.
+      const _idbProxy = new Proxy(window.indexedDB, {
+        get(t, prop){
+          if(prop === 'open') return _patchedOpen;
+          const v = t[prop];
+          return typeof v === 'function' ? v.bind(t) : v;
+        }
+      });
+      try {
+        Object.defineProperty(window, 'indexedDB', {
+          value: _idbProxy, writable: false, configurable: true
+        });
+        _patched = (window.indexedDB.open === _patchedOpen);
+      } catch(e){ _patched = false; }
+    }
+    if(!_patched) console.warn('[preview] monkey-patch IDB.open NO tomó — preview puede contaminar cajachica real.');
   } catch(e){ console.warn('[preview] no pudo overridear indexedDB.open:', e.message); }
 
   // 1) Bloquear fetch a APIs externas (devolver mocks 200 OK neutros).
@@ -8618,13 +8655,19 @@ async function forceAppUpdate(){
 
   // 3) Cascada de reload techniques. Cada técnica corre, y si la página
   // sigue ejecutando JS pasados 1.5s, se intenta la siguiente. Usamos
-  // pathname + ?_v= en lugar de URL().toString() para evitar query strings
-  // viejos que pudieran confundir a Safari ("misma URL → no recarga").
+  // pathname + query+ ?_v= en lugar de URL().toString() para evitar caches
+  // que pudieran confundir a Safari ("misma URL → no recarga"). v.0234:
+  // PRESERVAR query string existente — antes descartábamos `?preview=1`
+  // al reconstruir solo con pathname, lo que dejaba a la app cargando en
+  // modo normal pero con IDB ya contaminada por el preview anterior
+  // (cuando el monkey-patch IDB fallaba en Safari Mac).
   let targetUrl;
   try {
-    targetUrl = location.pathname + '?_v=' + Date.now();
+    const params = new URLSearchParams(location.search || '');
+    params.set('_v', String(Date.now()));
+    targetUrl = location.pathname + '?' + params.toString();
   } catch(_){
-    targetUrl = '?_v=' + Date.now();
+    targetUrl = (location.pathname || '') + (location.search || '?') + (location.search ? '&' : '') + '_v=' + Date.now();
   }
   _updateLog(`reload: target=${targetUrl}`);
 
