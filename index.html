@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0229';
+const APP_VERSION = '0230';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1810,6 +1810,23 @@ const _PREVIEW_ENABLED = (function(){
   try { return new URLSearchParams(window.location.search).get('preview') === '1'; }
   catch(e){ return false; }
 })();
+
+// v.0230: SAFETY GATE — si la app se carga SIN `?preview=1` pero el LS
+// tiene el email demo (porque una sesión previa cargó el preview en este
+// mismo navegador), limpiar los keys contaminados ANTES de que el OAuth
+// flow lea como sesión real. Sin esto, el usuario abre la app y la app
+// asume "estás logueado como demo@cajachica.app" — confusión total.
+if (!_PREVIEW_ENABLED && localStorage.getItem('cc_email') === 'demo@cajachica.app') {
+  try {
+    ['cc_token','cc_email','cc_name','cc_companies','cc_current_company',
+     'cc_masters','cc_bal','cc_proj','cc_last_reporte','cc_auth_history',
+     'cc_folders','cc_gemini','cc_session_id','cc_pending_user_config_save',
+     'cc_reporte_tipo','cc_central_script_url',
+     'cc_telemetry_queue','cc_telemetry_as_version'].forEach(k => localStorage.removeItem(k));
+    try { indexedDB.deleteDatabase('cajachica'); } catch(e){}
+    console.warn('[preview-cleanup] LS contaminado de preview detectado y limpiado. Login real requerido.');
+  } catch(e){}
+}
 
 // Activado YA, antes de que cualquier función toque token/LS/fetch.
 if (_PREVIEW_ENABLED) {
