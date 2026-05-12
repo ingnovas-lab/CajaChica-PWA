@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0230';
+const APP_VERSION = '0231';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1830,6 +1830,56 @@ if (!_PREVIEW_ENABLED && localStorage.getItem('cc_email') === 'demo@cajachica.ap
 
 // Activado YA, antes de que cualquier función toque token/LS/fetch.
 if (_PREVIEW_ENABLED) {
+  // 0) AISLAMIENTO TOTAL — el modo preview NO debe tocar el storage real.
+  // Si lo hace, contaminar el LS del navegador y cuando el usuario cierra
+  // ?preview=1 y abre la app normal, la app cree que es Demo User.
+  // (Bug v.0225-v.0229 que pisó la sesión de Joel en Safari el 2026-05-11).
+  //
+  // Solución: redefinir window.localStorage para que apunte a un Map en
+  // memoria, y redirigir indexedDB.open('cajachica') a 'cajachica_preview'.
+  // Al cerrar la pestaña preview, todo desaparece. El LS y la DB reales
+  // quedan intactos.
+  try {
+    const _previewLS = new Map();
+    const _methods = {
+      getItem: k => _previewLS.has(k) ? _previewLS.get(k) : null,
+      setItem: (k, v) => _previewLS.set(k, String(v)),
+      removeItem: k => _previewLS.delete(k),
+      clear: () => _previewLS.clear(),
+      key: i => Array.from(_previewLS.keys())[i] || null
+    };
+    // Proxy para que Object.keys, for...in, in, etc. enumeren los items reales
+    // como hace el Storage del navegador.
+    const _previewStorage = new Proxy({}, {
+      get(t, prop) {
+        if (prop === 'length') return _previewLS.size;
+        if (_methods[prop]) return _methods[prop];
+        if (typeof prop === 'string' && _previewLS.has(prop)) return _previewLS.get(prop);
+        return undefined;
+      },
+      set(t, prop, value) { _previewLS.set(String(prop), String(value)); return true; },
+      deleteProperty(t, prop) { _previewLS.delete(String(prop)); return true; },
+      has(t, prop) { return _previewLS.has(String(prop)); },
+      ownKeys(t) { return Array.from(_previewLS.keys()); },
+      getOwnPropertyDescriptor(t, prop) {
+        if (typeof prop === 'string' && _previewLS.has(prop)) {
+          return { enumerable: true, configurable: true, value: _previewLS.get(prop), writable: true };
+        }
+        return undefined;
+      }
+    });
+    Object.defineProperty(window, 'localStorage', {
+      value: _previewStorage, writable: false, configurable: true
+    });
+  } catch(e){ console.warn('[preview] no pudo overridear localStorage:', e.message); }
+
+  try {
+    const _origIDBOpen = window.indexedDB.open.bind(window.indexedDB);
+    window.indexedDB.open = function(name, version){
+      return _origIDBOpen(name === 'cajachica' ? 'cajachica_preview' : name, version);
+    };
+  } catch(e){ console.warn('[preview] no pudo overridear indexedDB.open:', e.message); }
+
   // 1) Bloquear fetch a APIs externas (devolver mocks 200 OK neutros).
   // El mock cuenta los `ranges=` del query string para devolver el mismo
   // número de `valueRanges`, evitando que el destructuring del caller
