@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0234';
+const APP_VERSION = '0235';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1828,72 +1828,72 @@ if (!_PREVIEW_ENABLED && localStorage.getItem('cc_email') === 'demo@cajachica.ap
   } catch(e){}
 }
 
-// v.0233: PURGE retroactivo de IDB contaminada por v.0225-v.0228 (versiones
-// del modo preview que escribían datos demo a la IDB real `cajachica` antes
-// del monkey-patch de aislamiento que llegó en v.0231). El safety gate
-// v.0230 solo se disparaba si cc_email === 'demo@cajachica.app', pero si
-// el LS ya se había limpiado y la IDB no, el gate nunca corría y las
-// facturas demo quedaban renderizándose en el home como pendientes reales.
-// Esta purga se ejecuta una vez (marcada por `cc_preview_idb_purged='0233'`)
-// y elimina:
-//   - DB `cajachica_preview` (residuo del aislamiento v.0231 si nunca se
-//     volvió a abrir ?preview=1)
-//   - records de `pending` con sheetId='preview_*' o usuario=demo@cajachica.app
-//   - records de `images` cuyos ids matchean el seed demo de v.0232
-// Si purga algo y refreshHome existe, lo dispara al finalizar para que el
-// usuario vea el home limpio sin tener que recargar.
-if (!_PREVIEW_ENABLED && localStorage.getItem('cc_preview_idb_purged') !== '0234') {
+// v.0235: PURGE IDEMPOTENTE de records demo en cajachica real.
+// Reemplaza el approach de v.0233/v.0234 que usaba flag LS + transaction
+// agrupada con múltiples deletes. En Safari Mac esa transaction agrupada
+// se abortaba silenciosamente y el callback final marcaba el flag igual,
+// dejando los records sin borrar (confirmado en DevTools de Joel:
+// cc_preview_idb_purged='0234' pero cajachica_demo=8).
+//
+// Nuevo approach:
+//   - Sin flag. Corre en cada boot sin `?preview=1`. Si no hay contaminación,
+//     es no-op (1 read transaction de cajachica.pending).
+//   - Cada delete en su PROPIA transaction (secuencial, no batched). Si una
+//     falla, las otras siguen.
+//   - También borra `cajachica_preview` residual.
+//   - Si borró algo, dispara refreshHome al final.
+if (!_PREVIEW_ENABLED) {
   (function _purgeContaminatedIDB(){
+    try { indexedDB.deleteDatabase('cajachica_preview'); } catch(e){}
+    // limpiar también el flag legacy de v.0233/v.0234 (informativo, no necesario)
+    try { localStorage.removeItem('cc_preview_idb_purged'); } catch(e){}
     try {
-      try { indexedDB.deleteDatabase('cajachica_preview'); } catch(e){}
       const req = indexedDB.open('cajachica', 2);
-      // Mismo schema que openDB() de la app — para que si este es el
-      // primer open (usuario fresh sin contaminación) los stores existan
-      // cuando la app los necesite después.
       req.onupgradeneeded = function(e){
         const db = e.target.result;
         if(!db.objectStoreNames.contains('pending')) db.createObjectStore('pending', {keyPath: 'id'});
         if(!db.objectStoreNames.contains('images')) db.createObjectStore('images', {keyPath: 'id'});
       };
+      req.onerror = function(){};
       req.onsuccess = function(e){
         const db = e.target.result;
-        const seedIds = ['R-260510-A1B2','R-260509-C3D4','R-260508-E5F6','R-260508-G7H8','R-260507-I9J0','R-260506-K1L2','I-260510-XYZ1','I-260505-XYZ2'];
-        const purgeStore = function(name, filter, cb){
-          if(!db.objectStoreNames.contains(name)){ cb(0); return; }
-          let n = 0;
-          try {
-            const tx = db.transaction(name, 'readwrite');
-            const store = tx.objectStore(name);
-            const all = store.getAll();
-            all.onsuccess = function(){
-              for(const r of all.result){
-                try { if(filter(r)){ store.delete(r.id); n++; } } catch(e){}
+        if(!db.objectStoreNames.contains('pending')){ try{db.close();}catch(_){} return; }
+        try {
+          const tx = db.transaction('pending','readonly');
+          const all = tx.objectStore('pending').getAll();
+          all.onerror = function(){ try{db.close();}catch(_){} };
+          all.onsuccess = function(){
+            const toDelete = all.result.filter(r => String(r.sheetId||'').startsWith('preview_') || r.usuario === 'demo@cajachica.app');
+            if(toDelete.length === 0){ try{db.close();}catch(_){} return; }
+            // Borrar one-by-one, cada uno en su propia transaction. Esto
+            // evita el bug de Safari Mac donde una tx con múltiples deletes
+            // se aborta silenciosamente sin marcar onerror/oncomplete
+            // correctamente.
+            let done = 0, errors = 0;
+            const next = function(){
+              if(done >= toDelete.length){
+                try{db.close();}catch(_){}
+                const ok = done - errors;
+                console.warn('[v.0235 purge] borrados ' + ok + '/' + toDelete.length + ' records demo de cajachica' + (errors ? ' (' + errors + ' errores)' : ''));
+                if(ok > 0 && typeof refreshHome === 'function'){
+                  setTimeout(function(){ try { refreshHome(); } catch(_){} }, 100);
+                }
+                return;
               }
+              const r = toDelete[done];
+              try {
+                const tx2 = db.transaction('pending','readwrite');
+                tx2.objectStore('pending').delete(r.id);
+                tx2.oncomplete = function(){ done++; next(); };
+                tx2.onerror = function(){ errors++; done++; next(); };
+                tx2.onabort = function(){ errors++; done++; next(); };
+              } catch(_){ errors++; done++; next(); }
             };
-            tx.oncomplete = function(){ cb(n); };
-            tx.onerror = function(){ cb(0); };
-          } catch(e){ cb(0); }
-        };
-        purgeStore('pending', r => String(r.sheetId||'').startsWith('preview_') || r.usuario === 'demo@cajachica.app', function(n1){
-          purgeStore('images', r => seedIds.indexOf(r.id) >= 0, function(n2){
-            const total = n1 + n2;
-            try { db.close(); } catch(e){}
-            try { localStorage.setItem('cc_preview_idb_purged', '0234'); } catch(e){}
-            if(total > 0){
-              console.warn('[v.0233 purge] limpiados', total, 'records demo de IDB. Refrescando home.');
-              if(typeof refreshHome === 'function'){
-                setTimeout(function(){ try { refreshHome(); } catch(e){} }, 100);
-              }
-            }
-          });
-        });
+            next();
+          };
+        } catch(_){ try{db.close();}catch(__){} }
       };
-      req.onerror = function(){
-        try { localStorage.setItem('cc_preview_idb_purged', '0234'); } catch(e){}
-      };
-    } catch(e){
-      try { localStorage.setItem('cc_preview_idb_purged', '0234'); } catch(e){}
-    }
+    } catch(_){}
   })();
 }
 
@@ -1942,49 +1942,14 @@ if (_PREVIEW_ENABLED) {
     });
   } catch(e){ console.warn('[preview] no pudo overridear localStorage:', e.message); }
 
-  // v.0234: monkey-patch robusto para Safari Mac.
-  // v.0231-v.0233 usaba `window.indexedDB.open = function...` que falla
-  // silenciosamente en Safari Mac (IDBFactory.open viene como non-writable
-  // en la instancia → la asignación directa NO toma efecto pero tampoco
-  // tira error en sloppy mode). Resultado: el preview seguía escribiendo
-  // a `cajachica` REAL en Safari Mac (confirmado en DevTools de Joel:
-  // 8 records demo en cajachica, cajachica_preview vacía sin store
-  // 'pending'). Fix: tratar de Object.defineProperty primero (fuerza
-  // shadowing con configurable:true), fallback a asignación directa, y
-  // como último recurso reemplazar window.indexedDB completo con un Proxy.
-  try {
-    const _origIDBOpen = window.indexedDB.open.bind(window.indexedDB);
-    const _patchedOpen = function(name, version){
-      return _origIDBOpen(name === 'cajachica' ? 'cajachica_preview' : name, version);
-    };
-    let _patched = false;
-    try {
-      Object.defineProperty(window.indexedDB, 'open', {
-        value: _patchedOpen, writable: true, configurable: true
-      });
-      _patched = (window.indexedDB.open === _patchedOpen);
-    } catch(e){ _patched = false; }
-    if(!_patched){
-      try { window.indexedDB.open = _patchedOpen; _patched = (window.indexedDB.open === _patchedOpen); } catch(e){ _patched = false; }
-    }
-    if(!_patched){
-      // Último recurso: Proxy sobre toda la factory.
-      const _idbProxy = new Proxy(window.indexedDB, {
-        get(t, prop){
-          if(prop === 'open') return _patchedOpen;
-          const v = t[prop];
-          return typeof v === 'function' ? v.bind(t) : v;
-        }
-      });
-      try {
-        Object.defineProperty(window, 'indexedDB', {
-          value: _idbProxy, writable: false, configurable: true
-        });
-        _patched = (window.indexedDB.open === _patchedOpen);
-      } catch(e){ _patched = false; }
-    }
-    if(!_patched) console.warn('[preview] monkey-patch IDB.open NO tomó — preview puede contaminar cajachica real.');
-  } catch(e){ console.warn('[preview] no pudo overridear indexedDB.open:', e.message); }
+  // v.0235: el monkey-patch de IDB.open de v.0231-v.0234 fallaba
+  // silenciosamente en Safari Mac (IDBFactory.open viene non-writable, ni
+  // la asignación directa ni Object.defineProperty toman efecto consistente,
+  // y al replacement de window.indexedDB completo el browser puede
+  // ignorarlo en algunos paths internos). Approach v.0235: el aislamiento
+  // se hace dentro de la función `openDB()` de la app — chequea
+  // _PREVIEW_ENABLED y abre `cajachica_preview` en lugar de `cajachica`.
+  // No depende de monkey-patch. Robusto en todos los browsers.
 
   // 1) Bloquear fetch a APIs externas (devolver mocks 200 OK neutros).
   // El mock cuenta los `ranges=` del query string para devolver el mismo
@@ -2491,7 +2456,11 @@ function loading(on, title, msg){
 let idb = null;
 function openDB(){
   return new Promise((res, rej) => {
-    const req = indexedDB.open('cajachica', 2);
+    // v.0235: si estamos en modo preview, abrir `cajachica_preview` (DB
+    // namespace separada). Aislamiento sin depender de monkey-patch de
+    // indexedDB.open que fallaba en Safari Mac.
+    const dbName = (typeof _PREVIEW_ENABLED !== 'undefined' && _PREVIEW_ENABLED) ? 'cajachica_preview' : 'cajachica';
+    const req = indexedDB.open(dbName, 2);
     req.onupgradeneeded = e => {
       const db = e.target.result;
       if(!db.objectStoreNames.contains('pending')) db.createObjectStore('pending', {keyPath: 'id'});
