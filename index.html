@@ -30,9 +30,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .topbar{display:flex;align-items:center;gap:10px;padding:16px 20px 12px;border-bottom:1px solid var(--border)}
 .topbar-title{font-size:24px;font-weight:600;flex:1;min-width:0;line-height:1.2}
 .topbar-sub{font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ibtn{width:36px;height:36px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;color:var(--text);user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.ibtn{width:44px;height:44px;border-radius:12px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;color:var(--text);user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .ibtn:active{opacity:.6}
 .ibtn *{pointer-events:none}
+.ibtn>svg{width:18px;height:18px}
 
 .body{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
 
@@ -80,8 +81,9 @@ input[type=date]{color-scheme:dark}
 .balance-sub{font-size:11px;color:#60a5fa;opacity:.85;margin-top:2px}
 .balance-amt{font-family:var(--mono);font-size:28px;font-weight:600;letter-spacing:-.02em;margin-top:8px;position:relative;z-index:1}
 .balance-amt.pos{color:#86efac}.balance-amt.neg{color:#fca5a5}
-.refresh{width:32px;height:32px;border-radius:8px;background:rgba(59,130,246,.25);border:1px solid rgba(147,197,253,.3);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#93c5fd;flex-shrink:0}
+.refresh{width:40px;height:40px;border-radius:10px;background:rgba(59,130,246,.25);border:1px solid rgba(147,197,253,.3);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#93c5fd;flex-shrink:0}
 .refresh:active{opacity:.6}
+.refresh>svg{width:18px;height:18px}
 .refresh.spin svg{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -105,7 +107,7 @@ input[type=date]{color-scheme:dark}
 .entry{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
 .entry:last-child{border-bottom:none}
 .entry-icon{width:36px;height:36px;border-radius:9px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px}
-.entry-thumb{width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer}
+.entry-thumb{width:44px;height:44px;border-radius:12px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer}
 .hcard-thumb{width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3);cursor:pointer}
 .entry-info{flex:1;min-width:0}
 .entry-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1762,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0225';
+const APP_VERSION = '0226';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -1880,22 +1882,25 @@ if (_PREVIEW_ENABLED) {
     at: _now
   }));
   localStorage.setItem('cc_last_reporte', '0042');
+  localStorage.setItem('cc_proj', JSON.stringify({cod: 'OBR-2026-001', nombre: 'Edificio Residencial Norte', fondoApertura: 50000, activo: 'SI'}));
   localStorage.setItem('cc_auth_history', JSON.stringify([
     {type: 'login_success', ts: _weekAgo, mode: 'opcion_d'},
     {type: 'refresh_ok', ts: _yesterday, mode: 'opcion_d'},
     {type: 'login_success', ts: _now, mode: 'opcion_d'}
   ]));
 
-  // 3) Cuando el DOM esté listo: popular IDB, mostrar banner, navegar al home.
-  document.addEventListener('DOMContentLoaded', function(){
-    _previewPopulateIDB().catch(()=>{});
+  // 3) Cuando la app cargó por completo: popular IDB, mostrar banner.
+  // window.load se dispara DESPUÉS de DOMContentLoaded y garantiza que las
+  // funciones async (dbAdd etc.) ya estén definidas en el scope global.
+  window.addEventListener('load', function(){
     _previewShowBanner();
+    setTimeout(() => _previewPopulateIDB().catch(()=>{}), 200);
   });
 }
 
 async function _previewPopulateIDB(){
   try {
-    if(typeof dbPut !== 'function') return;
+    if(typeof dbAdd !== 'function') return;
     const _now = Date.now();
     // 8 pendientes (6 gastos + 2 abonos) en la empresa EMP-001 / OBR-2026-001
     const pendings = [
@@ -1909,7 +1914,7 @@ async function _previewPopulateIDB(){
       {id: 'I-260505-XYZ2', tipo_registro: 'ABONO', proyecto: 'OBR-2026-001', sheetId: 'preview_sheet_norte', fecha: '2026-05-05', tipo: 'APERTURA', monto: 20000, referencia: 'Caja inicial', usuario: 'demo@cajachica.app'}
     ];
     for(const p of pendings){
-      try { await dbPut('pending', p); } catch(e){}
+      try { await dbAdd('pending', p); } catch(e){}
     }
   } catch(e){
     console.warn('[PREVIEW] populate IDB falló:', e && e.message);
