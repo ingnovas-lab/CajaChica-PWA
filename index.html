@@ -24,6 +24,14 @@
   --font:'Inter',sans-serif;--mono:'JetBrains Mono',monospace;
 }
 body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100dvh;max-width:440px;margin:0 auto;position:relative}
+/* v.0238: responsive A+C — en pantallas desktop (≥768px) el body crece a 600px,
+   gana frame con sombra y border-radius, y el html muestra un radial gradient
+   detrás. iPhone (≤430px) no entra al media query — UX mobile intacta. */
+@media (min-width:768px){
+  html{background:radial-gradient(ellipse at top, #1e293b 0%, #0a0e1a 60%, #020617 100%)}
+  body{max-width:min(92vw,600px);margin-top:32px;margin-bottom:32px;border-radius:28px;box-shadow:0 24px 70px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.05);overflow:hidden;min-height:calc(100dvh - 64px)}
+  .page{min-height:calc(100dvh - 64px)}
+}
 .page{display:none;flex-direction:column;min-height:100dvh;padding-bottom:env(safe-area-inset-bottom,16px)}
 .page.on{display:flex}
 
@@ -1764,7 +1772,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0237';
+const APP_VERSION = '0238';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
