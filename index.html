@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0236';
+const APP_VERSION = '0237';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -11697,9 +11697,14 @@ async function initBalance(){
 
   loading(true, 'Cargando', 'Leyendo movimientos...');
   try {
-    // Sincronizar el card de balance con el cache local del home
+    // Sincronizar el card de balance con el cache local del home.
+    // v.0237: usar `_balKey(proj)` (sheetId::cod) en lugar de `proj.cod`
+    // solo. v.0197 introdujo _balKey en los writers (refreshHome,
+    // refreshBalance) pero olvidó actualizar este reader → cached siempre
+    // resultaba undefined → balance mostraba "RD$ --" aunque el home lo
+    // tuviera correcto. Bug existía desde v.0197 hasta v.0236.
     const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
-    const cached = cache[proj.cod];
+    const cached = cache[_balKey(proj)];
     const amtEl = document.getElementById('bal-page-amt');
     const statusEl = document.getElementById('bal-page-status');
     if(cached){
@@ -13380,12 +13385,20 @@ document.addEventListener('visibilitychange', async () => {
     if(!getToken()){
       await silentRefresh();
     }
-    // Después del refresh (o si ya había token), refrescar balance si toca
+    // Después del refresh (o si ya había token), refrescar balance si toca.
+    // v.0237: usar _balKey(proj) (sheetId::cod). Antes leía `cache[proj.cod]`
+    // que nunca matcheaba la key escrita por refreshHome/refreshBalance →
+    // se disparaba refreshBalance(true) en CADA visibilitychange sin importar
+    // si el cache estaba fresco. Benigno (más calls a Sheets API que necesario)
+    // pero contribuía al 429 reportado.
     if(getToken()){
       const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
       const proj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
-      if(proj && (!cache[proj.cod] || Date.now() - cache[proj.cod].at > 600000)){
-        refreshBalance(true);
+      if(proj){
+        const bk = _balKey(proj);
+        if(!cache[bk] || Date.now() - cache[bk].at > 600000){
+          refreshBalance(true);
+        }
       }
     }
   }
