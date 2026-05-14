@@ -1764,7 +1764,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0239';
+const APP_VERSION = '0240';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -2337,6 +2337,19 @@ function getActiveSheetId(){
 
 // v.0197: cache de balance keyed por (sheetId, cod) para no confundir empresas
 // con mismo cod (ej. OBR-0001 en A y B).
+//
+// INVARIANTE: TODO acceso a LS.BALCACHE (read / write / delete) debe usar
+// _balKey(p), nunca p.cod solo. Si las keys de writers y readers/deleters se
+// desalinean, el cache deja de invalidarse y muestra balances stale.
+// Callsites (v.0240) — mantener sincronizado al agregar nuevos:
+//   - refreshHome           (read)    L.~7045-7052
+//   - refreshBalance        (write)   L.~7110
+//   - selectProject         (delete)  L.~7197
+//   - syncAll               (delete)  L.~7728  (fix v.0240)
+//   - initBalance           (read)    L.~11707 (fix v.0237)
+//   - visibilitychange      (read)    L.~13398 (fix v.0237)
+// Historial: v.0197 introdujo _balKey pero olvidó 3 readers/deleters; v.0237
+// arregló 2, v.0240 arregló el survivor en syncAll.
 function _balKey(p){
   if(!p || !p.cod) return '';
   return (getActiveSheetId() || '_') + '::' + p.cod;
@@ -7722,10 +7735,15 @@ async function syncAll(){
     // Invalidar el caché del balance del proyecto activo. Sin esto, refreshHome
     // muestra el caché viejo + netoPendiente=0 = balance SIN la factura recién
     // sincronizada, dando la sensación de que no descontó.
+    // v.0240: usar _balKey(currentProj) (sheetId::cod). Antes borraba con
+    // currentProj.cod solo, que nunca matcheaba la key escrita por los writers
+    // (refreshBalance usa _balKey desde v.0197) — el cache stale persistía
+    // hasta que el setTimeout(refreshBalance, 2s) de más abajo lo sobreescribía.
+    // Último survivor del bug heredado v.0197.
     const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
     if(currentProj){
       const balCache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
-      delete balCache[currentProj.cod];
+      delete balCache[_balKey(currentProj)];
       localStorage.setItem(LS.BALCACHE, JSON.stringify(balCache));
     }
 
