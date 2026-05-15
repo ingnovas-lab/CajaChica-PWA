@@ -171,6 +171,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
      sobre fondo blanco en print (sin contraste) y no aporta al PDF impreso.
      Ocultar explícitamente — no usa clase .alert. */
   #pdf-fotos-banner { display:none !important }
+  /* v.0244: listado preview de facturas (#rep-preview-lista, agregado en v.0242)
+     no se ocultaba en print → sus cards salían encima del título del reporte
+     generado. Único hunk rescatado de v.0243 (los toggles JS destapaban un
+     TIMEOUT de html2canvas en Safari iOS 18.7 — ver CHANGELOG v.0244). */
+  #rep-preview-lista { display:none !important }
   .page { display:none !important }
   .page.on { display:block !important; min-height:auto !important; padding:0 !important }
   .body { padding:0 !important }
@@ -1789,7 +1794,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0242';
+const APP_VERSION = '0244';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
