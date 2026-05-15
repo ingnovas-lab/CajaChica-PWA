@@ -159,9 +159,14 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 /* v.0241: size letter (US, default solicitado) en lugar de A4. */
 /* v.0242: orientation landscape — sin esto la tabla "Detalle de facturas"
    reparte una sola fila en 2 líneas con suplidores o NCFs largos, se ve mal. */
+/* v.0246: usar dimensiones explícitas (11in × 8.5in) en lugar del shorthand
+   `letter landscape`. Safari iOS PWA aborta silenciosamente window.print()
+   con el shorthand `<page-size> <orientation>` — divergencia con Safari Mac
+   confirmada por el usuario (en Mac funciona, en iPhone no hace nada). La
+   forma `<length>{2}` es CSS Paged Media estándar y respetada por ambos. */
 @page {
   margin: 1.2cm 1.2cm 1.5cm 1.2cm;
-  size: letter landscape;
+  size: 11in 8.5in;
 }
 @media print {
   body{background:#fff !important;color:#111 !important;max-width:none !important}
@@ -1794,7 +1799,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0245';
+const APP_VERSION = '0246';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
