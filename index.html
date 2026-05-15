@@ -171,6 +171,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
      sobre fondo blanco en print (sin contraste) y no aporta al PDF impreso.
      Ocultar explícitamente — no usa clase .alert. */
   #pdf-fotos-banner { display:none !important }
+  /* v.0243: listado preview de facturas (#rep-preview-lista, agregado en v.0242)
+     no se ocultaba en print → sus cards salían encima del título del reporte
+     generado. Ocultar explícitamente. */
+  #rep-preview-lista { display:none !important }
   .page { display:none !important }
   .page.on { display:block !important; min-height:auto !important; padding:0 !important }
   .body { padding:0 !important }
@@ -1789,7 +1793,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0242';
+const APP_VERSION = '0243';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -8850,6 +8854,12 @@ async function previewReporteFacturas(){
   const cntEl = document.getElementById('rep-stat-count');
   const totEl = document.getElementById('rep-stat-total');
 
+  // v.0243: si había un reporte generado en pantalla, ocultarlo — los filtros
+  // cambiaron y el reporte mostrado ya no corresponde. Restaurar el preview.
+  const repRes = document.getElementById('rep-resultado');
+  if(repRes && repRes.style.display !== 'none') repRes.style.display = 'none';
+  box.style.display = '';
+
   // Cache de 60s para no fetchear REGISTRO en cada cambio menor de fechas.
   // Si el cache es viejo o no existe, fetchear ahora.
   let regH, rows;
@@ -9048,6 +9058,11 @@ async function generarReporte(){
       fechaGeneracion: new Date().toLocaleString('es-DO')
     });
     document.getElementById('rep-resultado').style.display = 'block';
+    // v.0243: al mostrar el reporte generado, ocultar el listado preview de
+    // facturas (es la misma data, duplicar obliga al usuario a scrolear mucho
+    // para subir/bajar). El preview se restaura al cambiar cualquier filtro
+    // (ver previewReporteFacturas).
+    document.getElementById('rep-preview-lista').style.display = 'none';
     loading(false);
 
     // Scroll al resultado
