@@ -1794,7 +1794,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0244';
+const APP_VERSION = '0245';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7324,11 +7324,15 @@ async function runOCR(){
 }
 
 // Cache de NCFs existentes en el Sheet (se llena bajo demanda)
-let ncfCache = {list: null, at: 0};
+// v.0245: agregar sheetId al cache (mismo patrón que _repPreviewCache y _balKey).
+// Sin esto, al cambiar empresa los NCFs cacheados eran de la empresa anterior →
+// posible falso positivo/negativo en validación de duplicados durante 60s.
+let ncfCache = {list: null, at: 0, sheetId: null};
 
 async function getExistingNCFs(){
   // Cache de 60 segundos para evitar muchas llamadas durante la edición
-  if(ncfCache.list && (Date.now() - ncfCache.at) < 60000) return ncfCache.list;
+  const activeSid = getActiveSheetId();
+  if(ncfCache.list && ncfCache.sheetId === activeSid && (Date.now() - ncfCache.at) < 60000) return ncfCache.list;
   try {
     const raw = await sheetsGet('REGISTRO!A1:Z');
     if(!raw || raw.length < 2) return [];
@@ -7338,7 +7342,7 @@ async function getExistingNCFs(){
     const ncfs = raw.slice(1)
       .filter(r => r[H.NCF] && (H.ELIMINADO === undefined || r[H.ELIMINADO] !== 'SI'))
       .map(r => (r[H.NCF] || '').toUpperCase().trim());
-    ncfCache = {list: ncfs, at: Date.now()};
+    ncfCache = {list: ncfs, at: Date.now(), sheetId: activeSid};
     return ncfs;
   } catch(e){ return []; }
 }
@@ -8839,7 +8843,11 @@ function debounceRepNumero(){
 // si el usuario solo cambia el rango de fechas/numero sin tocar Obra (la mayoría
 // del tiempo). Invalidado al entrar a la pantalla (initReportes llama directo
 // a previewReporteFacturas que repuebla el cache).
-let _repPreviewCache = {at: 0, raw: null, regH: null};
+// v.0245: agregar sheetId al cache. Antes era global sin scope cross-empresa →
+// al cambiar de empresa, el cache de A se reusaba para los filtros de B durante
+// 60s, mostrando "0 facturas" o filas de A. Síntoma observado: "después del
+// minuto carga las facturas". Mismo patrón del bug _balKey v.0197.
+let _repPreviewCache = {at: 0, raw: null, regH: null, sheetId: null};
 
 // v.0242: refleja en pantalla las facturas que ENTRARÁN al PDF con los filtros
 // actuales. Reusa el mismo filtro que generarReporte (APROBADO=SI + no eliminadas
@@ -8856,9 +8864,12 @@ async function previewReporteFacturas(){
   const totEl = document.getElementById('rep-stat-total');
 
   // Cache de 60s para no fetchear REGISTRO en cada cambio menor de fechas.
-  // Si el cache es viejo o no existe, fetchear ahora.
+  // v.0245: validar contra sheetId activo — si la empresa cambió, el cache
+  // anterior es de otro Sheet y no aplica. Sin esto el preview mostraba 0 facturas
+  // (o las de la empresa previa) durante 60s tras cambiar empresa.
+  const activeSid = getActiveSheetId();
   let regH, rows;
-  if(_repPreviewCache.raw && (Date.now() - _repPreviewCache.at) < 60000){
+  if(_repPreviewCache.raw && _repPreviewCache.sheetId === activeSid && (Date.now() - _repPreviewCache.at) < 60000){
     regH = _repPreviewCache.regH;
     rows = _repPreviewCache.raw;
   } else {
@@ -8874,7 +8885,7 @@ async function previewReporteFacturas(){
       regH = {};
       (raw[0] || []).forEach((h, i) => regH[h] = i);
       rows = raw.slice(1);
-      _repPreviewCache = {at: Date.now(), raw: rows, regH};
+      _repPreviewCache = {at: Date.now(), raw: rows, regH, sheetId: activeSid};
     } catch(e){
       box.innerHTML = '<div class="alert alert-red" style="margin-top:14px">Error: '+_escHTML(e.message)+'</div>';
       cntEl.textContent = '0';
