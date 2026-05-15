@@ -159,6 +159,14 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 /* v.0241: size letter (US, default solicitado) en lugar de A4. */
 /* v.0242: orientation landscape — sin esto la tabla "Detalle de facturas"
    reparte una sola fila en 2 líneas con suplidores o NCFs largos, se ve mal. */
+/* v.0247: revertido a shorthand `letter landscape` tras bisect verificado.
+   v.0246 intentó usar `size: 11in 8.5in` (dimensiones explícitas) creyendo
+   que el shorthand rompía window.print() en iPhone PWA. La realidad
+   verificada por bisect es la OPUESTA: el shorthand `letter landscape`
+   FUNCIONA en iPhone PWA (v.0242-v.0245 lo confirman), y la forma
+   `<length>{2}` `11in 8.5in` ES la que aborta silenciosamente window.print()
+   en iPhone PWA. La hipótesis especulativa fue invalidada por datos reales —
+   NO cambiar este shorthand sin bisect en iPhone PWA primero. */
 @page {
   margin: 1.2cm 1.2cm 1.5cm 1.2cm;
   size: letter landscape;
@@ -1794,7 +1802,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0245';
+const APP_VERSION = '0247';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
