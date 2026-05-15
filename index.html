@@ -156,14 +156,19 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 
 /* ============ IMPRESIÓN ============ */
 /* Al imprimir, ocultamos TODO menos el reporte y forzamos colores claros */
+/* v.0241: size letter (US, default solicitado) en lugar de A4. */
 @page {
   margin: 1.2cm 1.2cm 1.5cm 1.2cm;
-  size: A4;
+  size: letter;
 }
 @media print {
   body{background:#fff !important;color:#111 !important;max-width:none !important}
   .topbar, nav, #toast, .modal-bg, #loader, .alert, button, .btn,
   #rep-filtros, #home-recent, .ibtn { display:none !important }
+  /* v.0241: banner verde "✓ PDF de soporte listo" tiene texto verde claro
+     sobre fondo blanco en print (sin contraste) y no aporta al PDF impreso.
+     Ocultar explícitamente — no usa clase .alert. */
+  #pdf-fotos-banner { display:none !important }
   .page { display:none !important }
   .page.on { display:block !important; min-height:auto !important; padding:0 !important }
   .body { padding:0 !important }
@@ -174,6 +179,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   thead { display:table-header-group }
   table td, table th { color:#111 !important; padding:6px 8px !important; border-bottom:1px solid #ddd !important }
   table th { background:#f5f5f5 !important; font-size:10px !important; text-transform:uppercase }
+  /* v.0241: la tabla "Detalle de facturas" en pg-reportes usa white-space:nowrap
+     + wrapper overflow-x:auto para scroll horizontal en pantalla. En print,
+     overflow-x:auto RECORTA en lugar de scrollear → columna Monto cortada
+     en el PDF impreso. Forzar wrap natural + overflow visible. */
+  #reporte-printable, #reporte-printable * { overflow:visible !important }
+  #reporte-printable table, #reporte-printable td, #reporte-printable th { white-space:normal !important; word-break:break-word !important }
   .stats { display:flex !important; gap:10px !important; margin-bottom:12px !important }
   /* STATS centrados en impresión */
   .stat { flex:1 !important; background:#fff !important; border:1px solid #cbd5e1 !important; color:#111 !important; padding:12px 10px !important; border-radius:6px !important; text-align:center !important }
@@ -1764,7 +1775,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0240';
+const APP_VERSION = '0241';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -9247,22 +9258,83 @@ function _renderPDFProjDivider(proj, pIdx, totProjs, grandTotal, pageNum, totalP
   return '<div class="page proj-divider"><div class="proj-band" style="background:'+accent+'"></div><div class="proj-divider-header"><div class="proj-eyebrow" style="color:'+accent+'">'+eyebrow+'</div><h1 style="color:'+accent+'">'+_escHTML(proj.nombre)+'</h1><div class="sub">'+_escHTML(sub)+'</div></div><div class="proj-body"><div class="proj-kpis"><div class="proj-kpi"><div class="lbl">Facturas del proyecto</div><div class="val">'+proj.facturas.length+'</div></div><div class="proj-kpi amber"><div class="lbl">Monto del proyecto</div><div class="val">RD$ '+_fmtMoney(proj.total)+'</div></div><div class="proj-kpi"><div class="lbl">Promedio / Factura</div><div class="val">RD$ '+_fmtMoney(prom)+'</div></div></div><div class="proj-note">Representa el <strong>'+pctT.toFixed(1)+'%</strong> del monto consolidado del reporte.</div><div class="proj-cat-section"><div class="proj-mini-chart"><h4>Categorías dentro del proyecto</h4>'+catTable+'</div><div class="proj-mini-chart"><h4>Top suplidores del proyecto</h4>'+supTable+'</div></div></div><div class="page-footer"><span>'+_escHTML(cliente)+' · '+_escHTML(proj.nombre)+'</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
 }
 
+// v.0241: máximo de filas por página de "Detalle por Categoría". Alto efectivo
+// dentro de .page (11in) tras header (~75px) + footer (~56px) + padding pg-body
+// vertical (~44px) = ~880px. Cada fila tbody ~30px (padding 7+7 + line-height ~16).
+// 26 filas × 30 = 780px + thead 30px = 810px. Margen de seguridad ~70px contra
+// wrapping ocasional de suplidores/NCF largos.
+const _DETAIL_ROWS_PER_PAGE = 26;
+
+// v.0241: cuántas pages necesita la tabla "Detalle por Categoría" de un proyecto.
+// Antes _renderPDFProjTable rendía 1 sola page por proyecto y el contenido
+// excedente quedaba oculto por overflow:hidden del .page → últimas filas
+// "se montaban" sobre el page-footer (absolute). Esta función + el refactor
+// de _renderPDFProjTable lo parten en N páginas.
+function _countDetailPages(proj){
+  let rows = 0;
+  Object.values(proj.byCat).forEach(cat => {
+    rows += 1;                       // cat-header
+    rows += cat.facturas.length;     // facturas
+    rows += 1;                       // subtotal
+  });
+  rows += 1;                          // proj-total (fila TOTAL)
+  // Replicar la lógica de salto-anticipado del renderer para no infrasestimar:
+  // si una página queda con <3 espacios y el próximo es cat-header, rompe antes.
+  // Estimación conservadora: usar el mismo divisor; aproximación suficiente para
+  // el cálculo de totalPages del footer Pág. X de Y.
+  return Math.max(1, Math.ceil(rows / _DETAIL_ROWS_PER_PAGE));
+}
+
 function _renderPDFProjTable(proj, isMulti, prevIdx, pageNum, totalPages, cliente){
   cliente=cliente||'Empresa';
   const titulo=isMulti?'Detalle por Categoría · '+_escHTML(proj.nombre):'Detalle por Categoría';
   const cats=Object.values(proj.byCat).sort((a,b)=>b.total-a.total);
-  let idx=prevIdx, body='';
+
+  // v.0241: construir lista de filas tipadas en lugar de un único string.
+  // Esto permite paginar el body sin perder el orden cat-header → facturas
+  // → subtotal y evitar cat-header huérfano al final de página.
+  let idx=prevIdx;
+  const allRows=[];
   cats.forEach(cat=>{
-    body+='<tr class="cat-header"><td colspan="6">▸ '+_escHTML(cat.nombre.toUpperCase())+' · '+cat.facturas.length+' factura(s)</td></tr>';
+    allRows.push({type:'cat-header', html:'<tr class="cat-header"><td colspan="6">▸ '+_escHTML(cat.nombre.toUpperCase())+' · '+cat.facturas.length+' factura(s)</td></tr>'});
     cat.facturas.forEach(f=>{
       idx++;
-      body+='<tr><td>'+idx+'</td><td>'+_escHTML(f.fecha)+'</td><td>'+_escHTML(f.suplidor)+'</td><td>'+_escHTML(f.rnc||'—')+'</td><td>'+_escHTML(f.ncf||'—')+'</td><td class="num">'+_fmtMoney(f.monto)+'</td></tr>';
+      allRows.push({type:'factura', html:'<tr><td>'+idx+'</td><td>'+_escHTML(f.fecha)+'</td><td>'+_escHTML(f.suplidor)+'</td><td>'+_escHTML(f.rnc||'—')+'</td><td>'+_escHTML(f.ncf||'—')+'</td><td class="num">'+_fmtMoney(f.monto)+'</td></tr>'});
     });
-    body+='<tr class="subtotal"><td colspan="5">Subtotal '+_escHTML(cat.nombre)+'</td><td class="num">'+_fmtMoney(cat.total)+'</td></tr>';
+    allRows.push({type:'subtotal', html:'<tr class="subtotal"><td colspan="5">Subtotal '+_escHTML(cat.nombre)+'</td><td class="num">'+_fmtMoney(cat.total)+'</td></tr>'});
   });
   const totLbl=isMulti?'TOTAL '+_escHTML(proj.nombre.toUpperCase()):'TOTAL GENERAL';
-  body+='<tr class="proj-total"><td colspan="5">'+totLbl+'</td><td class="num">RD$ '+_fmtMoney(proj.total)+'</td></tr>';
-  return '<div class="page"><div class="pg-header"><h2>'+titulo+'</h2><div class="crumb">'+proj.facturas.length+' facturas · RD$ '+_fmtMoney(proj.total)+'</div></div><div class="pg-body"><table class="detail"><thead><tr><th style="width:30px">#</th><th style="width:75px">Fecha</th><th>Suplidor</th><th style="width:90px">RNC</th><th style="width:110px">NCF</th><th style="width:90px;text-align:right">Monto (RD$)</th></tr></thead><tbody>'+body+'</tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+(isMulti?' · '+_escHTML(proj.nombre):'')+' · Detalle por categoría</span><span>Pág. '+pageNum+' de '+totalPages+'</span></div></div>';
+  allRows.push({type:'proj-total', html:'<tr class="proj-total"><td colspan="5">'+totLbl+'</td><td class="num">RD$ '+_fmtMoney(proj.total)+'</td></tr>'});
+
+  // Paginar — split en chunks de _DETAIL_ROWS_PER_PAGE, con guard anti-huérfano:
+  // si el siguiente row es cat-header y a la página actual ya le queda <3 huecos,
+  // rompe antes para que el cat-header arranque la próxima página con sus filas.
+  const chunks=[];
+  let current=[];
+  for(let i=0; i<allRows.length; i++){
+    const row=allRows[i];
+    const remaining=_DETAIL_ROWS_PER_PAGE-current.length;
+    if(row.type==='cat-header' && current.length>0 && remaining<3){
+      chunks.push(current);
+      current=[];
+    }
+    current.push(row);
+    if(current.length>=_DETAIL_ROWS_PER_PAGE){
+      chunks.push(current);
+      current=[];
+    }
+  }
+  if(current.length>0) chunks.push(current);
+
+  const thead='<thead><tr><th style="width:30px">#</th><th style="width:75px">Fecha</th><th>Suplidor</th><th style="width:90px">RNC</th><th style="width:110px">NCF</th><th style="width:90px;text-align:right">Monto (RD$)</th></tr></thead>';
+  return chunks.map((chunk, i) => {
+    const tituloLocal = i===0 ? titulo : titulo+' (cont.)';
+    const crumb = i===0
+      ? proj.facturas.length+' facturas · RD$ '+_fmtMoney(proj.total)
+      : 'Continuación · parte '+(i+1)+' de '+chunks.length;
+    const bodyHtml = chunk.map(r => r.html).join('');
+    return '<div class="page"><div class="pg-header"><h2>'+tituloLocal+'</h2><div class="crumb">'+crumb+'</div></div><div class="pg-body"><table class="detail">'+thead+'<tbody>'+bodyHtml+'</tbody></table></div><div class="page-footer"><span>'+_escHTML(cliente)+(isMulti?' · '+_escHTML(proj.nombre):'')+' · Detalle por categoría</span><span>Pág. '+(pageNum+i)+' de '+totalPages+'</span></div></div>';
+  }).join('');
 }
 
 function _renderPDFFactura(f, idx, projName, pageNum, totalPages, cliente, projColor){
@@ -9293,7 +9365,11 @@ function _buildPDFReportHTML(d){
   let runIdx=0;
   d.projList.forEach((p,i)=>{
     if(d.isMultiProj){ html+=_renderPDFProjDivider(p,i+1,d.projList.length,d.totalMonto,pageNum,d.totalPages,d.cliente); pageNum++; }
-    html+=_renderPDFProjTable(p,d.isMultiProj,runIdx,pageNum,d.totalPages,d.cliente); pageNum++;
+    // v.0241: la tabla "Detalle por Categoría" puede rendir varias pages si el
+    // proyecto tiene muchas filas. Incrementar pageNum por la cantidad real.
+    const detailPages = _countDetailPages(p);
+    html+=_renderPDFProjTable(p,d.isMultiProj,runIdx,pageNum,d.totalPages,d.cliente);
+    pageNum += detailPages;
     p.facturas.forEach(f=>{ runIdx++; html+=_renderPDFFactura(f,runIdx,d.isMultiProj?p.nombre:null,pageNum,d.totalPages,d.cliente,d.isMultiProj?p.color:null); pageNum++; });
   });
   html+='</div>';
@@ -10138,8 +10214,16 @@ async function generarPDFFotos(params){
     } else {
       // Template Ejecutivo Corporativo (default, comportamiento histórico)
       const tBuild = Date.now();
+      // v.0241: cover + resumen = 2 pages base. Por proyecto: divider (si multi)
+      // + N pages de tabla detalle (paginada) + 1 page por factura. Antes la
+      // tabla se asumía siempre 1 page y las filas excedentes se montaban sobre
+      // el page-footer (overflow:hidden).
       let totalPages = 2;
-      projList.forEach(p => { totalPages += isMultiProj ? 2 : 1; totalPages += p.facturas.length; });
+      projList.forEach(p => {
+        if(isMultiProj) totalPages += 1;            // proj-divider
+        totalPages += _countDetailPages(p);         // tabla detalle (>=1 pages)
+        totalPages += p.facturas.length;            // 1 page por factura
+      });
       reportData = {...baseData, totalPages};
       builderHTML = _buildPDFReportHTML(reportData);
       cssId = 'pdf-report-css';
@@ -10773,27 +10857,39 @@ function initFacturas(){
   sel.innerHTML = '<option value="">— Todas las obras —</option>' +
     masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
 
-  // v.0109: default Desde = primer día del mes en curso, Hasta = hoy.
-  // Mes en curso es lo más útil por defecto para revisar gastos recientes.
-  // El usuario puede vaciar Desde para ver todo el histórico.
+  // v.0241: defaults nuevos por solicitud del usuario:
+  //  - Obra: SIEMPRE la obra activa del proyecto (LS.PROJ), no la restaurada del
+  //    state. Si el usuario filtró por otra obra antes de editar una factura,
+  //    al volver verá su obra activa otra vez (trade-off coherente con "al
+  //    entrar a Mis facturas quiero ver MI obra").
+  //  - Desde: SIEMPRE día 1 del mes ANTERIOR al actual (no del mes en curso
+  //    como en v.0109). El usuario suele revisar gastos del mes pasado para
+  //    cerrar contabilidad/reembolsos.
+  //  - Estado, Buscar, Hasta: restaurados del state si existe (flujo retorno
+  //    de editar una factura), o defaults frescos.
   const todayD = new Date();
   const today = todayD.toISOString().slice(0, 10);
-  const firstOfMonth = new Date(todayD.getFullYear(), todayD.getMonth(), 1)
-    .toISOString().slice(0, 10);
+  // Día 1 del mes anterior. Manejo manual de cruce de año (enero → diciembre).
+  // Construcción string para evitar offsets de toISOString() vs hora local.
+  const y = todayD.getFullYear();
+  const m = todayD.getMonth(); // 0-indexed
+  const prevMonth = m === 0 ? 11 : m - 1;
+  const prevYear = m === 0 ? y - 1 : y;
+  const firstOfPrevMonth = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-01`;
 
-  // Restaurar filtros previos si existen (ej. volviendo de editar una factura)
+  const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
+  sel.value = currentProj ? currentProj.cod : '';
+  document.getElementById('fac-filtro-desde').value = firstOfPrevMonth;
+
   if(facturasFiltrosState){
-    sel.value = facturasFiltrosState.obra || '';
+    // Restaurar solo lo que el usuario haya tocado puntualmente; obra y desde
+    // se mantienen como defaults nuevos (ver bloque arriba).
     document.getElementById('fac-filtro-estado').value = facturasFiltrosState.estado || 'activas';
     document.getElementById('fac-filtro-buscar').value = facturasFiltrosState.buscar || '';
-    document.getElementById('fac-filtro-desde').value = facturasFiltrosState.desde !== undefined ? facturasFiltrosState.desde : firstOfMonth;
     document.getElementById('fac-filtro-hasta').value = facturasFiltrosState.hasta || today;
   } else {
-    const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
-    if(currentProj) sel.value = currentProj.cod;
     document.getElementById('fac-filtro-estado').value = 'activas';
     document.getElementById('fac-filtro-buscar').value = '';
-    document.getElementById('fac-filtro-desde').value = firstOfMonth;
     document.getElementById('fac-filtro-hasta').value = today;
   }
 
