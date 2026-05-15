@@ -157,9 +157,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 /* ============ IMPRESIÓN ============ */
 /* Al imprimir, ocultamos TODO menos el reporte y forzamos colores claros */
 /* v.0241: size letter (US, default solicitado) en lugar de A4. */
+/* v.0242: orientation landscape — sin esto la tabla "Detalle de facturas"
+   reparte una sola fila en 2 líneas con suplidores o NCFs largos, se ve mal. */
 @page {
   margin: 1.2cm 1.2cm 1.5cm 1.2cm;
-  size: letter;
+  size: letter landscape;
 }
 @media print {
   body{background:#fff !important;color:#111 !important;max-width:none !important}
@@ -1089,7 +1091,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <h3>Filtros</h3>
       <div class="field">
         <div class="lbl">Obra</div>
-        <select id="rep-proyecto"></select>
+        <select id="rep-proyecto" onchange="previewReporteFacturas()"></select>
       </div>
       <div class="field">
         <div class="lbl">Tipo de informe</div>
@@ -1101,22 +1103,34 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
       <div class="grid2">
         <div class="field">
           <div class="lbl">Desde</div>
-          <input type="date" id="rep-desde">
+          <input type="date" id="rep-desde" onchange="previewReporteFacturas()">
         </div>
         <div class="field">
           <div class="lbl">Hasta</div>
-          <input type="date" id="rep-hasta">
+          <input type="date" id="rep-hasta" onchange="previewReporteFacturas()">
         </div>
       </div>
       <div class="field">
         <div class="lbl">No. de reporte (opcional)</div>
-        <input type="text" id="rep-numero" placeholder="Deja vacío para todos" style="font-family:var(--mono)">
+        <input type="text" id="rep-numero" placeholder="Deja vacío para todos" style="font-family:var(--mono)" oninput="debounceRepNumero()">
       </div>
-      <button class="btn btn-amber" onclick="generarReporte()" style="padding:14px;margin-top:10px">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Generar reporte
-      </button>
+      <!-- v.0242: stats bar idéntico al de pg-facturas (counter izq + monto der).
+           Refleja lo que ENTRARÁ al PDF con los filtros actuales. -->
+      <div id="rep-stats" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px">
+        <div><span id="rep-stat-count" style="font-weight:600;color:var(--text)">0</span> <span style="color:var(--text2)">factura(s)</span></div>
+        <div style="font-family:var(--mono);font-weight:600;color:var(--red)">RD$ <span id="rep-stat-total">0.00</span></div>
+      </div>
     </div>
+
+    <button class="btn btn-amber" onclick="generarReporte()" style="padding:14px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Generar reporte
+    </button>
+
+    <!-- v.0242: listado preview de las facturas que entrarán al PDF, mismo look
+         que pg-facturas pero solo lectura. Refresca on-change de Obra / Desde /
+         Hasta / No. Reporte. -->
+    <div id="rep-preview-lista"></div>
 
     <div id="rep-resultado" style="display:none"></div>
   </div>
@@ -1775,7 +1789,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0241';
+const APP_VERSION = '0242';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -8779,23 +8793,153 @@ function initReportes(){
   sel.innerHTML = '<option value="">— Todas las obras —</option>' +
     masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
 
-  // Preseleccionar obra actual
+  // v.0242: defaults nuevos, alineados con pg-facturas (solicitud del usuario):
+  //  - Obra: SIEMPRE la obra activa (LS.PROJ). El usuario puede cambiar a otra
+  //    obra o a "Todas las obras" después si lo necesita.
+  //  - Tipo de informe: SIEMPRE 'ejecutivo' al entrar. Ignora LS.REPORTE_TIPO
+  //    guardado (antes en v.0083 se restauraba la última selección).
+  //  - Desde: día 1 del mes ANTERIOR (antes en v.0069 eran "últimos 30 días").
+  //  - Hasta: hoy.
+  //  - No. de reporte: vacío.
   const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
-  if(currentProj) sel.value = currentProj.cod;
+  sel.value = currentProj ? currentProj.cod : '';
 
-  // Defaults de fechas: últimos 30 días
-  const hoy = new Date();
-  const hace30 = new Date(hoy.getTime() - 30 * 86400000);
-  document.getElementById('rep-desde').value = hace30.toISOString().slice(0,10);
-  document.getElementById('rep-hasta').value = hoy.toISOString().slice(0,10);
+  const todayD = new Date();
+  const today = todayD.toISOString().slice(0, 10);
+  const y = todayD.getFullYear();
+  const m = todayD.getMonth();
+  const prevMonth = m === 0 ? 11 : m - 1;
+  const prevYear = m === 0 ? y - 1 : y;
+  const firstOfPrevMonth = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-01`;
+  document.getElementById('rep-desde').value = firstOfPrevMonth;
+  document.getElementById('rep-hasta').value = today;
   document.getElementById('rep-numero').value = '';
-
-  // Restaurar última selección de tipo de informe
-  const tipoGuardado = localStorage.getItem(LS.REPORTE_TIPO) || 'ejecutivo';
-  document.getElementById('rep-tipo').value = tipoGuardado;
+  document.getElementById('rep-tipo').value = 'ejecutivo';
 
   // Ocultar resultado previo
   document.getElementById('rep-resultado').style.display = 'none';
+
+  // v.0242: cargar listado preview con los defaults arriba.
+  previewReporteFacturas();
+}
+
+// v.0242: debounce para el input No. de reporte — evita una llamada por letra.
+let _repNumeroTimeout = null;
+function debounceRepNumero(){
+  clearTimeout(_repNumeroTimeout);
+  _repNumeroTimeout = setTimeout(() => previewReporteFacturas(), 400);
+}
+
+// v.0242: cache local del último preview para no re-fetchear al toggle de filtros
+// si el usuario solo cambia el rango de fechas/numero sin tocar Obra (la mayoría
+// del tiempo). Invalidado al entrar a la pantalla (initReportes llama directo
+// a previewReporteFacturas que repuebla el cache).
+let _repPreviewCache = {at: 0, raw: null, regH: null};
+
+// v.0242: refleja en pantalla las facturas que ENTRARÁN al PDF con los filtros
+// actuales. Reusa el mismo filtro que generarReporte (APROBADO=SI + no eliminadas
+// + rango fecha + obra + numero). Solo lectura: las cards no son clickeables (el
+// usuario edita desde "Mis facturas"). Stats: counter izq + monto der.
+async function previewReporteFacturas(){
+  const obra = document.getElementById('rep-proyecto').value;
+  const desde = document.getElementById('rep-desde').value;
+  const hasta = document.getElementById('rep-hasta').value;
+  const numero = document.getElementById('rep-numero').value.trim();
+
+  const box = document.getElementById('rep-preview-lista');
+  const cntEl = document.getElementById('rep-stat-count');
+  const totEl = document.getElementById('rep-stat-total');
+
+  // Cache de 60s para no fetchear REGISTRO en cada cambio menor de fechas.
+  // Si el cache es viejo o no existe, fetchear ahora.
+  let regH, rows;
+  if(_repPreviewCache.raw && (Date.now() - _repPreviewCache.at) < 60000){
+    regH = _repPreviewCache.regH;
+    rows = _repPreviewCache.raw;
+  } else {
+    box.innerHTML = '<div class="alert alert-amber" style="margin-top:14px">Cargando facturas…</div>';
+    try {
+      const raw = await sheetsGet('REGISTRO!A1:Z');
+      if(!raw || raw.length === 0){
+        box.innerHTML = '<div class="alert alert-amber" style="margin-top:14px">REGISTRO vacío</div>';
+        cntEl.textContent = '0';
+        totEl.textContent = '0.00';
+        return;
+      }
+      regH = {};
+      (raw[0] || []).forEach((h, i) => regH[h] = i);
+      rows = raw.slice(1);
+      _repPreviewCache = {at: Date.now(), raw: rows, regH};
+    } catch(e){
+      box.innerHTML = '<div class="alert alert-red" style="margin-top:14px">Error: '+_escHTML(e.message)+'</div>';
+      cntEl.textContent = '0';
+      totEl.textContent = '0.00';
+      return;
+    }
+  }
+
+  // Filtro idéntico al de generarReporte (líneas ~8841-8851):
+  // APROBADO=SI + no ELIMINADO + dentro del rango + obra match + numero match.
+  const filtered = rows.filter(r => {
+    if(!r[regH.ID] && !r[0]) return false;
+    const projMatch = !obra || r[regH.PROYECTO] === obra;
+    const fecha = r[regH.FECHA_FACTURA] || r[regH.FECHA_REGISTRO] || '';
+    const fechaMatch = (!desde || fecha >= desde) && (!hasta || fecha <= hasta);
+    const repNum = regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '';
+    const numMatch = !numero || repNum.toLowerCase().includes(numero.toLowerCase());
+    const aprobMatch = r[regH.APROBADO] === 'SI';
+    const noEliminado = regH.ELIMINADO === undefined || r[regH.ELIMINADO] !== 'SI';
+    return projMatch && fechaMatch && numMatch && aprobMatch && noEliminado;
+  });
+
+  const totalMonto = filtered.reduce((s, r) => s + (parseFloat(r[regH.MONTO]) || 0), 0);
+  cntEl.textContent = filtered.length;
+  totEl.textContent = fmt(totalMonto).replace('RD$ ', '');
+
+  if(filtered.length === 0){
+    box.innerHTML = '<div class="alert alert-amber" style="margin-top:14px">Ninguna factura cumple los filtros</div>';
+    return;
+  }
+
+  // Ordenar por fecha asc (igual que generarReporte) — orden cronológico estable.
+  filtered.sort((a, b) => (a[regH.FECHA_FACTURA] || '').localeCompare(b[regH.FECHA_FACTURA] || ''));
+
+  // Render: misma estética que pg-facturas (card con thumb + suplidor + meta +
+  // monto), pero SIN onclick → solo lectura. Si el usuario quiere editar/eliminar,
+  // va a "Mis facturas" desde el home.
+  box.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">' + filtered.map(r => {
+    const url = r[regH.URL_FACTURA] || '';
+    const proj = masters.projects.find(p => p.cod === r[regH.PROYECTO]);
+    const catName = (masters.categories.find(c => c.cod === r[regH.CATEGORIA]) || {nombre: r[regH.CATEGORIA] || ''}).nombre;
+    const consolidado = regH.CONSOLIDADO !== undefined && r[regH.CONSOLIDADO] === 'SI';
+    let thumb;
+    if(url){
+      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if(m && consolidado){
+        thumb = `<img src="https://drive.google.com/thumbnail?id=${m[1]}&sz=w120" style="width:44px;height:44px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);background:var(--bg3)" alt="">`;
+      } else {
+        thumb = '<div style="width:44px;height:44px;border-radius:9px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;color:var(--text2)">📷</div>';
+      }
+    } else {
+      thumb = '<div style="width:44px;height:44px;border-radius:9px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;color:var(--text2)">−</div>';
+    }
+    const monto = parseFloat(r[regH.MONTO]) || 0;
+    const supl = r[regH.SUPLIDOR] || '(sin suplidor)';
+    const fecha = r[regH.FECHA_FACTURA] || '';
+    const noRep = regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '';
+    const ncf = r[regH.NCF] || '';
+    const projTag = !obra && proj ? ` · ${_escHTML(proj.nombre)}` : '';
+    const metaParts = [fecha, catName, noRep ? 'Rep. '+noRep : null, ncf || null].filter(Boolean);
+    return `
+    <div class="card" style="padding:11px 13px;display:flex;gap:10px;align-items:center">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_escHTML(supl)}${projTag}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_escHTML(metaParts.join(' · '))}</div>
+      </div>
+      <div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--red);flex-shrink:0;text-align:right">RD$ ${_fmtMoney(monto)}</div>
+    </div>`;
+  }).join('') + '</div>';
 }
 
 async function generarReporte(){
@@ -10880,15 +11024,15 @@ function initFacturas(){
   const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
   sel.value = currentProj ? currentProj.cod : '';
   document.getElementById('fac-filtro-desde').value = firstOfPrevMonth;
+  // v.0242: Estado SIEMPRE en 'todas' (solicitud del usuario). No se restaura
+  // del state — mismo lineamiento que Obra y Desde: defaults frescos al entrar.
+  document.getElementById('fac-filtro-estado').value = 'todas';
 
   if(facturasFiltrosState){
-    // Restaurar solo lo que el usuario haya tocado puntualmente; obra y desde
-    // se mantienen como defaults nuevos (ver bloque arriba).
-    document.getElementById('fac-filtro-estado').value = facturasFiltrosState.estado || 'activas';
+    // Restaurar solo Buscar y Hasta (Obra, Desde, Estado son siempre defaults).
     document.getElementById('fac-filtro-buscar').value = facturasFiltrosState.buscar || '';
     document.getElementById('fac-filtro-hasta').value = facturasFiltrosState.hasta || today;
   } else {
-    document.getElementById('fac-filtro-estado').value = 'activas';
     document.getElementById('fac-filtro-buscar').value = '';
     document.getElementById('fac-filtro-hasta').value = today;
   }
