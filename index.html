@@ -1802,7 +1802,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0247';
+const APP_VERSION = '0248';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -10775,6 +10775,16 @@ async function generarPDFFotos(params){
       blobUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} });
       _pdfLog(`cleanup: revocados ${blobUrls.length} blob URLs`);
     }
+    // v.0248: remover los <style> inyectados (pdf-report-css / pdf-fiscal-css)
+    // tras terminar. Si NO se remueven, su `@page{margin:0}` queda persistente
+    // en el <head> y sobreescribe el `@page` global (línea 170), haciendo que
+    // window.print() del reporte normal salga sin márgenes (bug observado en
+    // Safari Mac v.0247). El check `if(!document.getElementById(cssId))` antes
+    // de inyectar (línea ~10402) re-inyecta correctamente al regenerar.
+    ['pdf-report-css', 'pdf-fiscal-css'].forEach(id => {
+      const s = document.getElementById(id);
+      if(s) s.remove();
+    });
   }
 }
 
