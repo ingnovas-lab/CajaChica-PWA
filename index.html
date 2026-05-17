@@ -1802,7 +1802,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0248';
+const APP_VERSION = '0249';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -7073,16 +7073,30 @@ async function refreshHome(){
 
   document.getElementById('user-email').textContent = getDisplayName();
 
-  // Stats pendientes locales — v.0106: por empresa activa, no por proyecto.
+  // Stats pendientes locales — v.0106: contador + recientes por empresa activa.
   // El usuario controla varios proyectos a la vez y necesita ver el total de
   // pendientes de la empresa para no perder ninguno. Igual que pg-history
   // (v.0105). Filtro vía masters.projects (que ya está scoped a empresa).
+  //
+  // v.0249: dos correcciones al filtro de pendientes en home.
+  //  (a) Filtro robusto sheetId-first (patrón v.0197 usado en pg-history y
+  //      syncAll). Sin esto, cods iguales cross-empresa (OBR-XXXX) hacen que
+  //      el home cuente pendientes de otras empresas. Survivor del refactor
+  //      v.0197 — análogo al bug de balCache cerrado en v.0240.
+  //  (b) Balance del proyecto activo NO debe sumar pendientes de otros
+  //      proyectos de la misma empresa. El contador y los recientes siguen
+  //      siendo "por empresa" (política v.0106), pero el balance suma solo
+  //      las pendientes del proyecto actual.
+  const sid = getActiveSheetId();
+  const projCod = proj ? proj.cod : null;
   const pending = await dbGetAll('pending');
   const validCods = new Set(masters.projects.map(p => p.cod));
-  const myPending = pending.filter(p => validCods.has(p.proyecto));
-  const netoPendiente = myPending.reduce((s, p) => s + (p.tipo_registro === 'ABONO' ? +p.monto : -Math.abs(+p.monto)), 0);
-  document.getElementById('s-pending').textContent = myPending.length;
-  document.getElementById('s-total').textContent = fmt(netoPendiente);
+  const myPendingEmpresa = pending.filter(p => p.sheetId ? p.sheetId === sid : validCods.has(p.proyecto));
+  const netoPendienteEmpresa = myPendingEmpresa.reduce((s, p) => s + (p.tipo_registro === 'ABONO' ? +p.monto : -Math.abs(+p.monto)), 0);
+  const myPendingProyecto = projCod ? myPendingEmpresa.filter(p => p.proyecto === projCod) : [];
+  const netoPendienteProyecto = myPendingProyecto.reduce((s, p) => s + (p.tipo_registro === 'ABONO' ? +p.monto : -Math.abs(+p.monto)), 0);
+  document.getElementById('s-pending').textContent = myPendingEmpresa.length;
+  document.getElementById('s-total').textContent = fmt(netoPendienteEmpresa);
 
   // Badge "Por revisar": consulta cuántas facturas en el Sheet están como REVISAR/PENDIENTE
   // (silencioso — si falla, no bloquea nada)
@@ -7095,7 +7109,7 @@ async function refreshHome(){
   const cache = JSON.parse(localStorage.getItem(LS.BALCACHE) || '{}');
   const bk = _balKey(proj);
   if(proj && cache[bk]){
-    const v = cache[bk].value + netoPendiente;
+    const v = cache[bk].value + netoPendienteProyecto;
     const el = document.getElementById('balance-amt');
     el.textContent = fmt(v);
     el.className = 'balance-amt ' + (v >= 0 ? 'pos' : 'neg');
@@ -7111,9 +7125,9 @@ async function refreshHome(){
   // Recientes (pendientes locales) — card entera clickeable para editar
   const box = document.getElementById('home-list');
   const rw = document.getElementById('home-recent');
-  if(myPending.length > 0){
+  if(myPendingEmpresa.length > 0){
     rw.style.display = 'block';
-    box.innerHTML = myPending.slice(0, 3).map(p => {
+    box.innerHTML = myPendingEmpresa.slice(0, 3).map(p => {
       // Tanto GASTO como ABONO son editables — editarPending detecta el tipo y carga
       // el formulario apropiado (pg-editar para GASTO, pg-abono para ABONO).
       const clickHandler = `onclick="editarPending('${p.id}')" style="cursor:pointer"`;
