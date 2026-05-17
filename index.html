@@ -1825,7 +1825,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0250';
+const APP_VERSION = '0251';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -9150,7 +9150,10 @@ async function generarReporte(){
         const cod = r[regH.PROYECTO];
         const projObj = masters.projects.find(p => p.cod === cod);
         const nombre = projObj ? projObj.nombre : cod;
-        const key = cod + ' · ' + nombre;
+        // v.0251: solo el nombre. El cod (OBR-XXXX) no se muestra en docs
+        // (resumen HTML, window.print, PDF). Mismo patrón que el PDF Ejecutivo
+        // (línea 10307: projsByName indexado por nombre).
+        const key = nombre;
         porObra[key] = (porObra[key] || 0) + (parseFloat(r[regH.MONTO]) || 0);
       });
     }
