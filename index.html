@@ -1825,7 +1825,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0252';
+const APP_VERSION = '0253';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -11978,6 +11978,15 @@ async function eliminarFactura(idx){
     toast('Factura enviada a Papelera', 'ok');
     await loadFacturas();
     invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 500);
+    // v.0253: barrido automático del Drive local del eliminador. Sin esto,
+    // la copia distribuida (ccCopyOf=masterId) quedaba en Drive del usuario
+    // hasta el próximo arranque + throttle 5min. Equivalente a "Forzar
+    // barrido del Drive" en background. Skip super_admin: no tiene copias
+    // distribuidas (su Drive contiene el master, no copias).
+    if(!isSuperAdmin()){
+      localStorage.removeItem(LS_DISTRIBUTE_AT);
+      _distributeMastersToUserDrive().catch(e => console.warn('[post-eliminar] distribute:', e.message));
+    }
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
@@ -12058,6 +12067,14 @@ async function restaurarFactura(idx){
     toast('Factura restaurada', 'ok');
     await loadFacturas();
     invalidateRevisarCache(); setTimeout(() => refreshBalance(true), 500);
+    // v.0253: equivalente al post-eliminar — disparar distribute en
+    // background para que la copia local del usuario se RECREE (al estar
+    // ELIMINADO=NO de nuevo, el sheet vuelve a referenciar el master como
+    // activo, y _distributeMastersToUserDrive detecta que falta la copia).
+    if(!isSuperAdmin()){
+      localStorage.removeItem(LS_DISTRIBUTE_AT);
+      _distributeMastersToUserDrive().catch(e => console.warn('[post-restaurar] distribute:', e.message));
+    }
   } catch(e){
     loading(false);
     toast('Error: ' + e.message, 'err');
