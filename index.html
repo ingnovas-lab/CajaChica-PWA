@@ -59,6 +59,22 @@ input[type=date]{color-scheme:dark}
 .lbl{font-size:11px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.06em}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
+/* v.0250: picker multi-obra para pg-reportes */
+.obra-picker{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.obra-picker .op-row{display:flex;align-items:center;gap:10px;padding:10px 13px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+.obra-picker .op-row:last-child{border-bottom:0}
+.obra-picker .op-row:active{background:#262626}
+.obra-picker .op-cb{width:18px;height:18px;border:1.5px solid var(--text2);border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--bg);position:relative}
+.obra-picker .op-row.on .op-cb{background:var(--amber);border-color:var(--amber)}
+.obra-picker .op-row.on .op-cb::after{content:'';width:9px;height:5px;border-left:2px solid #1c1917;border-bottom:2px solid #1c1917;transform:rotate(-45deg) translate(0,-1px)}
+.obra-picker .op-nm{flex:1;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.obra-picker .op-row.on .op-nm{font-weight:600}
+.obra-picker .op-empty{padding:14px;text-align:center;color:var(--text2);font-size:12px}
+.obra-toolbar{display:flex;gap:8px;margin-top:8px;font-size:12px}
+.obra-toolbar a{color:var(--text);cursor:pointer;text-decoration:none;padding:6px 10px;border-radius:6px;background:var(--bg3);border:1px solid var(--border)}
+.obra-toolbar a:active{opacity:.6}
+.obra-count{font-weight:500;color:var(--amber);font-size:11px;text-transform:none;letter-spacing:0}
+
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px}
 .section-label{font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;padding:6px 4px 0;margin-top:4px}
 
@@ -1103,8 +1119,15 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
     <div class="card" id="rep-filtros">
       <h3>Filtros</h3>
       <div class="field">
-        <div class="lbl">Obra</div>
-        <select id="rep-proyecto" onchange="previewReporteFacturas()"></select>
+        <div class="lbl" style="display:flex;justify-content:space-between;align-items:baseline">
+          <span>Obra</span>
+          <span id="rep-proy-count" class="obra-count">Todas las obras</span>
+        </div>
+        <div id="rep-proy-picker" class="obra-picker"></div>
+        <div class="obra-toolbar">
+          <a onclick="repObraSelAll()">Seleccionar todas</a>
+          <a onclick="repObraSelNone()">Limpiar</a>
+        </div>
       </div>
       <div class="field">
         <div class="lbl">Tipo de informe</div>
@@ -1802,7 +1825,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0249';
+const APP_VERSION = '0250';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -8818,22 +8841,69 @@ function closeModal(){
 // ============================================================
 // REPORTES DE BALANCE
 // ============================================================
+// v.0250: picker multi-obra. El select single fue reemplazado por checkboxes
+// inline. Devuelve array de cods seleccionados (vacío = ninguna). Para semántica
+// de filtro, "todas seleccionadas" se trata igual que "vacío" → sin filtro.
+function getRepObrasSeleccionadas(){
+  return Array.from(document.querySelectorAll('#rep-proy-picker .op-row.on')).map(r => r.dataset.cod);
+}
+function _repObraIsAll(){
+  const sel = getRepObrasSeleccionadas();
+  return sel.length === 0 || sel.length === masters.projects.length;
+}
+function updateRepObraCount(){
+  const total = masters.projects.length;
+  const sel = getRepObrasSeleccionadas();
+  const el = document.getElementById('rep-proy-count');
+  if(!el) return;
+  if(sel.length === 0) el.textContent = 'Ninguna seleccionada';
+  else if(sel.length === total) el.textContent = 'Todas las obras';
+  else el.textContent = `${sel.length} de ${total} seleccionadas`;
+}
+function repObraSelAll(){
+  document.querySelectorAll('#rep-proy-picker .op-row').forEach(r => r.classList.add('on'));
+  updateRepObraCount();
+  previewReporteFacturas();
+}
+function repObraSelNone(){
+  document.querySelectorAll('#rep-proy-picker .op-row').forEach(r => r.classList.remove('on'));
+  updateRepObraCount();
+  previewReporteFacturas();
+}
+function _repObraOnRowClick(ev){
+  const row = ev.target.closest('.op-row');
+  if(!row) return;
+  row.classList.toggle('on');
+  updateRepObraCount();
+  previewReporteFacturas();
+}
+
 function initReportes(){
-  // Llenar dropdown de obras
-  const sel = document.getElementById('rep-proyecto');
-  sel.innerHTML = '<option value="">— Todas las obras —</option>' +
-    masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
+  // v.0250: poblar picker multi-obra (reemplaza select single de v.0249).
+  const picker = document.getElementById('rep-proy-picker');
+  if(masters.projects.length === 0){
+    picker.innerHTML = '<div class="op-empty">Sin obras en esta empresa</div>';
+  } else {
+    picker.innerHTML = masters.projects.map(p =>
+      `<div class="op-row" data-cod="${_escHTML(p.cod)}"><div class="op-cb"></div><div class="op-nm">${_escHTML(p.nombre)}</div></div>`
+    ).join('');
+    picker.onclick = _repObraOnRowClick;
+  }
 
   // v.0242: defaults nuevos, alineados con pg-facturas (solicitud del usuario):
-  //  - Obra: SIEMPRE la obra activa (LS.PROJ). El usuario puede cambiar a otra
-  //    obra o a "Todas las obras" después si lo necesita.
+  //  - Obra: SIEMPRE la obra activa (LS.PROJ). El usuario puede agregar más obras
+  //    o "Seleccionar todas" después si lo necesita.
   //  - Tipo de informe: SIEMPRE 'ejecutivo' al entrar. Ignora LS.REPORTE_TIPO
   //    guardado (antes en v.0083 se restauraba la última selección).
   //  - Desde: día 1 del mes ANTERIOR (antes en v.0069 eran "últimos 30 días").
   //  - Hasta: hoy.
   //  - No. de reporte: vacío.
   const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
-  sel.value = currentProj ? currentProj.cod : '';
+  if(currentProj){
+    const row = picker.querySelector(`.op-row[data-cod="${CSS.escape(currentProj.cod)}"]`);
+    if(row) row.classList.add('on');
+  }
+  updateRepObraCount();
 
   const todayD = new Date();
   const today = todayD.toISOString().slice(0, 10);
@@ -8876,7 +8946,9 @@ let _repPreviewCache = {at: 0, raw: null, regH: null, sheetId: null};
 // + rango fecha + obra + numero). Solo lectura: las cards no son clickeables (el
 // usuario edita desde "Mis facturas"). Stats: counter izq + monto der.
 async function previewReporteFacturas(){
-  const obra = document.getElementById('rep-proyecto').value;
+  // v.0250: leer obras seleccionadas del picker multi (reemplaza select single).
+  const seleccionadas = getRepObrasSeleccionadas();
+  const isAll = _repObraIsAll();
   const desde = document.getElementById('rep-desde').value;
   const hasta = document.getElementById('rep-hasta').value;
   const numero = document.getElementById('rep-numero').value.trim();
@@ -8916,11 +8988,15 @@ async function previewReporteFacturas(){
     }
   }
 
-  // Filtro idéntico al de generarReporte (líneas ~8841-8851):
+  // Filtro idéntico al de generarReporte:
   // APROBADO=SI + no ELIMINADO + dentro del rango + obra match + numero match.
+  // v.0250: obra match ahora soporta multi-selección. Si "todas" (isAll) →
+  // no filtra. Si "ninguna" (seleccionadas vacío y no isAll) → filtra todo
+  // fuera. Si N específicas → includes.
+  const obraSet = new Set(seleccionadas);
   const filtered = rows.filter(r => {
     if(!r[regH.ID] && !r[0]) return false;
-    const projMatch = !obra || r[regH.PROYECTO] === obra;
+    const projMatch = isAll ? true : (obraSet.size > 0 && obraSet.has(r[regH.PROYECTO]));
     const fecha = r[regH.FECHA_FACTURA] || r[regH.FECHA_REGISTRO] || '';
     const fechaMatch = (!desde || fecha >= desde) && (!hasta || fecha <= hasta);
     const repNum = regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '';
@@ -8966,7 +9042,9 @@ async function previewReporteFacturas(){
     const fecha = r[regH.FECHA_FACTURA] || '';
     const noRep = regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '';
     const ncf = r[regH.NCF] || '';
-    const projTag = !obra && proj ? ` · ${_escHTML(proj.nombre)}` : '';
+    // v.0250: mostrar nombre de obra como tag cuando hay más de 1 obra en el
+    // resultado (ya sea "todas" o multi-selección). Si es 1 sola, redundante.
+    const projTag = (seleccionadas.length !== 1) && proj ? ` · ${_escHTML(proj.nombre)}` : '';
     const metaParts = [fecha, catName, noRep ? 'Rep. '+noRep : null, ncf || null].filter(Boolean);
     return `
     <div class="card" style="padding:11px 13px;display:flex;gap:10px;align-items:center">
@@ -8981,7 +9059,11 @@ async function previewReporteFacturas(){
 }
 
 async function generarReporte(){
-  const proyecto = document.getElementById('rep-proyecto').value;
+  // v.0250: multi-selección de obras. Si "todas" o ninguna marcada con count==total,
+  // sin filtro (isAll). Si N específicas, filtrar por includes. Si 0 marcadas y
+  // no es isAll → bloquear (el usuario marcó "Limpiar" pero no eligió nada).
+  const seleccionadas = getRepObrasSeleccionadas();
+  const isAll = _repObraIsAll();
   const desde = document.getElementById('rep-desde').value;
   const hasta = document.getElementById('rep-hasta').value;
   const numero = document.getElementById('rep-numero').value.trim();
@@ -8989,6 +9071,9 @@ async function generarReporte(){
   // Persistir selección para próxima vez
   localStorage.setItem(LS.REPORTE_TIPO, tipoInforme);
 
+  if(seleccionadas.length === 0 && !isAll){
+    toast('Selecciona al menos una obra', 'err'); return;
+  }
   if(!desde || !hasta){ toast('Selecciona fechas', 'err'); return; }
   if(desde > hasta){ toast('La fecha desde es mayor que hasta', 'err'); return; }
 
@@ -9020,9 +9105,11 @@ async function generarReporte(){
     // (Hasta v.0066 no se filtraba ELIMINADO — bug que causaba que el reporte
     // incluyera facturas borradas y el script de PDF las rechazara después,
     // produciendo "No hay facturas en el rango".)
+    // v.0250: multi-obra — isAll = sin filtro, set = filtro por includes.
+    const obraSet = new Set(seleccionadas);
     const filtrados = registros.filter(r => {
       if(!r[regH.ID] && !r[0]) return false;
-      const projMatch = !proyecto || r[regH.PROYECTO] === proyecto;
+      const projMatch = isAll ? true : obraSet.has(r[regH.PROYECTO]);
       const fecha = r[regH.FECHA_FACTURA] || r[regH.FECHA_REGISTRO] || '';
       const fechaMatch = fecha >= desde && fecha <= hasta;
       const repNum = regH.NO_REPORTE !== undefined ? (r[regH.NO_REPORTE] || '') : '';
@@ -9035,7 +9122,7 @@ async function generarReporte(){
     // Ingresos del periodo
     const ingFiltrados = ingresos.filter(r => {
       if(!r[0]) return false;
-      const projMatch = !proyecto || r[ingH.PROYECTO] === proyecto;
+      const projMatch = isAll ? true : obraSet.has(r[ingH.PROYECTO]);
       const fechaMatch = (r[ingH.FECHA] || '') >= desde && (r[ingH.FECHA] || '') <= hasta;
       return projMatch && fechaMatch;
     });
@@ -9052,9 +9139,13 @@ async function generarReporte(){
       porCategoria[catNombre] = (porCategoria[catNombre] || 0) + (parseFloat(r[regH.MONTO]) || 0);
     });
 
-    // Agrupar por obra (si es "todas")
+    // Agrupar por obra cuando hay más de una obra en el resultado (multi-select
+    // o "todas"). Si es una sola obra, no tiene sentido el breakdown por obra.
+    // v.0250: usa el alcance real (isAll o N>1), no la presencia/ausencia del
+    // viejo select single.
+    const showByObra = isAll || seleccionadas.length > 1;
     const porObra = {};
-    if(!proyecto){
+    if(showByObra){
       filtrados.forEach(r => {
         const cod = r[regH.PROYECTO];
         const projObj = masters.projects.find(p => p.cod === cod);
@@ -9064,10 +9155,22 @@ async function generarReporte(){
       });
     }
 
-    // Nombre de obra para el header del reporte
-    const projObj = proyecto ? masters.projects.find(p => p.cod === proyecto) : null;
-    const nombreObra = projObj ? projObj.nombre : 'Todas las obras';
-    const codObra = projObj ? projObj.cod : '';
+    // Nombre / cod de obra para el header del reporte y el destino en Drive.
+    // v.0250: 3 escenarios.
+    //  - isAll → "Todas las obras", codObra vacío → /Todas las obras/Reportes/
+    //  - 1 obra → nombre real, cod real → /[Obra]/Reportes/
+    //  - N obras (multi) → "Obras seleccionadas (N)", cod vacío → consolidado.
+    let nombreObra, codObra;
+    if(isAll){
+      nombreObra = 'Todas las obras'; codObra = '';
+    } else if(seleccionadas.length === 1){
+      const projObj = masters.projects.find(p => p.cod === seleccionadas[0]);
+      nombreObra = projObj ? projObj.nombre : seleccionadas[0];
+      codObra = projObj ? projObj.cod : '';
+    } else {
+      nombreObra = `Obras seleccionadas (${seleccionadas.length})`;
+      codObra = '';
+    }
 
     // Mapear filtrados a formato normalizado para renderizar
     const filasNormalizadas = filtrados.map(r => ({
