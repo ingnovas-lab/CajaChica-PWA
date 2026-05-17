@@ -1825,7 +1825,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0251';
+const APP_VERSION = '0252';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -11921,28 +11921,56 @@ async function eliminarFactura(idx){
       body: JSON.stringify({values: [['SI']]})
     });
 
-    // 2) Mover foto a Papelera del proyecto (estructura nueva)
+    // 2) Mover foto a Papelera del proyecto (estructura nueva).
+    // v.0252: try PATCH directo → si falla (response.ok=false o excepción),
+    // fallback al AS proxy. Sin esto, los invitados (scope drive.file) no
+    // pueden mover el master (propiedad del super_admin) → 403/404 silencioso,
+    // toast "OK" engañoso, foto se quedaba en Fotos/. Mismo patrón que
+    // eliminarFacturaPermanente v.0198.
     const url = r[H.URL_FACTURA];
     if(url){
       loading(true, 'Eliminando', 'Moviendo foto a Papelera...');
       const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if(m){
         const fileId = m[1];
-        // Nueva estructura: /Empresa/Proyectos/[Obra]/Papelera/
-        const papeleraId = await getSubfolderObra(r[H.PROYECTO], 'Papelera');
-
-        // Remover de padres actuales, agregar a Papelera
-        const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
-          headers: {'Authorization': 'Bearer ' + token}
-        });
-        const fm = await fileMeta.json();
-        const currentParents = (fm.parents || []).join(',');
-
-        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${papeleraId}&removeParents=${currentParents}`, {
-          method: 'PATCH',
-          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-          body: JSON.stringify({})
-        });
+        let moved = false;
+        try {
+          const papeleraId = await getSubfolderObra(r[H.PROYECTO], 'Papelera');
+          const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
+            headers: {'Authorization': 'Bearer ' + token}
+          });
+          if(fileMeta.ok){
+            const fm = await fileMeta.json();
+            const currentParents = (fm.parents || []).join(',');
+            const patchRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${papeleraId}&removeParents=${currentParents}`, {
+              method: 'PATCH',
+              headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+              body: JSON.stringify({})
+            });
+            if(patchRes.ok) moved = true;
+          }
+        } catch(e){
+          _telemetry('error', 'warn', 'mover-papelera-direct-failed', {fileId, error: (e && e.message) || String(e)});
+        }
+        if(!moved){
+          // Fallback AS proxy: el invitado no tiene permisos para mover el
+          // master, pero el AS sí (corre con permisos del super_admin).
+          const empresa = getCurrentCompany();
+          const projObj = masters.projects.find(p => p.cod === r[H.PROYECTO]);
+          const nombreObra = projObj ? projObj.nombre : '';
+          if(empresa && nombreObra){
+            const res = await _callASForEmpresa(empresa, {
+              action: 'moverAPapelera',
+              fileId,
+              nombreObra
+            });
+            if(!res || !res.ok){
+              throw new Error('No se pudo mover la foto a Papelera: ' + ((res && res.error) || 'sin acceso'));
+            }
+          } else {
+            throw new Error('No se pudo mover la foto a Papelera (sin empresa o nombre de obra)');
+          }
+        }
       }
     }
 
@@ -11977,27 +12005,52 @@ async function restaurarFactura(idx){
       body: JSON.stringify({values: [['NO']]})
     });
 
-    // 2) Mover foto de Papelera de vuelta a carpeta Fotos del proyecto
+    // 2) Mover foto de Papelera de vuelta a carpeta Fotos del proyecto.
+    // v.0252: mismo patrón que eliminarFactura — try PATCH directo, fallback
+    // al AS si falla (invitados con scope drive.file no pueden mover el
+    // master del super_admin).
     const url = r[H.URL_FACTURA];
     if(url){
       loading(true, 'Restaurando', 'Moviendo foto...');
       const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if(m){
         const fileId = m[1];
-        // Destino: /Empresa/Proyectos/[Obra]/Fotos/
-        const fotosId = await getSubfolderObra(r[H.PROYECTO], 'Fotos');
-
-        const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
-          headers: {'Authorization': 'Bearer ' + token}
-        });
-        const fm = await fileMeta.json();
-        const currentParents = (fm.parents || []).join(',');
-
-        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${fotosId}&removeParents=${currentParents}`, {
-          method: 'PATCH',
-          headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
-          body: JSON.stringify({})
-        });
+        let moved = false;
+        try {
+          const fotosId = await getSubfolderObra(r[H.PROYECTO], 'Fotos');
+          const fileMeta = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
+            headers: {'Authorization': 'Bearer ' + token}
+          });
+          if(fileMeta.ok){
+            const fm = await fileMeta.json();
+            const currentParents = (fm.parents || []).join(',');
+            const patchRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${fotosId}&removeParents=${currentParents}`, {
+              method: 'PATCH',
+              headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+              body: JSON.stringify({})
+            });
+            if(patchRes.ok) moved = true;
+          }
+        } catch(e){
+          _telemetry('error', 'warn', 'restaurar-papelera-direct-failed', {fileId, error: (e && e.message) || String(e)});
+        }
+        if(!moved){
+          const empresa = getCurrentCompany();
+          const projObj = masters.projects.find(p => p.cod === r[H.PROYECTO]);
+          const nombreObra = projObj ? projObj.nombre : '';
+          if(empresa && nombreObra){
+            const res = await _callASForEmpresa(empresa, {
+              action: 'restaurarDePapelera',
+              fileId,
+              nombreObra
+            });
+            if(!res || !res.ok){
+              throw new Error('No se pudo restaurar la foto: ' + ((res && res.error) || 'sin acceso'));
+            }
+          } else {
+            throw new Error('No se pudo restaurar la foto (sin empresa o nombre de obra)');
+          }
+        }
       }
     }
 
