@@ -681,7 +681,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <input type="date" id="fac-filtro-hasta" onchange="loadFacturas()">
         </div>
       </div>
-      <div class="grid2">
+      <div class="grid2" style="margin-bottom:14px">
         <div class="field" style="margin-bottom:0">
           <div class="lbl">Estado</div>
           <select id="fac-filtro-estado" onchange="loadFacturas()">
@@ -695,6 +695,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
           <div class="lbl">Buscar</div>
           <input type="text" id="fac-filtro-buscar" placeholder="Suplidor, NCF..." oninput="debounceBuscar()">
         </div>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <div class="lbl">No. de reporte (opcional)</div>
+        <input type="text" id="fac-filtro-numero" placeholder="Deja vacío para todos" style="font-family:var(--mono)" oninput="debounceFacNumero()">
       </div>
       <div id="fac-stats" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px">
         <div><span id="fac-stat-count" style="font-weight:600;color:var(--text)">0</span> <span style="color:var(--text2)">factura(s)</span></div>
@@ -1833,7 +1837,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0255';
+const APP_VERSION = '0256';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -11239,9 +11243,12 @@ function initFacturas(){
   // v.0242: Estado SIEMPRE en 'todas' (solicitud del usuario). No se restaura
   // del state — mismo lineamiento que Obra y Desde: defaults frescos al entrar.
   document.getElementById('fac-filtro-estado').value = 'todas';
+  // v.0256: No. de reporte SIEMPRE vacío al entrar (solicitud del usuario).
+  // No se restaura del state ni siquiera en el flujo de retorno desde editar.
+  document.getElementById('fac-filtro-numero').value = '';
 
   if(facturasFiltrosState){
-    // Restaurar solo Buscar y Hasta (Obra, Desde, Estado son siempre defaults).
+    // Restaurar solo Buscar y Hasta (Obra, Desde, Estado, Numero son siempre defaults).
     document.getElementById('fac-filtro-buscar').value = facturasFiltrosState.buscar || '';
     document.getElementById('fac-filtro-hasta').value = facturasFiltrosState.hasta || today;
   } else {
@@ -11260,6 +11267,14 @@ function debounceBuscar(){
   buscarTimeout = setTimeout(() => loadFacturas(), 400);
 }
 
+// v.0256: debounce para el input No. de reporte. Mismo patrón que debounceRepNumero
+// de pg-reportes (sesión 28). 400ms = espera entre tecleos sin que el usuario lo note.
+let _facNumeroTimeout = null;
+function debounceFacNumero(){
+  clearTimeout(_facNumeroTimeout);
+  _facNumeroTimeout = setTimeout(() => loadFacturas(), 400);
+}
+
 async function loadFacturas(){
   // v.0255: filtro Obra ahora es multi-select (picker). isAll cubre el caso
   // "ninguna" o "todas" → no filtra por obra. Si hay 1..N-1 seleccionadas,
@@ -11273,9 +11288,12 @@ async function loadFacturas(){
   const buscar = document.getElementById('fac-filtro-buscar').value.trim().toLowerCase();
   const desde = document.getElementById('fac-filtro-desde').value;
   const hasta = document.getElementById('fac-filtro-hasta').value;
+  // v.0256: filtro adicional por No. de reporte (independiente de Buscar).
+  // Buscar mira SUPLIDOR+NCF+NO_REPORTE; este input restringe SOLO NO_REPORTE.
+  const numero = document.getElementById('fac-filtro-numero').value.trim().toLowerCase();
 
   // Guardar estado para poder restaurar filtros al volver de editar
-  facturasFiltrosState = {obras: obrasSel, estado, buscar, desde, hasta};
+  facturasFiltrosState = {obras: obrasSel, estado, buscar, desde, hasta, numero};
 
   loading(true, 'Cargando', 'Leyendo facturas...');
   try {
@@ -11317,6 +11335,13 @@ async function loadFacturas(){
       if(buscar){
         const text = ((r[H.SUPLIDOR] || '') + ' ' + (r[H.NCF] || '') + ' ' + (r[H.NO_REPORTE] || '')).toLowerCase();
         if(!text.includes(buscar)) return false;
+      }
+      // v.0256: filtro dedicado por No. de reporte. Si está vacío, no filtra.
+      // Si tiene valor, restringe a filas cuyo NO_REPORTE incluya el texto
+      // (case-insensitive, mismo patrón que pg-reportes).
+      if(numero){
+        const repNum = (H.NO_REPORTE !== undefined ? (r[H.NO_REPORTE] || '') : '').toString().toLowerCase();
+        if(!repNum.includes(numero)) return false;
       }
       return true;
     }).map((r, i) => {
