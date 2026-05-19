@@ -661,8 +661,15 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
   <div class="body">
     <div class="card" style="padding:12px">
       <div class="field" style="margin-bottom:8px">
-        <div class="lbl">Obra</div>
-        <select id="fac-filtro-obra" onchange="loadFacturas()"></select>
+        <div class="lbl" style="display:flex;justify-content:space-between;align-items:baseline">
+          <span>Obra</span>
+          <span id="fac-obra-count" class="obra-count">Todas las obras</span>
+        </div>
+        <div id="fac-obra-picker" class="obra-picker"></div>
+        <div class="obra-toolbar">
+          <a onclick="facObraSelAll()">Seleccionar todas</a>
+          <a onclick="facObraSelNone()">Limpiar</a>
+        </div>
       </div>
       <div class="grid2" style="margin-bottom:8px">
         <div class="field" style="margin-bottom:0">
@@ -1826,7 +1833,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:6px 0}
 // CONSTANTES Y UTILIDADES
 // ============================================================
 // Versión de la app — incrementar en cada iteración (formato: 4 dígitos)
-const APP_VERSION = '0254';
+const APP_VERSION = '0255';
 const APP_VERSION_LABEL = 'v.' + APP_VERSION;
 
 // OAuth client ID — DEBES REEMPLAZAR con el tuyo (ver README)
@@ -11150,17 +11157,62 @@ let facturasHeaders = {}; // mapeo header->índice
 // Estado de los filtros persistente entre entradas a la pantalla (para volver después de editar)
 let facturasFiltrosState = null;
 
-function initFacturas(){
-  // Llenar dropdown de obras
-  const sel = document.getElementById('fac-filtro-obra');
-  sel.innerHTML = '<option value="">— Todas las obras —</option>' +
-    masters.projects.map(p => `<option value="${p.cod}">${p.nombre}</option>`).join('');
+// v.0255: helpers del picker multi-obra. Mismo patrón que pg-reportes
+// (getRepObrasSeleccionadas et al, sesión 28). El picker reemplaza el select
+// single. El "isAll" cubre el caso semántico "filtro Obra inactivo": ni cero
+// ni todas seleccionadas restringen el resultado por obra.
+function getFacObrasSeleccionadas(){
+  return Array.from(document.querySelectorAll('#fac-obra-picker .op-row.on')).map(r => r.dataset.cod);
+}
+function _facObraIsAll(){
+  const sel = getFacObrasSeleccionadas();
+  return sel.length === 0 || sel.length === masters.projects.length;
+}
+function updateFacObraCount(){
+  const total = masters.projects.length;
+  const sel = getFacObrasSeleccionadas();
+  const el = document.getElementById('fac-obra-count');
+  if(!el) return;
+  if(sel.length === 0) el.textContent = 'Ninguna seleccionada';
+  else if(sel.length === total) el.textContent = 'Todas las obras';
+  else el.textContent = `${sel.length} de ${total} seleccionadas`;
+}
+function facObraSelAll(){
+  document.querySelectorAll('#fac-obra-picker .op-row').forEach(r => r.classList.add('on'));
+  updateFacObraCount();
+  loadFacturas();
+}
+function facObraSelNone(){
+  document.querySelectorAll('#fac-obra-picker .op-row').forEach(r => r.classList.remove('on'));
+  updateFacObraCount();
+  loadFacturas();
+}
+function _facObraOnRowClick(ev){
+  const row = ev.target.closest('.op-row');
+  if(!row) return;
+  row.classList.toggle('on');
+  updateFacObraCount();
+  loadFacturas();
+}
 
-  // v.0241: defaults nuevos por solicitud del usuario:
-  //  - Obra: SIEMPRE la obra activa del proyecto (LS.PROJ), no la restaurada del
-  //    state. Si el usuario filtró por otra obra antes de editar una factura,
-  //    al volver verá su obra activa otra vez (trade-off coherente con "al
-  //    entrar a Mis facturas quiero ver MI obra").
+function initFacturas(){
+  // v.0255: poblar picker multi-obra (reemplaza select single de v.0254).
+  // Patrón espejo de initReportes (sesión 28 hilo 2).
+  const picker = document.getElementById('fac-obra-picker');
+  if(masters.projects.length === 0){
+    picker.innerHTML = '<div class="op-empty">Sin obras en esta empresa</div>';
+  } else {
+    picker.innerHTML = masters.projects.map(p =>
+      `<div class="op-row" data-cod="${_escHTML(p.cod)}"><div class="op-cb"></div><div class="op-nm">${_escHTML(p.nombre)}</div></div>`
+    ).join('');
+    picker.onclick = _facObraOnRowClick;
+  }
+
+  // v.0241/v.0255: defaults nuevos por solicitud del usuario:
+  //  - Obra: SIEMPRE la obra activa del proyecto (LS.PROJ) marcada como única.
+  //    El usuario puede agregar más obras o "Seleccionar todas" si lo necesita.
+  //    Mismo lineamiento que pg-reportes (defaults frescos al entrar; no se
+  //    restaura selección previa del state).
   //  - Desde: SIEMPRE día 1 del mes ANTERIOR al actual (no del mes en curso
   //    como en v.0109). El usuario suele revisar gastos del mes pasado para
   //    cerrar contabilidad/reembolsos.
@@ -11177,7 +11229,12 @@ function initFacturas(){
   const firstOfPrevMonth = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-01`;
 
   const currentProj = JSON.parse(localStorage.getItem(LS.PROJ) || 'null');
-  sel.value = currentProj ? currentProj.cod : '';
+  if(currentProj){
+    const row = picker.querySelector(`.op-row[data-cod="${CSS.escape(currentProj.cod)}"]`);
+    if(row) row.classList.add('on');
+  }
+  updateFacObraCount();
+
   document.getElementById('fac-filtro-desde').value = firstOfPrevMonth;
   // v.0242: Estado SIEMPRE en 'todas' (solicitud del usuario). No se restaura
   // del state — mismo lineamiento que Obra y Desde: defaults frescos al entrar.
@@ -11204,14 +11261,21 @@ function debounceBuscar(){
 }
 
 async function loadFacturas(){
-  const obra = document.getElementById('fac-filtro-obra').value;
+  // v.0255: filtro Obra ahora es multi-select (picker). isAll cubre el caso
+  // "ninguna" o "todas" → no filtra por obra. Si hay 1..N-1 seleccionadas,
+  // filtra con Set.has(). obrasSel se persiste en el state por completitud
+  // aunque initFacturas no lo restaura (defaults frescos siempre, igual que
+  // pg-reportes — el flujo de retorno de editar solo restaura Buscar/Hasta).
+  const obrasSel = getFacObrasSeleccionadas();
+  const isAll = _facObraIsAll();
+  const obraSet = new Set(obrasSel);
   const estado = document.getElementById('fac-filtro-estado').value;
   const buscar = document.getElementById('fac-filtro-buscar').value.trim().toLowerCase();
   const desde = document.getElementById('fac-filtro-desde').value;
   const hasta = document.getElementById('fac-filtro-hasta').value;
 
   // Guardar estado para poder restaurar filtros al volver de editar
-  facturasFiltrosState = {obra, estado, buscar, desde, hasta};
+  facturasFiltrosState = {obras: obrasSel, estado, buscar, desde, hasta};
 
   loading(true, 'Cargando', 'Leyendo facturas...');
   try {
@@ -11242,7 +11306,9 @@ async function loadFacturas(){
       if(estado === 'activas' && eliminado) return false;
       if(estado === 'eliminadas' && !eliminado) return false;
       if(estado === 'revisar' && (!porRevisar || eliminado)) return false;
-      if(obra && r[H.PROYECTO] !== obra) return false;
+      // v.0255: filtro multi-obra. isAll=true → no filtra por obra. Si hay
+      // selección parcial, la fila debe pertenecer a una obra del Set.
+      if(!isAll && !obraSet.has(r[H.PROYECTO])) return false;
       // v.0108: filtro por rango de fechas. FECHA_FACTURA es 'YYYY-MM-DD' →
       // comparación lexicográfica segura. Vacío = sin restricción de ese lado.
       const fechaFact = r[H.FECHA_FACTURA] || '';
